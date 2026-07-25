@@ -1,0 +1,29 @@
+{
+  "globalStyle": {
+    "backgroundColor": "@bgColor",
+    "backgroundColorBottom": "@bgColorBottom",
+    "backgroundColorTop": "@bgColorTop",
+    "backgroundTextStyle": "@bgTxtStyle",
+    "navigationBarBackgroundColor": "#000000",
+    "navigationBarTextStyle": "@navTxtStyle",
+    "navigationBarTitleText": "Uni Creator",
+    "navigationStyle": "custom"
+  },
+  "pages": [
+    // #ifdef H5
+    {
+      "path": "pages/home/index",
+      "type": "home"
+    },
+    // #endif
+    {
+      "path": "pages/home/index",
+      "type": "page"
+    },
+    {
+      "path": "pages/index",
+      "type": "home"
+    }
+  ],
+  "subPackages": []
+}
