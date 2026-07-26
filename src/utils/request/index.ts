@@ -1,7 +1,9 @@
 import { createRequest } from './createRequest';
+import { defaultInterceptor } from './interceptor';
 
-/** 默认请求实例 */
-const http = createRequest();
+const http = createRequest({
+  interceptors: defaultInterceptor,
+});
 
 export default http;
 export * from './createRequest';

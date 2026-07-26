@@ -1,5 +1,5 @@
 export const storage = {
-  set(key: string, value: unknown): void {
+  set<T>(key: string, value: T): void {
     uni.setStorageSync(key, value);
   },
   get<T>(key: string): T | null {

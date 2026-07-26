@@ -1,4 +1,18 @@
 <script setup lang="ts">
+import { useUserStore } from '@/stores/modules/user';
+
+const userStore = useUserStore();
+
+userStore.setToken('abc123');
+userStore.setUserInfo({
+  id: 1,
+  username: 'admin',
+  nickname: '管理员',
+});
+
+console.warn(userStore.isLogin);
+console.warn(userStore.token);
+console.warn(userStore.userInfo);
 </script>
 
 <template>
