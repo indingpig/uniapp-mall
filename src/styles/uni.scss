@@ -1,0 +1,43 @@
+/**
+ * 全局 SCSS 变量
+ * 在 vue 组件 <style lang="scss"> 中可直接使用
+ */
+
+/* 主题色 */
+$color-primary: #7ea279;            // 主绿色（按钮、徽章、进度条）
+$color-primary-soft: #cfe1c8;       // 主绿色浅色（进度条轨道）
+$color-coral: #d8896a;              // 珊瑚色（"正在哭泣"文字、状态图标）
+$color-coral-soft: #f6dccd;         // 珊瑚色浅色
+
+/* 背景与卡片 */
+$color-bg: #f4ede0;                 // 页面暖米色背景
+$color-card: #ffffff;               // 卡片白色
+$color-card-soft: #fbf8f1;          // 卡片次级（备用）
+
+/* 文字 */
+$color-text-primary: #1f1f1f;       // 主文字
+$color-text-regular: #4a4a4a;
+$color-text-secondary: #8a8a8a;
+$color-text-muted: #b3b3b3;
+
+/* 圆角 */
+$radius-sm: 12rpx;
+$radius-md: 20rpx;
+$radius-lg: 28rpx;
+$radius-pill: 999rpx;
+
+/* 间距 */
+$space-xs: 8rpx;
+$space-sm: 12rpx;
+$space-md: 20rpx;
+$space-lg: 32rpx;
+$space-xl: 48rpx;
+
+/* 字号 */
+$font-size-xs: 22rpx;
+$font-size-sm: 26rpx;
+$font-size-base: 30rpx;
+$font-size-md: 32rpx;
+$font-size-lg: 36rpx;
+$font-size-xl: 44rpx;
+$font-size-xxl: 56rpx;

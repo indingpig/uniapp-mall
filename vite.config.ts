@@ -14,6 +14,13 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        additionalData: `@use "@/styles/uni.scss" as *;\n`,
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': {
