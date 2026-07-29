@@ -12,6 +12,7 @@ export default defineConfig({
     alias: {
       'h5': ['w', 'h'],
       'mp-weixin': 'wx',
+      'app-plus': 'app',
     },
   },
   autoGenerate: {
