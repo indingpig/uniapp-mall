@@ -7,10 +7,6 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
-    AppFooter: typeof import('./src/components/AppFooter.vue')['default']
-    AppLogos: typeof import('./src/components/AppLogos.vue')['default']
-    InputEntry: typeof import('./src/components/InputEntry.vue')['default']
-    UniPopup: typeof import('@dcloudio/uni-ui/lib/uni-popup/uni-popup.vue')['default']
-    UniTransition: typeof import('@dcloudio/uni-ui/lib/uni-transition/uni-transition.vue')['default']
+    CustomTabBar: typeof import('./src/components/CustomTabBar.vue')['default']
   }
 }
