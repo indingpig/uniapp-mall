@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { IconKey } from '@/utils/icons';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import CustomTabBar from '@/components/CustomTabBar.vue';
 import { getIcon } from '@/utils/icons';
 
 /* ------------------------------------------------------------------ */
@@ -190,8 +189,6 @@ onBeforeUnmount(() => {
         <text class="device-battery">{{ device.batteryPercent }}%</text>
       </view>
     </view>
-
-    <CustomTabBar current="home" />
   </view>
 </template>
 
@@ -211,7 +208,7 @@ page {
   height: 100%;
   background-color: $color-bg;
   padding-top: var(--status-bar-height);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* padding-bottom: env(safe-area-inset-bottom); */
   display: flex;
   flex-direction: column;
   overflow-y: auto;

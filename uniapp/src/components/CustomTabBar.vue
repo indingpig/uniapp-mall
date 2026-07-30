@@ -6,6 +6,11 @@ defineProps<{
   current: string;
 }>();
 
+// App/H5 端隐藏原生 TabBar（小程序端 custom:true 已自动隐藏）
+// #ifdef APP-PLUS || H5
+uni.hideTabBar();
+// #endif
+
 interface TabItem {
   key: string;
   label: string;

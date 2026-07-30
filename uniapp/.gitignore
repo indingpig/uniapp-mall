@@ -8,9 +8,17 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+unpackage
 .DS_Store
 dist
 *.local
+
+# Arduino build artifacts
+arduino/**/build/
+*.inob
+*.bin
+*.elf
+*.hex
 
 # Editor directories and files
 .idea
@@ -19,5 +27,3 @@ dist
 *.njsproj
 *.sln
 *.sw?
-
-arduino

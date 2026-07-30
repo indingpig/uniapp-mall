@@ -1,25 +1,31 @@
 <script setup lang="ts">
-import CustomTabBar from '@/components/CustomTabBar.vue';
 </script>
 
 <template>
   <view class="page">
     <view class="main">
-      <text class="title">数据统计</text>
-      <text class="placeholder">暂无统计数据</text>
+      <text class="title">设置</text>
+      <text class="placeholder">暂无设置项</text>
     </view>
-    <CustomTabBar current="stats" />
   </view>
 </template>
 
+<style lang="scss">
+page {
+  height: 100%;
+  overflow: hidden;
+}
+</style>
+
 <style lang="scss" scoped>
 .page {
-  min-height: 100vh;
+  height: 100%;
   background-color: $color-bg;
   padding-top: var(--status-bar-height);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* padding-bottom: env(safe-area-inset-bottom); */
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .main {

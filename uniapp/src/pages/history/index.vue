@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import CustomTabBar from '@/components/CustomTabBar.vue';
 </script>
 
 <template>
@@ -8,18 +7,25 @@ import CustomTabBar from '@/components/CustomTabBar.vue';
       <text class="title">历史记录</text>
       <text class="placeholder">暂无历史数据</text>
     </view>
-    <CustomTabBar current="history" />
   </view>
 </template>
 
+<style lang="scss">
+page {
+  height: 100%;
+  overflow: hidden;
+}
+</style>
+
 <style lang="scss" scoped>
 .page {
-  min-height: 100vh;
+  height: 100%;
   background-color: $color-bg;
   padding-top: var(--status-bar-height);
-  padding-bottom: env(safe-area-inset-bottom);
+  /* padding-bottom: env(safe-area-inset-bottom); */
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .main {

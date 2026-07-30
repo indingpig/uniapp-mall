@@ -2,7 +2,7 @@ import { defineManifestConfig } from '@uni-helper/vite-plugin-uni-manifest';
 
 export default defineManifestConfig({
   'name': '宝宝监护器',
-  'appid': '__BABY_MONITOR__',
+  'appid': '__UNI__F18597F',
   'description': '婴儿监护器 - 实时监测宝宝状态',
   'versionName': '1.0.0',
   'versionCode': '100',

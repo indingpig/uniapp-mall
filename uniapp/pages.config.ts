@@ -13,7 +13,6 @@ export default defineUniPages({
     navigationStyle: 'custom',
   },
   tabBar: {
-    custom: true,
     color: '#7a7e83',
     selectedColor: '#3cc51f',
     backgroundColor: '#ffffff',
@@ -21,18 +20,26 @@ export default defineUniPages({
       {
         pagePath: 'pages/home/index',
         text: '首页',
+        iconPath: 'static/tabbar/home.png',
+        selectedIconPath: 'static/tabbar/home-active.png',
       },
       {
         pagePath: 'pages/history/index',
         text: '历史',
+        iconPath: 'static/tabbar/clock.png',
+        selectedIconPath: 'static/tabbar/clock-active.png',
       },
       {
         pagePath: 'pages/stats/index',
         text: '统计',
+        iconPath: 'static/tabbar/chart.png',
+        selectedIconPath: 'static/tabbar/chart-active.png',
       },
       {
         pagePath: 'pages/settings/index',
         text: '设置',
+        iconPath: 'static/tabbar/gear.png',
+        selectedIconPath: 'static/tabbar/gear-active.png',
       },
     ],
   },
