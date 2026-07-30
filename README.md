@@ -1,6 +1,6 @@
 # 👶 宝宝监护器 (Baby Cry Monitor)
 
-基于 ESP32 + uni-app 的婴儿哭声实时监测系统。硬件端通过 I2S 麦克风采集音频并检测哭声，移动端 App 实时展示宝宝状态、音量及设备信息。
+基于 ESP32 + uni-app 的婴儿哭声实时监测系统。硬件端通过 I2S 麦克风采集音频，使用 **Edge Impulse** 训练的机器学习模型识别哭声，移动端 App 实时展示宝宝状态、音量及设备信息。
 
 ---
 
@@ -93,6 +93,7 @@ npm run dev -- --platform app-plus
 | **ESP32** | 主控芯片 |
 | **I2S 麦克风** | 数字音频输入 (INMP441 / SPH0645 等) |
 | **Arduino Framework** | 开发框架 |
+| **Edge Impulse** | 声音分类模型训练与部署 |
 | **Python** | WAV 数据接收工具 |
 
 ---
@@ -113,7 +114,7 @@ npm run dev -- --platform app-plus
 ### 🔧 硬件端 (ESP32)
 
 - [x] I2S 麦克风音频采集
-- [x] 哭声检测算法
+- [x] 哭声检测（Edge Impulse 声音分类模型）
 - [ ] 区分更多状态（安睡 / 清醒 / 玩耍）
 - [ ] 音量分贝计算
 - [ ] 电池电量检测与上报
