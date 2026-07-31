@@ -1,0 +1,667 @@
+/**
+ * bin-bluetooth HarmonyOS(Next) BLE 实现（Central 中心设备）
+ * 底层对接 @kit.ConnectivityKit 的 ble / access 模块。
+ */
+
+import { IScanner, IPeripheral, BleScanOptions, BleObserveOptions, Advertisement, CharacteristicRef, BleConnectionState, Uuid, OpenAdapter, CloseAdapter, CreateScanner, CreatePeripheral } from '../interface.uts';
+import { BleFailImpl } from '../unierror';
+
+/**
+ * 连接状态，对应 kable 的 State
+ * 0=disconnected 1=connecting 2=connected 3=disconnecting
+ * 注意：iOS 下 enum 无法作为 public 方法出入参，故用 number 别名 + 常量替代
+ */
+export const BLE_STATE_DISCONNECTED : BleConnectionState = 0;
+export const BLE_STATE_CONNECTING : BleConnectionState = 1;
+export const BLE_STATE_CONNECTED : BleConnectionState = 2;
+export const BLE_STATE_DISCONNECTING : BleConnectionState = 3;
+
+import { ble, access, constant } from '@kit.ConnectivityKit';
+import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+
+/* 扫描代次：每次 startScan/stopScan/closeAdapter 递增，用于让遗留的超时计时器失效，
+   同时避免多个扫描器实例相互干扰 */
+let scanGeneration : number = 0;
+
+/* ---------------- 工具函数 ---------------- */
+
+function normalizeUuid(uuid : string) : string {
+	return uuid.toLowerCase();
+}
+
+/* 数字转两位十六进制字符串 */
+function hex2(v : number) : string {
+	let s = v.toString(16);
+	while (s.length < 2) {
+		s = '0' + s;
+	}
+	return s;
+}
+
+/* 16-bit 短 UUID 转标准 128-bit UUID 字符串 */
+function to16BitUuidString(v : number) : string {
+	let s = v.toString(16);
+	while (s.length < 4) {
+		s = '0' + s;
+	}
+	return '0000' + s + '-0000-1000-8000-00805f9b34fb';
+}
+
+/* 从广播数据中读取 128-bit UUID（小端序），转为标准 UUID 字符串 */
+function to128BitUuidString(bytes : Uint8Array, start : number) : string {
+	const parts = new Array<string>();
+	for (let k = 15; k >= 0; k--) {
+		parts.push(hex2(bytes[start + k]));
+	}
+	const hex = parts.join('');
+	return hex.substring(0, 8) + '-' + hex.substring(8, 12) + '-' + hex.substring(12, 16) + '-' + hex.substring(16, 20) + '-' + hex.substring(20, 32);
+}
+
+/**
+ * 从广播包中解析厂商自定义数据段(AD Type 0xFF)，返回十六进制字符串（小写、无分隔符）
+ * 返回内容含前 2 字节小端公司标识，与微信小程序 advertisData 语义一致；无厂商数据时返回 null
+ */
+function parseManufacturerData(data : ArrayBuffer | null) : string | null {
+	if (data == null) {
+		return null;
+	}
+	const bytes = new Uint8Array(data);
+	const total = bytes.length;
+	let i = 0;
+	while (i < total) {
+		const len = bytes[i];
+		if (len == 0) {
+			break;
+		}
+		// 长度越界保护：AD 结构需覆盖到 i+len
+		if (i + len >= total) {
+			break;
+		}
+		const adType = bytes[i + 1];
+		if (adType == 0xFF) {
+			// 数据段为 bytes[i+2 .. i+len]（长度 len-1）
+			let hex = '';
+			for (let j = i + 2; j <= i + len; j++) {
+				const v = bytes[j] & 0xFF;
+				const s = v.toString(16);
+				if (s.length < 2) { hex += '0'; }
+				hex += s;
+			}
+			return hex;
+		}
+		i = i + len + 1;
+	}
+	return null;
+}
+
+/* 解析原始广播数据(AD 结构)中的服务 UUID 列表 */
+function parseServiceUuids(data : ArrayBuffer | null) : Array<string> {
+	const result = new Array<string>();
+	if (data == null) {
+		return result;
+	}
+	const bytes = new Uint8Array(data);
+	const total = bytes.length;
+	let i = 0;
+	while (i < total) {
+		const len = bytes[i];
+		if (len == 0) {
+			break;
+		}
+		// 长度越界保护
+		if (i + len >= total) {
+			break;
+		}
+		const adType = bytes[i + 1];
+		const dataStart = i + 2;
+		const dataLen = len - 1;
+		if (adType == 0x02 || adType == 0x03) {
+			// 16-bit 服务 UUID 列表（小端，每 2 字节一个）
+			let j = 0;
+			while (j + 1 < dataLen) {
+				const lo = bytes[dataStart + j];
+				const hi = bytes[dataStart + j + 1];
+				const v = (hi << 8) | lo;
+				result.push(to16BitUuidString(v));
+				j = j + 2;
+			}
+		} else if (adType == 0x06 || adType == 0x07) {
+			// 128-bit 服务 UUID 列表（小端，每 16 字节一个）
+			let j = 0;
+			while (j + 15 < dataLen) {
+				result.push(to128BitUuidString(bytes, dataStart + j));
+				j = j + 16;
+			}
+		}
+		i = i + len + 1;
+	}
+	return result;
+}
+
+/* 特征引用辅助构造函数 */
+export function characteristicOf(serviceUuid : Uuid, characteristicUuid : Uuid) : CharacteristicRef {
+	return { serviceUuid: serviceUuid, characteristicUuid: characteristicUuid } as CharacteristicRef;
+}
+
+/**
+ * ArrayBuffer 转十六进制字符串（小写、无分隔符），用于 read/observe 的值回传
+ */
+function arrayBufferToHex(data : ArrayBuffer) : string {
+	const bytes = new Uint8Array(data);
+	let hex = '';
+	for (let i = 0; i < bytes.length; i++) {
+		const v = bytes[i] & 0xFF;
+		const s = v.toString(16);
+		if (s.length < 2) { hex += '0'; }
+		hex += s;
+	}
+	return hex;
+}
+
+/**
+ * 十六进制字符串转 ArrayBuffer（奇数长度自动前补 0），用于 write 入参
+ */
+function hexToArrayBuffer(hex : string) : ArrayBuffer {
+	const clean = hex.length % 2 == 0 ? hex : '0' + hex;
+	const len = Math.floor(clean.length / 2) as number;
+	const bytes = new Uint8Array(len);
+	for (let i = 0; i < len; i++) {
+		bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
+	}
+	return bytes.buffer;
+}
+
+/* 构造用于读/写的 BLECharacteristic 描述对象 */
+function buildCharacteristic(target : CharacteristicRef, value : ArrayBuffer) : ble.BLECharacteristic {
+	return {
+		serviceUuid: target.serviceUuid,
+		characteristicUuid: target.characteristicUuid,
+		characteristicValue: value,
+		descriptors: [] as Array<ble.BLEDescriptor>
+	} as ble.BLECharacteristic;
+}
+
+function mapConnectionState(state : number) : BleConnectionState {
+	if (state == constant.ProfileConnectionState.STATE_CONNECTED) {
+		return BLE_STATE_CONNECTED;
+	} else if (state == constant.ProfileConnectionState.STATE_CONNECTING) {
+		return BLE_STATE_CONNECTING;
+	} else if (state == constant.ProfileConnectionState.STATE_DISCONNECTING) {
+		return BLE_STATE_DISCONNECTING;
+	}
+	return BLE_STATE_DISCONNECTED;
+}
+
+/* ---------------- 适配器 ---------------- */
+
+export const openAdapter : OpenAdapter = function () : Promise<boolean> {
+	return new Promise<boolean>((resolve, reject) => {
+		const ctx = UTSHarmony.getUIAbilityContext();
+		if (ctx == null) {
+			resolve(false);
+			return;
+		}
+		// 蓝牙已就绪后申请 ACCESS_BLUETOOTH 权限
+		const requestPerms = () => {
+			const atManager = abilityAccessCtrl.createAtManager();
+			const perms = ['ohos.permission.ACCESS_BLUETOOTH'] as Array<Permissions>;
+			atManager.requestPermissionsFromUser(ctx, perms).then((result) => {
+				const grantStatus = result.authResults;
+				let allGranted = grantStatus.length > 0;
+				for (let i = 0; i < grantStatus.length; i++) {
+					if (grantStatus[i] != 0) {
+						allGranted = false;
+					}
+				}
+				resolve(allGranted);
+			}).catch((_err : BusinessError) => {
+				resolve(false);
+			});
+		};
+		// 检查蓝牙开关
+		let state : access.BluetoothState;
+		try {
+			state = access.getState();
+		} catch (e) {
+			resolve(false);
+			return;
+		}
+		if (state == access.BluetoothState.STATE_ON) {
+			requestPerms();
+			return;
+		}
+		// 系统蓝牙未开启：请求开启并监听状态变为 STATE_ON
+		let settled = false;
+		let onState : ((data : access.BluetoothState) => void) | null = null;
+		onState = (data : access.BluetoothState) => {
+			if (data == access.BluetoothState.STATE_ON && !settled) {
+				settled = true;
+				try { access.off('stateChange', onState!); } catch (e) { }
+				requestPerms();
+			}
+		};
+		try {
+			access.on('stateChange', onState!);
+			access.enableBluetooth();
+		} catch (e) {
+			settled = true;
+			try { access.off('stateChange', onState!); } catch (e2) { }
+			resolve(false);
+			return;
+		}
+		// 超时保护：10 秒内未开启则视为失败
+		setTimeout(() => {
+			if (!settled) {
+				settled = true;
+				try { access.off('stateChange', onState!); } catch (e) { }
+				resolve(false);
+			}
+		}, 10000);
+	});
+}
+
+export const closeAdapter : CloseAdapter = function () {
+	// 使所有进行中的扫描计时器失效
+	scanGeneration = scanGeneration + 1;
+	try {
+		ble.stopBLEScan();
+	} catch (e) {
+		// ignore
+	}
+}
+
+/* ---------------- 扫描器 ---------------- */
+
+class HarmonyScanner implements IScanner {
+	private onFind : ((data : Array<ble.ScanResult>) => void) | null = null;
+	private scanning : boolean = false;
+	private scanTimer : number = -1;
+
+	@UTSJS.keepAlive
+	startScan(options : BleScanOptions) {
+		// 取消上一次扫描遗留的计时器，并递增代次使其失效
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		scanGeneration = scanGeneration + 1;
+		const gen = scanGeneration;
+		const namePrefix = options.namePrefix;
+		const onAdv = options.onAdvertisement;
+		// 是否允许重复上报同一设备：HarmonyOS 原生按广播包持续上报，false 时需自行按 deviceId 去重
+		let allowDup = false;
+		const adOpt = options.allowDuplicates;
+		if (adOpt != null) { allowDup = adOpt; }
+		const seen = new Set<string>();
+
+		const listener = (results : Array<ble.ScanResult>) => {
+			for (let i = 0; i < results.length; i++) {
+				const r = results[i];
+				const name = r.deviceName;
+				if (namePrefix != null) {
+					if (name == null || !name.startsWith(namePrefix!)) {
+						continue;
+					}
+				}
+				// 同一设备去重（不允许重复上报时）
+				if (!allowDup) {
+					if (seen.has(r.deviceId)) {
+						continue;
+					}
+					seen.add(r.deviceId);
+				}
+				const adv : Advertisement = {
+					deviceId: r.deviceId,
+					name: (name == null || name == '') ? null : name,
+					rssi: r.rssi,
+					serviceUuids: parseServiceUuids(r.data),
+					advertisData: parseManufacturerData(r.data)
+				};
+				onAdv(adv);
+			}
+		};
+		this.onFind = listener;
+
+		try {
+			ble.on('BLEDeviceFind', listener);
+			// 构建服务过滤
+			const filters = new Array<ble.ScanFilter>();
+			for (let i = 0; i < options.services.length; i++) {
+				filters.push({ serviceUuid: options.services[i] } as ble.ScanFilter);
+			}
+			const scanOptions : ble.ScanOptions = {
+				interval: 0,
+				dutyMode: ble.ScanDuty.SCAN_MODE_BALANCED,
+				matchMode: ble.MatchMode.MATCH_MODE_AGGRESSIVE
+			} as ble.ScanOptions;
+			this.scanning = true;
+			if (filters.length > 0) {
+				ble.startBLEScan(filters, scanOptions);
+			} else {
+				ble.startBLEScan(null, scanOptions);
+			}
+		} catch (e) {
+			options.onError?.(new BleFailImpl(9020003));
+		}
+
+		// 扫描超时自动结束，默认 15 秒
+		if (this.scanning) {
+			let to = 15000;
+			const t = options.timeout;
+			if (t != null) { to = t; }
+			if (to > 0) {
+				this.scanTimer = setTimeout(() => {
+					// 仅当本次扫描代次仍有效时才自动结束，避免误停其他扫描器
+					if (gen == scanGeneration) {
+						this.stopScan();
+						options.onEnd?.();
+					}
+				}, to);
+			}
+		}
+	}
+
+	stopScan() {
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		// 递增代次，使任何遗留的计时器回调失效
+		scanGeneration = scanGeneration + 1;
+		try {
+			if (this.onFind != null) {
+				ble.off('BLEDeviceFind', this.onFind!);
+			}
+			if (this.scanning) {
+				ble.stopBLEScan();
+			}
+		} catch (e) {
+			// ignore
+		}
+		this.scanning = false;
+		this.onFind = null;
+	}
+}
+
+/* ---------------- 外围设备 ---------------- */
+
+class HarmonyPeripheral implements IPeripheral {
+	readonly deviceId : string;
+	private device : ble.GattClientDevice | null = null;
+	private state : BleConnectionState = BLE_STATE_DISCONNECTED;
+	private stateCb : ((state : BleConnectionState) => void) | null = null;
+	private observers : Map<string, (v : string) => void> = new Map<string, (v : string) => void>();
+	private notifyListenerBound : boolean = false;
+	// 挂起的连接回调（用于连接结算与断开时主动拒绝）
+	private pendingConnectResolve : (() => void) | null = null;
+	private pendingConnectReject : ((e : any) => void) | null = null;
+	// 连接超时计时器
+	private connectTimer : number = -1;
+
+	constructor(deviceId : string) {
+		this.deviceId = deviceId;
+	}
+
+	private ensureDevice() : ble.GattClientDevice {
+		if (this.device == null) {
+			this.device = ble.createGattClientDevice(this.deviceId);
+		}
+		return this.device!;
+	}
+
+	private setState(s : BleConnectionState) {
+		this.state = s;
+		this.stateCb?.(s);
+	}
+
+	getState() : BleConnectionState {
+		return this.state;
+	}
+
+	onStateChange(cb : (state : BleConnectionState) => void) {
+		this.stateCb = cb;
+	}
+
+	private clearConnectTimer() {
+		if (this.connectTimer != -1) {
+			clearTimeout(this.connectTimer);
+			this.connectTimer = -1;
+		}
+	}
+
+	connect() : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			const dev = this.ensureDevice();
+			// 使用实例级回调引用，便于超时与断开时主动结算
+			this.pendingConnectResolve = resolve;
+			this.pendingConnectReject = reject;
+			try {
+				dev.on('BLEConnectionStateChange', (stateInfo : ble.BLEConnectionChangeState) => {
+					const s = mapConnectionState(stateInfo.state);
+					this.setState(s);
+					if (s == BLE_STATE_CONNECTED) {
+						this.clearConnectTimer();
+						const r = this.pendingConnectResolve;
+						this.pendingConnectResolve = null;
+						this.pendingConnectReject = null;
+						r?.();
+					} else if (s == BLE_STATE_DISCONNECTED) {
+						this.clearConnectTimer();
+						const rj = this.pendingConnectReject;
+						this.pendingConnectResolve = null;
+						this.pendingConnectReject = null;
+						this.observers.clear();
+						rj?.(new BleFailImpl(9020004));
+					}
+				});
+				this.setState(BLE_STATE_CONNECTING);
+				dev.connect();
+				// 连接超时保护：默认 30 秒未回调则判定失败并断开
+				this.connectTimer = setTimeout(() => {
+					const rj = this.pendingConnectReject;
+					if (rj != null) {
+						this.pendingConnectResolve = null;
+						this.pendingConnectReject = null;
+						const d = this.device;
+						if (d != null) {
+							try { d.disconnect(); } catch (e) { }
+							try { d.close(); } catch (e2) { }
+						}
+						this.device = null;
+						this.setState(BLE_STATE_DISCONNECTED);
+						rj(new BleFailImpl(9020004, 'connect timeout'));
+					}
+				}, 30000);
+			} catch (e) {
+				this.clearConnectTimer();
+				const rj = this.pendingConnectReject;
+				this.pendingConnectResolve = null;
+				this.pendingConnectReject = null;
+				rj?.(new BleFailImpl(9020004));
+			}
+		});
+	}
+
+	disconnect() : Promise<void> {
+		return new Promise<void>((resolve : () => void, _reject : (e : any) => void) => {
+			// 断开时主动拒绝仍在挂起的连接请求
+			this.clearConnectTimer();
+			const rj = this.pendingConnectReject;
+			this.pendingConnectResolve = null;
+			this.pendingConnectReject = null;
+			rj?.(new BleFailImpl(9020005));
+
+			const dev = this.device;
+			if (dev == null) {
+				this.setState(BLE_STATE_DISCONNECTED);
+				resolve();
+				return;
+			}
+			this.setState(BLE_STATE_DISCONNECTING);
+			try {
+				dev.disconnect();
+				dev.close();
+			} catch (e) {
+				// ignore
+			}
+			this.device = null;
+			this.observers.clear();
+			this.setState(BLE_STATE_DISCONNECTED);
+			resolve();
+		});
+	}
+
+	@UTSJS.keepAlive
+	discoverServices(onCharacteristic : (serviceUuid : string, uuid : string, properties : number) => void) : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			const dev = this.device;
+			if (dev == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			dev.getServices().then((services : Array<ble.GattService>) => {
+				// 逐条回调返回特征（每个特征带 serviceUuid），传基础类型，与 iOS/Android 保持一致
+				for (let i = 0; i < services.length; i++) {
+					const s = services[i];
+					for (let j = 0; j < s.characteristics.length; j++) {
+						const c = s.characteristics[j];
+						let props = 0;
+						const p = c.properties;
+						if (p != null) {
+							if (p!.read == true) { props = props | 2; }
+							if (p!.writeNoResponse == true) { props = props | 4; }
+							if (p!.write == true) { props = props | 8; }
+							if (p!.notify == true) { props = props | 16; }
+							if (p!.indicate == true) { props = props | 32; }
+						}
+						onCharacteristic(s.serviceUuid, c.characteristicUuid, props);
+					}
+				}
+				resolve();
+			}).catch((_err : BusinessError) => {
+				reject(new BleFailImpl(9020006));
+			});
+		});
+	}
+
+	read(target : CharacteristicRef) : Promise<string> {
+		return new Promise<string>((resolve : (v : string) => void, reject : (e : any) => void) => {
+			const dev = this.device;
+			if (dev == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = buildCharacteristic(target, new ArrayBuffer(0));
+			dev.readCharacteristicValue(ch).then((result : ble.BLECharacteristic) => {
+				resolve(arrayBufferToHex(result.characteristicValue));
+			}).catch((_err : BusinessError) => {
+				reject(new BleFailImpl(9020007));
+			});
+		});
+	}
+
+	write(target : CharacteristicRef, value : string, wtype : number) : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			const dev = this.device;
+			if (dev == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = buildCharacteristic(target, hexToArrayBuffer(value));
+			const gattWriteType = (wtype == 1) ? ble.GattWriteType.WRITE_NO_RESPONSE : ble.GattWriteType.WRITE; // 1 = 无响应写
+			dev.writeCharacteristicValue(ch, gattWriteType).then(() => {
+				resolve();
+			}).catch((_err : BusinessError) => {
+				reject(new BleFailImpl(9020008));
+			});
+		});
+	}
+
+	@UTSJS.keepAlive
+	observe(target : CharacteristicRef, options : BleObserveOptions) : void {
+		const dev = this.device;
+		if (dev == null) {
+			options.onError?.(new BleFailImpl(9020005));
+			return;
+		}
+		const key = normalizeUuid(target.characteristicUuid);
+		// 保存持久通知回调（本方法 void 返回 + keepAlive，回调不会在调用后被回收）
+		this.observers.set(key, options.onValue);
+		// 绑定全局通知监听（仅一次）
+		if (!this.notifyListenerBound) {
+			this.notifyListenerBound = true;
+			dev.on('BLECharacteristicChange', (c : ble.BLECharacteristic) => {
+				const k = normalizeUuid(c.characteristicUuid);
+				const observer = this.observers.get(k);
+				observer?.(arrayBufferToHex(c.characteristicValue));
+			});
+		}
+		const ch = buildCharacteristic(target, new ArrayBuffer(0));
+		dev.setCharacteristicChangeNotification(ch, true).then(() => {
+			options.onSuccess?.();
+		}).catch((_err : BusinessError) => {
+			this.observers.delete(key);
+			options.onError?.(new BleFailImpl(9020009));
+		});
+	}
+
+	stopObserve(target : CharacteristicRef) : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			const dev = this.device;
+			if (dev == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const key = normalizeUuid(target.characteristicUuid);
+			this.observers.delete(key);
+			const ch = buildCharacteristic(target, new ArrayBuffer(0));
+			dev.setCharacteristicChangeNotification(ch, false).then(() => {
+				resolve();
+			}).catch((_err : BusinessError) => {
+				resolve();
+			});
+		});
+	}
+
+	readRssi() : Promise<number> {
+		return new Promise<number>((resolve : (v : number) => void, reject : (e : any) => void) => {
+			const dev = this.device;
+			if (dev == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			dev.getRssiValue().then((rssi : number) => {
+				resolve(rssi);
+			}).catch((_err : BusinessError) => {
+				reject(new BleFailImpl(9020007));
+			});
+		});
+	}
+
+	requestMtu(mtu : number) : Promise<number> {
+		return new Promise<number>((resolve : (v : number) => void, _reject : (e : any) => void) => {
+			const dev = this.device;
+			if (dev == null) {
+				resolve(mtu);
+				return;
+			}
+			try {
+				dev.setBLEMtuSize(mtu);
+			} catch (e) {
+				// ignore
+			}
+			resolve(mtu);
+		});
+	}
+}
+
+/* ---------------- 工厂导出 ---------------- */
+
+export const createScanner : CreateScanner = function () : IScanner {
+	return new HarmonyScanner();
+}
+
+export const createPeripheral : CreatePeripheral = function (deviceId : string) : IPeripheral {
+	return new HarmonyPeripheral(deviceId);
+}

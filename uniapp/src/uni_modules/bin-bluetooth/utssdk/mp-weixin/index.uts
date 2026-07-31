@@ -1,0 +1,716 @@
+/**
+ * bin-bluetooth 微信小程序 BLE 实现（Central 中心设备）
+ * 底层对接微信小程序蓝牙 API（uni.openBluetoothAdapter / uni.startBluetoothDevicesDiscovery /
+ * uni.createBLEConnection / uni.readBLECharacteristicValue 等）。
+ *
+ * 说明：
+ * - mp-weixin 平台下 UTS 编译为 JavaScript，桥接微信 `uni.*` 蓝牙能力。
+ * - 部分蓝牙 API 未包含在 uni-app x 的 uni 类型声明中，这里统一通过 `uni as any` 调用，
+ *   规避类型缺失导致的编译报错（JS 目标平台下 any 调用是安全的）。
+ * - 微信读取特征值(readBLECharacteristicValue)的实际数据不在 success 中返回，而是通过
+ *   全局 onBLECharacteristicValueChange 事件回传，故 read 需借助“待结算 read 表”配合该事件。
+ */
+
+import { IScanner, IPeripheral, BleScanOptions, BleObserveOptions, Advertisement, CharacteristicRef, BleConnectionState, Uuid, OpenAdapter, CloseAdapter, CreateScanner, CreatePeripheral } from '../interface.uts';
+import { BleFailImpl } from '../unierror';
+
+/**
+ * 连接状态，对应 kable 的 State
+ * 0=disconnected 1=connecting 2=connected 3=disconnecting
+ * 注意：iOS 下 enum 无法作为 public 方法出入参，故用 number 别名 + 常量替代
+ */
+export const BLE_STATE_DISCONNECTED : BleConnectionState = 0;
+export const BLE_STATE_CONNECTING : BleConnectionState = 1;
+export const BLE_STATE_CONNECTED : BleConnectionState = 2;
+export const BLE_STATE_DISCONNECTING : BleConnectionState = 3;
+
+/* 蓝牙相关 API 通过 any 调用，规避 wx 类型声明中可能缺失的方法 */
+const bt = wx as any;
+
+/* 扫描代次：每次 startScan/stopScan/closeAdapter 递增，用于让遗留的超时计时器失效 */
+let scanGeneration : number = 0;
+
+/* ---------------- 工具函数 ---------------- */
+
+/**
+ * 归一化 UUID：短 UUID(如 "180d") 补全为 128 位标准格式，并统一转小写，
+ * 用于订阅回调 / 读取事件的特征匹配。
+ */
+function normalizeUuid(uuid : string) : string {
+	const u = uuid.toLowerCase();
+	if (u.length == 4) {
+		return '0000' + u + '-0000-1000-8000-00805f9b34fb';
+	}
+	if (u.length == 8) {
+		return u + '-0000-1000-8000-00805f9b34fb';
+	}
+	return u;
+}
+
+/* 将微信特征 properties 对象映射为与其他端一致的位掩码：
+   read=2 / writeNoResponse=4 / write=8 / notify=16 / indicate=32 */
+function mapProperties(p : any) : number {
+	let props = 0;
+	if (p != null) {
+		if (p.read == true) { props = props | 2; }
+		if (p.writeNoResponse == true) { props = props | 4; }
+		if (p.write == true) { props = props | 8; }
+		if (p.notify == true) { props = props | 16; }
+		if (p.indicate == true) { props = props | 32; }
+	}
+	return props;
+}
+
+/**
+ * ArrayBuffer 转十六进制字符串（小写、无分隔符）
+ */
+function advDataToHex(data : ArrayBuffer | null) : string | null {
+	if (data == null) {
+		return null;
+	}
+	const bytes = new Uint8Array(data);
+	if (bytes.length == 0) {
+		return null;
+	}
+	let hex = '';
+	for (let i = 0; i < bytes.length; i++) {
+		const v = bytes[i] & 0xFF;
+		const s = v.toString(16);
+		if (s.length < 2) { hex += '0'; }
+		hex += s;
+	}
+	return hex;
+}
+
+/* 特征引用辅助构造函数 */
+export function characteristicOf(serviceUuid : Uuid, characteristicUuid : Uuid) : CharacteristicRef {
+	return { serviceUuid: serviceUuid, characteristicUuid: characteristicUuid } as CharacteristicRef;
+}
+
+/**
+ * ArrayBuffer 转十六进制字符串（小写、无分隔符），空值返回空串。
+ * 用于 read/observe 的值回传（统一以 hex 字符串向上层回传）
+ */
+function bufToHex(data : ArrayBuffer) : string {
+	const bytes = new Uint8Array(data);
+	let hex = '';
+	for (let i = 0; i < bytes.length; i++) {
+		const v = bytes[i] & 0xFF;
+		const s = v.toString(16);
+		if (s.length < 2) { hex += '0'; }
+		hex += s;
+	}
+	return hex;
+}
+
+/**
+ * 十六进制字符串转 ArrayBuffer（奇数长度自动前补 0），用于 write 入参
+ */
+function hexToArrayBuffer(hex : string) : ArrayBuffer {
+	const clean = hex.length % 2 == 0 ? hex : '0' + hex;
+	const len = Math.floor(clean.length / 2) as number;
+	const bytes = new Uint8Array(len);
+	for (let i = 0; i < len; i++) {
+		bytes[i] = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
+	}
+	return bytes.buffer;
+}
+
+/* ---------------- 授权 / 开关 引导 ---------------- */
+
+/* 获取平台标识（android / ios / ...），失败返回空串 */
+function getPlatform() : string {
+	try {
+		const info = bt.getDeviceInfo();
+		if (info != null && info.platform != null) {
+			return (info.platform as string).toLowerCase();
+		}
+	} catch (e) { }
+	try {
+		const info2 = bt.getSystemInfoSync();
+		if (info2 != null && info2.platform != null) {
+			return (info2.platform as string).toLowerCase();
+		}
+	} catch (e2) { }
+	return '';
+}
+
+/* 弹窗引导用户。action：''=仅提示；'app'=跳转系统「微信」授权设置页；'scope'=跳转小程序设置页 */
+function showGuide(content : string, action : string) {
+	const canOpen = action != '';
+	bt.showModal({
+		title: '蓝牙不可用',
+		content: content,
+		showCancel: canOpen,
+		confirmText: canOpen ? '去设置' : '我知道了',
+		success: (res : any) => {
+			if (canOpen && res.confirm == true) {
+				if (action == 'app') {
+					// 跳转系统层「微信」权限设置（OS 层蓝牙/定位授权）
+					bt.openAppAuthorizeSetting({ success: () => { }, fail: () => { } });
+				} else if (action == 'scope') {
+					// 跳转小程序设置页（scope 授权，如 scope.bluetooth）
+					bt.openSetting({ success: () => { }, fail: () => { } });
+				}
+			}
+		},
+		fail: () => { }
+	});
+}
+
+/* 适配器初始化失败时诊断并引导：OS 层蓝牙授权 → 系统蓝牙开关 → 小程序 scope.bluetooth 授权 */
+function guideBluetoothIssue() {
+	// getAppAuthorizeSetting / getSystemSetting 均为同步 API，直接取返回值
+	let auth : any = null;
+	try { auth = bt.getAppAuthorizeSetting(); } catch (e) { auth = null; }
+	// 1) 微信（OS 层）未获得系统蓝牙权限：引导去系统设置授权
+	if (auth != null && (auth.bluetoothAuthorized as string) == 'denied') {
+		showGuide('检测到微信未获得附近设备权限，请在系统设置中允许微信使用附近设备后重试', 'app');
+		return;
+	}
+	// 2) 系统蓝牙开关未开启
+	let sys : any = null;
+	try { sys = bt.getSystemSetting(); } catch (e2) { sys = null; }
+	if (sys != null && sys.bluetoothEnabled != true) {
+		showGuide('系统蓝牙未开启，请在控制中心/设置中开启蓝牙后重试', '');
+		return;
+	}
+	// 3) 小程序 scope.bluetooth 授权（getSetting 为异步）：被拒时引导去小程序设置页重新授权
+	bt.getSetting({
+		success: (r : any) => {
+			const s = r.authSetting;
+			if (s != null && s['scope.bluetooth'] == false) {
+				showGuide('小程序未获得蓝牙授权，请在设置中开启「蓝牙」权限后重试', 'scope');
+			} else {
+				showGuide('蓝牙初始化失败，请确认已开启系统蓝牙并授权微信使用蓝牙后重试', '');
+			}
+		},
+		fail: () => {
+			showGuide('蓝牙初始化失败，请确认已开启系统蓝牙并授权微信使用蓝牙后重试', '');
+		}
+	});
+}
+
+/* 扫描前检查定位：微信定位权限 → 系统定位开关。就绪返回 true；未就绪时弹窗引导并返回 false。
+   iOS 扫描 BLE 不依赖定位，恒返回 true */
+function ensureLocationForScan() : boolean {
+	// 仅安卓扫描 BLE 依赖定位，iOS 无需定位，避免误引导
+	if (getPlatform() != 'android') {
+		return true;
+	}
+	// getAppAuthorizeSetting / getSystemSetting 均为同步 API，直接取返回值
+	let auth : any = null;
+	try { auth = bt.getAppAuthorizeSetting(); } catch (e) { auth = null; }
+	// 1) 微信（OS 层）未获得定位权限：引导去系统设置授权
+	if (auth != null && (auth.locationAuthorized as string) == 'denied') {
+		showGuide('检测到微信未获得定位权限，安卓需定位权限才能搜索蓝牙设备，请在系统设置中允许微信使用定位', 'app');
+		return false;
+	}
+	// 2) 系统定位开关未开启
+	let sys : any = null;
+	try { sys = bt.getSystemSetting(); } catch (e2) { sys = null; }
+	if (sys != null && sys.locationEnabled != true) {
+		showGuide('系统定位未开启，安卓需开启系统定位后才能搜索到蓝牙设备', '');
+		return false;
+	}
+	return true;
+}
+
+/* ---------------- 适配器 ---------------- */
+
+export const openAdapter : OpenAdapter = function () : Promise<boolean> {
+	return new Promise<boolean>((resolve : (v : boolean) => void, _reject : (e : any) => void) => {
+		bt.openBluetoothAdapter({
+			success: () => {
+				// 蓝牙适配器就绪。定位检查放在扫描路径中（连接不需要定位）
+				resolve(true);
+			},
+			fail: () => {
+				// 蓝牙未开启 / 设备不支持 / 无授权：诊断并引导用户开启或授权
+				guideBluetoothIssue();
+				resolve(false);
+			}
+		});
+	});
+}
+
+export const closeAdapter : CloseAdapter = function () {
+	// 使所有进行中的扫描计时器失效
+	scanGeneration = scanGeneration + 1;
+	try {
+		// 提供 success/fail 回调，避免以 Promise 形式抛出未捕获拒绝
+		bt.closeBluetoothAdapter({
+			success: () => { },
+			fail: () => { }
+		});
+	} catch (e) {
+		// ignore
+	}
+}
+
+/* ---------------- 扫描器 ---------------- */
+
+class WeixinScanner implements IScanner {
+	private foundListener : ((res : any) => void) | null = null;
+	private scanning : boolean = false;
+	private scanTimer : number = -1;
+
+	startScan(options : BleScanOptions) {
+		// 取消上一次扫描遗留的计时器，并递增代次使其失效
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		scanGeneration = scanGeneration + 1;
+		const gen = scanGeneration;
+		const namePrefix = options.namePrefix;
+		const onAdv = options.onAdvertisement;
+		// 是否允许重复上报同一设备，透传给微信 allowDuplicatesKey（不传默认 false，同一设备仅上报一次）
+		let allowDup = false;
+		const adOpt = options.allowDuplicates;
+		if (adOpt != null) { allowDup = adOpt; }
+
+		// 先解绑历史监听，避免重复回调
+		if (this.foundListener != null) {
+			try { bt.offBluetoothDeviceFound(this.foundListener); } catch (e) { }
+			this.foundListener = null;
+		}
+
+		// 设备处理管线：onBluetoothDeviceFound 与 getBluetoothDevices 复用同一套解析逻辑
+		const emitDevices = (devices : Array<any> | null) => {
+			if (devices == null) {
+				return;
+			}
+			for (let i = 0; i < devices.length; i++) {
+				const dev = devices[i];
+				// 名称优先取 name，其次 localName
+				let name : string | null = null;
+				const dn = dev.name;
+				if (dn != null && (dn as string) != '') {
+					name = dn as string;
+				} else {
+					const ln = dev.localName;
+					if (ln != null && (ln as string) != '') {
+						name = ln as string;
+					}
+				}
+				// 名称前缀过滤
+				if (namePrefix != null) {
+					if (name == null || !name!.startsWith(namePrefix!)) {
+						continue;
+					}
+				}
+				// 服务 UUID 列表
+				let serviceUuids : string[] = [];
+				const su = dev.advertisServiceUUIDs;
+				if (su != null) {
+					serviceUuids = su as string[];
+				}
+				// 厂商自定义数据段（四端统一语义）：微信 advertisData 即厂商数据段
+				let mfg : string | null = null;
+				const ad = dev.advertisData;
+				if (ad != null) {
+					mfg = advDataToHex(ad as ArrayBuffer);
+				}
+				const adv : Advertisement = {
+					deviceId: dev.deviceId as string,
+					name: name,
+					rssi: dev.RSSI as number,
+					serviceUuids: serviceUuids,
+					advertisData: mfg
+				};
+				onAdv(adv);
+			}
+		};
+
+		const listener = (res : any) => {
+			emitDevices(res.devices as Array<any>);
+		};
+		this.foundListener = listener;
+
+		bt.onBluetoothDeviceFound(listener);
+
+		// 启动发现：微信要求适配器已初始化，否则报 not init。
+		const beginDiscovery = () => {
+			// 构建服务过滤（空数组表示不过滤）
+			bt.startBluetoothDevicesDiscovery({
+				services: options.services,
+				allowDuplicatesKey: allowDup,
+				success: () => {
+					this.scanning = true;
+					// 第二次扫描时，上次已发现的设备被微信缓存，不会再经 onBluetoothDeviceFound 回调，
+					// 故主动拉取已发现设备列表（含缓存）补充上报，避免“第二次扫描不到设备”
+					bt.getBluetoothDevices({
+						success: (r : any) => { emitDevices(r.devices as Array<any>); },
+						fail: () => { }
+					});
+				},
+				fail: (err : any) => {
+					// 透传微信原始失败信息，便于定位（如 not init / location not turn on / 无效 services UUID 等）
+					let detail = '';
+					if (err != null) {
+						const code = err.errCode;
+						const msg = err.errMsg;
+						if (code != null) { detail = detail + 'errCode=' + code; }
+						if (msg != null) { detail = (detail == '' ? '' : detail + ' ') + (msg as string); }
+					}
+					options.onError?.(new BleFailImpl(9020003, detail == '' ? null : detail));
+				}
+			});
+		};
+		// 扫描超时自动结束（默认 15 秒）——仅在真正开始发现后启动
+		let to = 15000;
+		const t = options.timeout;
+		if (t != null) { to = t; }
+		const armTimeout = () => {
+			if (to > 0) {
+				this.scanTimer = setTimeout(() => {
+					// 仅当本次扫描代次仍有效时才自动结束，避免误停其他扫描器
+					if (gen == scanGeneration) {
+						this.stopScan();
+						options.onEnd?.();
+					}
+				}, to);
+			}
+		};
+
+		// 先确保适配器已初始化（openBluetoothAdapter 幂等：已开启时直接成功）
+		bt.openBluetoothAdapter({
+			success: () => {
+				// 适配器就绪：扫描依赖定位（安卓），定位未就绪则引导并上报错误，不进入扫描（避免假扫描状态）
+				if (!ensureLocationForScan()) {
+					options.onError?.(new BleFailImpl(9020003, '定位未就绪：请开启系统定位并授权微信定位后重试'));
+					return;
+				}
+				beginDiscovery();
+				armTimeout();
+			},
+			fail: () => {
+				// 适配器未就绪（蓝牙未开 / 无权限 / scope 未授权）：引导并直接上报错误，不再尝试发现
+				guideBluetoothIssue();
+				options.onError?.(new BleFailImpl(9020003, '蓝牙未就绪：请检查系统蓝牙开关与相关授权'));
+			}
+		});
+	}
+
+	stopScan() {
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		// 递增代次，使任何遗留的计时器回调失效
+		scanGeneration = scanGeneration + 1;
+		try {
+			if (this.foundListener != null) {
+				bt.offBluetoothDeviceFound(this.foundListener);
+			}
+			// 必须提供 success/fail 回调，避免适配器未初始化(not init)时以 Promise 形式抛出未捕获拒绝
+			bt.stopBluetoothDevicesDiscovery({
+				success: () => { },
+				fail: () => { }
+			});
+		} catch (e) {
+			// ignore
+		}
+		this.scanning = false;
+		this.foundListener = null;
+	}
+}
+
+/* ---------------- 外围设备 ---------------- */
+
+class WeixinPeripheral implements IPeripheral {
+	readonly deviceId : string;
+	private state : BleConnectionState = BLE_STATE_DISCONNECTED;
+	private stateCb : ((state : BleConnectionState) => void) | null = null;
+	// 订阅表：normalizeUuid(characteristicUuid) -> 通知回调（值以 hex 字符串回传）
+	private observers : Map<string, (v : string) => void> = new Map<string, (v : string) => void>();
+	// 待结算的读取表：normalizeUuid(characteristicUuid) -> 读取 resolve（微信读取值经事件回传，以 hex 字符串结算）
+	private readResolvers : Map<string, (v : string) => void> = new Map<string, (v : string) => void>();
+	// 挂起的连接拒绝回调（断开 / 超时时主动拒绝）
+	private pendingConnectReject : ((e : any) => void) | null = null;
+
+	constructor(deviceId : string) {
+		this.deviceId = deviceId;
+	}
+
+	private setState(s : BleConnectionState) {
+		this.state = s;
+		this.stateCb?.(s);
+	}
+
+	getState() : BleConnectionState {
+		return this.state;
+	}
+
+	onStateChange(cb : (state : BleConnectionState) => void) {
+		this.stateCb = cb;
+	}
+
+	/* 由全局连接状态监听分发：微信仅提供 connected true/false */
+	handleConnectionChange(connected : boolean) {
+		if (connected) {
+			this.setState(BLE_STATE_CONNECTED);
+		} else {
+			// 非预期断开：复位状态，清理订阅，并拒绝仍挂起的连接请求
+			this.setState(BLE_STATE_DISCONNECTED);
+			this.observers.clear();
+			const rj = this.pendingConnectReject;
+			this.pendingConnectReject = null;
+			rj?.(new BleFailImpl(9020005));
+		}
+	}
+
+	/* 由全局特征值变化监听分发：既用于读取结算，也用于订阅通知。值统一转为 hex 字符串回传 */
+	handleValue(characteristicId : string, value : ArrayBuffer) {
+		const key = normalizeUuid(characteristicId);
+		const hex = bufToHex(value);
+		// 优先结算待处理的读取
+		const readResolve = this.readResolvers.get(key);
+		if (readResolve != null) {
+			this.readResolvers.delete(key);
+			readResolve!(hex);
+		}
+		// 同时回调订阅者
+		const observer = this.observers.get(key);
+		observer?.(hex);
+	}
+
+	connect() : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			// 注册到全局设备表并确保连接状态监听已绑定
+			peripherals.set(this.deviceId, this);
+			ensureConnStateListener();
+			this.pendingConnectReject = reject;
+			this.setState(BLE_STATE_CONNECTING);
+			// 发起连接（连接仅依赖蓝牙，不需要定位）
+			const doConnect = () => {
+				bt.createBLEConnection({
+					deviceId: this.deviceId,
+					timeout: 30000,
+					success: () => {
+						this.pendingConnectReject = null;
+						this.setState(BLE_STATE_CONNECTED);
+						resolve();
+					},
+					fail: () => {
+						this.pendingConnectReject = null;
+						this.setState(BLE_STATE_DISCONNECTED);
+						reject(new BleFailImpl(9020004));
+					}
+				});
+			};
+			// 先确保适配器已初始化（幂等）；失败则诊断并引导蓝牙相关授权，仍尝试连接以透出真实原因
+			bt.openBluetoothAdapter({
+				success: () => { doConnect(); },
+				fail: () => {
+					guideBluetoothIssue();
+					doConnect();
+				}
+			});
+		});
+	}
+
+	disconnect() : Promise<void> {
+		return new Promise<void>((resolve : () => void, _reject : (e : any) => void) => {
+			// 断开时主动拒绝仍在挂起的连接请求
+			const rj = this.pendingConnectReject;
+			this.pendingConnectReject = null;
+			rj?.(new BleFailImpl(9020005));
+
+			this.setState(BLE_STATE_DISCONNECTING);
+			const finish = () => {
+				this.observers.clear();
+				this.readResolvers.clear();
+				peripherals.delete(this.deviceId);
+				this.setState(BLE_STATE_DISCONNECTED);
+				resolve();
+			};
+			bt.closeBLEConnection({
+				deviceId: this.deviceId,
+				success: () => { finish(); },
+				fail: () => { finish(); }
+			});
+		});
+	}
+
+	discoverServices(onCharacteristic : (serviceUuid : string, uuid : string, properties : number) => void) : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			bt.getBLEDeviceServices({
+				deviceId: this.deviceId,
+				success: (sres : any) => {
+					const services = sres.services as Array<any>;
+					if (services == null || services.length == 0) {
+						resolve();
+						return;
+					}
+					// 每个服务分别获取其特征，全部完成后 resolve
+					let remaining = services.length;
+					for (let i = 0; i < services.length; i++) {
+						const serviceId = services[i].uuid as string;
+						bt.getBLEDeviceCharacteristics({
+							deviceId: this.deviceId,
+							serviceId: serviceId,
+							success: (cres : any) => {
+								const chars = cres.characteristics as Array<any>;
+								if (chars != null) {
+									for (let j = 0; j < chars.length; j++) {
+										const ch = chars[j];
+										onCharacteristic(serviceId, ch.uuid as string, mapProperties(ch.properties));
+									}
+								}
+								remaining = remaining - 1;
+								if (remaining == 0) { resolve(); }
+							},
+							fail: () => {
+								// 单个服务特征获取失败不阻断整体流程
+								remaining = remaining - 1;
+								if (remaining == 0) { resolve(); }
+							}
+						});
+					}
+				},
+				fail: () => {
+					reject(new BleFailImpl(9020006));
+				}
+			});
+		});
+	}
+
+	read(target : CharacteristicRef) : Promise<string> {
+		return new Promise<string>((resolve : (v : string) => void, reject : (e : any) => void) => {
+			ensureValueListener();
+			const key = normalizeUuid(target.characteristicUuid);
+			// 读取值经 onBLECharacteristicValueChange 回传，设置超时兜底避免 Promise 永挂
+			const timer = setTimeout(() => {
+				this.readResolvers.delete(key);
+				reject(new BleFailImpl(9020007, 'read timeout'));
+			}, 10000);
+			this.readResolvers.set(key, (v : string) => {
+				clearTimeout(timer);
+				resolve(v);
+			});
+			bt.readBLECharacteristicValue({
+				deviceId: this.deviceId,
+				serviceId: target.serviceUuid,
+				characteristicId: target.characteristicUuid,
+				fail: () => {
+					clearTimeout(timer);
+					this.readResolvers.delete(key);
+					reject(new BleFailImpl(9020007));
+				}
+			});
+		});
+	}
+
+	write(target : CharacteristicRef, value : string, wtype : number) : Promise<void> {
+		return new Promise<void>((resolve : () => void, reject : (e : any) => void) => {
+			const writeType = (wtype == 1) ? 'writeNoResponse' : 'write'; // 1 = 无响应写
+			bt.writeBLECharacteristicValue({
+				deviceId: this.deviceId,
+				serviceId: target.serviceUuid,
+				characteristicId: target.characteristicUuid,
+				value: hexToArrayBuffer(value),
+				writeType: writeType,
+				success: () => { resolve(); },
+				fail: () => { reject(new BleFailImpl(9020008)); }
+			});
+		});
+	}
+
+	observe(target : CharacteristicRef, options : BleObserveOptions) : void {
+		ensureValueListener();
+		const key = normalizeUuid(target.characteristicUuid);
+		// 保存持久通知回调（mp 平台编译为 JS，闭包自然持久）
+		this.observers.set(key, options.onValue);
+		bt.notifyBLECharacteristicValueChange({
+			deviceId: this.deviceId,
+			serviceId: target.serviceUuid,
+			characteristicId: target.characteristicUuid,
+			state: true,
+			success: () => { options.onSuccess?.(); },
+			fail: () => {
+				this.observers.delete(key);
+				options.onError?.(new BleFailImpl(9020009));
+			}
+		});
+	}
+
+	stopObserve(target : CharacteristicRef) : Promise<void> {
+		return new Promise<void>((resolve : () => void, _reject : (e : any) => void) => {
+			const key = normalizeUuid(target.characteristicUuid);
+			this.observers.delete(key);
+			bt.notifyBLECharacteristicValueChange({
+				deviceId: this.deviceId,
+				serviceId: target.serviceUuid,
+				characteristicId: target.characteristicUuid,
+				state: false,
+				success: () => { resolve(); },
+				fail: () => { resolve(); }
+			});
+		});
+	}
+
+	readRssi() : Promise<number> {
+		return new Promise<number>((resolve : (v : number) => void, reject : (e : any) => void) => {
+			bt.getBLEDeviceRSSI({
+				deviceId: this.deviceId,
+				success: (res : any) => { resolve(res.RSSI as number); },
+				fail: () => { reject(new BleFailImpl(9020007)); }
+			});
+		});
+	}
+
+	requestMtu(mtu : number) : Promise<number> {
+		return new Promise<number>((resolve : (v : number) => void, _reject : (e : any) => void) => {
+			bt.setBLEMTU({
+				deviceId: this.deviceId,
+				mtu: mtu,
+				// iOS 无需协商 / 部分机型不支持，失败也返回请求值
+				success: () => { resolve(mtu); },
+				fail: () => { resolve(mtu); }
+			});
+		});
+	}
+}
+
+/* ---------------- 全局事件分发 ---------------- */
+
+/* 已连接的外围设备表：deviceId -> Peripheral，用于分发全局蓝牙事件 */
+const peripherals : Map<string, WeixinPeripheral> = new Map<string, WeixinPeripheral>();
+let connStateListenerBound : boolean = false;
+let valueListenerBound : boolean = false;
+
+/* 绑定全局连接状态监听（仅一次） */
+function ensureConnStateListener() {
+	if (connStateListenerBound) {
+		return;
+	}
+	connStateListenerBound = true;
+	bt.onBLEConnectionStateChange((res : any) => {
+		const p = peripherals.get(res.deviceId as string);
+		p?.handleConnectionChange(res.connected as boolean);
+	});
+}
+
+/* 绑定全局特征值变化监听（仅一次），读取值与通知均经此回传 */
+function ensureValueListener() {
+	if (valueListenerBound) {
+		return;
+	}
+	valueListenerBound = true;
+	bt.onBLECharacteristicValueChange((res : any) => {
+		const p = peripherals.get(res.deviceId as string);
+		p?.handleValue(res.characteristicId as string, res.value as ArrayBuffer);
+	});
+}
+
+/* ---------------- 工厂导出 ---------------- */
+
+export const createScanner : CreateScanner = function () : IScanner {
+	return new WeixinScanner();
+}
+
+export const createPeripheral : CreatePeripheral = function (deviceId : string) : IPeripheral {
+	return new WeixinPeripheral(deviceId);
+}

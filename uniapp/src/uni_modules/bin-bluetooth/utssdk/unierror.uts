@@ -1,0 +1,79 @@
+/* bin-bluetooth BLE 错误对象实现，遵循 uni 错误码规范 */
+import { BleErrorCode, BleFail } from "./interface.uts"
+
+/**
+ * 错误主题（插件名称）
+ */
+export const UniErrorSubject = 'bin-bluetooth';
+
+/**
+ * 错误码与错误信息映射表
+ */
+export const BleErrors : Map<BleErrorCode, string> = new Map<BleErrorCode, string>([
+  [9020001, '蓝牙未开启或适配器不可用'],
+  [9020002, '蓝牙相关权限被拒绝'],
+  [9020003, '扫描失败'],
+  [9020004, '连接失败或连接超时'],
+  [9020005, '设备已断开连接'],
+  [9020006, '服务或特征未找到'],
+  [9020007, '读取特征值失败'],
+  [9020008, '写入特征值失败'],
+  [9020009, '订阅通知失败'],
+  [9020010, '参数错误'],
+]);
+
+/**
+ * BLE 错误对象实现
+ *
+ * 平台差异：
+ * - App(Android/iOS/HarmonyOS) 端 UniError 是编译为原生的全局基类（继承自 uts Error），
+ *   直接 extends UniError 以获得与 uni 错误规范一致的行为。
+ * - MP(微信/支付宝等小程序) 端 UTS 编译为 JS，运行时并不存在全局 UniError 类，
+ *   若 extends UniError 会在加载插件时抛出 "UniError is not defined"。
+ *   故此处按 uni 错误规范(IUniError)自行实现同形结构，不依赖缺失的全局基类。
+ */
+// #ifdef APP
+export class BleFailImpl extends UniError implements BleFail {
+
+  override errCode : BleErrorCode
+
+  /**
+   * @param errCode 错误码
+   * @param extraMsg 附加错误详情，可为 null
+   */
+  constructor(errCode : BleErrorCode, extraMsg : string | null = null) {
+    super();
+    this.errSubject = UniErrorSubject;
+    this.errCode = errCode;
+    const base = BleErrors.get(errCode) ?? "";
+    this.errMsg = extraMsg == null ? base : (base + ": " + extraMsg!);
+  }
+}
+// #endif
+
+// #ifdef MP
+export class BleFailImpl implements BleFail {
+
+  /* 遵循 uni 错误规范(IUniError)，小程序端不继承全局 UniError，直接实现同形字段 */
+  errSubject : string
+  errCode : BleErrorCode
+  errMsg : string
+  data : any | null = null
+
+  /**
+   * @param errCode 错误码
+   * @param extraMsg 附加错误详情，可为 null
+   */
+  constructor(errCode : BleErrorCode, extraMsg : string | null = null) {
+    this.errSubject = UniErrorSubject;
+    this.errCode = errCode;
+    const base = BleErrors.get(errCode) ?? "";
+    this.errMsg = extraMsg == null ? base : (base + ": " + extraMsg!);
+  }
+
+  /* 与 UniError 行为对齐，便于日志输出 */
+  toString() : string {
+    return this.errSubject + ": " + this.errCode.toString() + " " + this.errMsg;
+  }
+}
+// #endif

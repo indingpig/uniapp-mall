@@ -1,0 +1,799 @@
+/**
+ * bin-bluetooth iOS BLE 实现（Central 中心设备）
+ * 底层对接 CoreBluetooth 的 CBCentralManager / CBPeripheral。
+ *
+ * CoreBluetooth 回调默认在主队列（构造 CBCentralManager 时 queue 传 null），
+ * 因此无需额外线程切换。
+ */
+
+import { IScanner, IPeripheral, BleScanOptions, BleObserveOptions, Advertisement, CharacteristicRef, BleConnectionState, Uuid, OpenAdapter, CloseAdapter, CreateScanner, CreatePeripheral } from '../interface.uts';
+import { BleFailImpl } from '../unierror';
+
+/**
+ * 连接状态，对应 kable 的 State
+ * 0=disconnected 1=connecting 2=connected 3=disconnecting
+ * 注意：iOS 下 enum 无法作为 public 方法出入参，故用 number 别名 + 常量替代
+ */
+export const BLE_STATE_DISCONNECTED : BleConnectionState = 0;
+export const BLE_STATE_CONNECTING : BleConnectionState = 1;
+export const BLE_STATE_CONNECTED : BleConnectionState = 2;
+export const BLE_STATE_DISCONNECTING : BleConnectionState = 3;
+
+import { NSObject, NSError, NSNumber, NSData, Data, UUID } from 'Foundation';
+import { CBCentralManager, CBCentralManagerDelegate, CBPeripheral, CBPeripheralDelegate, CBService, CBCharacteristic, CBUUID, CBManagerState, CBCharacteristicWriteType, CBCharacteristicProperties, CBCentralManagerScanOptionAllowDuplicatesKey } from 'CoreBluetooth';
+
+/* 扫描代次：每次 startScan/stopScan/closeAdapter 递增，用于让遗留的超时计时器失效，
+   同时避免多个扫描器实例共享单例时相互干扰 */
+let scanGeneration : number = 0;
+
+/* ---------------- 工具函数 ---------------- */
+
+function normalizeUuid(uuid : string) : string {
+	return uuid.toUpperCase();
+}
+
+function dataToArrayBuffer(data : Data) : ArrayBuffer {
+	const len = Number.from(data.count);
+	const u = new Uint8Array(len);
+	for (let i = 0; i < len; i++) {
+		// Swift 中 Data 下标返回 UInt8，需显式转为 number 才能赋值给 Uint8Array（桥接为 NSNumber）
+		u[i] = Number.from(data[i.toInt()]);
+	}
+	return u.buffer;
+}
+
+/**
+ * Data 转十六进制字符串（小写、无分隔符）
+ */
+function dataToHex(data : Data) : string {
+	const len = Number.from(data.count);
+	let hex = '';
+	for (let i = 0; i < len; i++) {
+		const v = Number.from(data[i.toInt()]) & 0xFF;
+		const s = v.toString(16);
+		if (s.length < 2) { hex += '0'; }
+		hex += s;
+	}
+	return hex;
+}
+
+function arrayBufferToData(buf : ArrayBuffer) : Data {
+	const u = new Uint8Array(buf);
+	const bytes = new Array<UInt8>();
+	for (let i = 0; i < u.length; i++) {
+		bytes.push(u[i].toUInt8());
+	}
+	return new Data(bytes);
+}
+
+/**
+ * 十六进制字符串转 Data（奇数长度自动前补 0），用于 write 入参
+ */
+function hexToData(hex : string) : Data {
+	const clean = hex.length % 2 == 0 ? hex : '0' + hex;
+	// 用 Number.from(Int) 得到干净的 number，避免 `Math.floor(...) as number` 在 iOS 被编译为非法的 `Int as! NSNumber`
+	const len = Number.from(clean.length) / 2;
+	const bytes = new Array<UInt8>();
+	for (let i = 0; i < len; i++) {
+		const v = parseInt(clean.substring(i * 2, i * 2 + 2), 16);
+		bytes.push(v.toUInt8());
+	}
+	return new Data(bytes);
+}
+
+/* 特征引用辅助构造函数 */
+export function characteristicOf(serviceUuid : Uuid, characteristicUuid : Uuid) : CharacteristicRef {
+	return { serviceUuid: serviceUuid, characteristicUuid: characteristicUuid } as CharacteristicRef;
+}
+
+/* ---------------- 全局中心管理器 ---------------- */
+
+export class BleCentral extends NSObject implements CBCentralManagerDelegate {
+	central : CBCentralManager | null = null;
+	private ready : boolean = false;
+	private readyResolvers : Array<VoidResolver> = new Array<VoidResolver>();
+
+	// 扫描回调
+	scanOnAdv : ((adv : Advertisement) => void) | null = null;
+	scanNamePrefix : string | null = null;
+	scanOnErr : ((err : BleFailImpl) => void) | null = null;
+
+	// deviceId -> IOSPeripheral
+	peripherals : Map<string, IOSPeripheral> = new Map<string, IOSPeripheral>();
+
+	constructor() {
+		super();
+		this.central = new CBCentralManager(delegate = this, queue = null);
+	}
+
+	isReady() : boolean {
+		return this.ready;
+	}
+
+	waitReady() : Promise<void> {
+		return new Promise<boolean>((resolve : (v : boolean) => void, reject : (e : any) => void) => {
+			if (this.ready) {
+				resolve(true);
+				return;
+			}
+			const state = this.central?.state;
+			if (state != null && state != CBManagerState.poweredOn && state != CBManagerState.unknown && state != CBManagerState.resetting) {
+				reject(new BleFailImpl(9020001));
+				return;
+			}
+			this.readyResolvers.push({ resolve: resolve, reject: reject } as VoidResolver);
+		}).then((_v : boolean) : void => { });
+	}
+
+	centralManagerDidUpdateState(central : CBCentralManager) {
+		const st = central.state;
+		if (st == CBManagerState.poweredOn) {
+			this.ready = true;
+			const list = this.readyResolvers;
+			this.readyResolvers = new Array<VoidResolver>();
+			list.forEach((r : VoidResolver) => {
+				r.resolve(true);
+			});
+		} else if (st == CBManagerState.unknown || st == CBManagerState.resetting) {
+			// 瞬态/未决定状态：例如首次使用时系统权限弹窗尚未响应，初始 state 为 unknown。
+			// 此时继续等待，不结算 Promise，避免过早 reject 触发自定义弹窗与系统弹窗冲突。
+			this.ready = false;
+		} else {
+			// 明确不可用（poweredOff / unsupported / unauthorized）才结算失败
+			this.ready = false;
+			const list = this.readyResolvers;
+			this.readyResolvers = new Array<VoidResolver>();
+			list.forEach((r : VoidResolver) => {
+				r.reject(new BleFailImpl(9020001));
+			});
+		}
+	}
+
+	centralManager(central : CBCentralManager, @argumentLabel("didDiscover") didDiscover : CBPeripheral, @argumentLabel("advertisementData") advertisementData : Map<string, any>, @argumentLabel("rssi") rssi : NSNumber) {
+		const cb = this.scanOnAdv;
+		if (cb == null) {
+			return;
+		}
+		const name = didDiscover.name ?? null;
+		if (this.scanNamePrefix != null) {
+			if (name == null || !name!.startsWith(this.scanNamePrefix!)) {
+				return;
+			}
+		}
+		const serviceUuids = new Array<string>();
+		const uuidList = advertisementData.get('kCBAdvDataServiceUUIDs');
+		if (uuidList != null) {
+			const arr = uuidList as CBUUID[];
+			for (let i = 0; i < arr.length; i++) {
+				serviceUuids.push(arr[i].uuidString);
+			}
+		}
+		// 厂商自定义数据段（四端统一语义）：kCBAdvDataManufacturerData
+		// 为 NSData：公司标识(小端 2 字节) + 厂商自定义内容
+		let mfgData : string | null = null;
+		const md = advertisementData.get('kCBAdvDataManufacturerData');
+		if (md != null) {
+			mfgData = dataToHex(md as Data);
+		}
+		const deviceId = didDiscover.identifier.uuidString;
+		// 缓存 CBPeripheral，便于后续连接
+		const existing = this.peripherals.get(deviceId);
+		if (existing != null) {
+			existing.bindCBPeripheral(didDiscover);
+		}
+		const adv : Advertisement = {
+			deviceId: deviceId,
+			name: name,
+			rssi: Number.from(rssi.doubleValue),
+			serviceUuids: serviceUuids,
+			advertisData: mfgData
+		};
+		cb(adv);
+	}
+
+	centralManager(central : CBCentralManager, @argumentLabel("didConnect") didConnect : CBPeripheral) {
+		const p = this.peripherals.get(didConnect.identifier.uuidString);
+		p?._onConnected();
+	}
+
+	centralManager(central : CBCentralManager, @argumentLabel("didFailToConnect") didFailToConnect : CBPeripheral, @argumentLabel("error") error : NSError | null) {
+		const p = this.peripherals.get(didFailToConnect.identifier.uuidString);
+		p?._onConnectFailed();
+	}
+
+	centralManager(central : CBCentralManager, @argumentLabel("didDisconnectPeripheral") didDisconnectPeripheral : CBPeripheral, @argumentLabel("error") error : NSError | null) {
+		const p = this.peripherals.get(didDisconnectPeripheral.identifier.uuidString);
+		p?._onDisconnected();
+	}
+}
+
+let sharedCentral : BleCentral | null = null;
+function getCentral() : BleCentral {
+	if (sharedCentral == null) {
+		sharedCentral = new BleCentral();
+	}
+	return sharedCentral!;
+}
+
+/* ---------------- 适配器 ---------------- */
+
+export const openAdapter : OpenAdapter = function () : Promise<boolean> {
+	const c = getCentral();
+	return c.waitReady().then(() : boolean => {
+		return true;
+	}).catch((_e : any) : boolean => {
+		// 蓝牙不可用：首次使用时 iOS 会自动弹出「允许 App 使用蓝牙」系统弹窗，
+		// 无需自定义弹窗；此处仅返回 false，由调用方决定后续处理。
+		return false;
+	});
+}
+
+export const closeAdapter : CloseAdapter = function () {
+	const c = sharedCentral;
+	if (c != null) {
+		// 使所有进行中的扫描计时器失效
+		scanGeneration = scanGeneration + 1;
+		c.scanOnAdv = null;
+		c.central?.stopScan();
+		// 清理所有外围设备的挂起操作并释放，避免全局状态残留
+		c.peripherals.forEach((p : IOSPeripheral) => {
+			p._forceCleanup();
+		});
+		c.peripherals.clear();
+	}
+}
+
+/* ---------------- 扫描器 ---------------- */
+
+export class IOSScanner implements IScanner {
+	private scanTimer : number = -1;
+
+	@UTSJS.keepAlive
+	startScan(options : BleScanOptions) {
+		const c = getCentral();
+		if (!c.isReady()) {
+			options.onError?.(new BleFailImpl(9020001));
+			return;
+		}
+		// 取消上一次扫描遗留的计时器，并递增代次使其失效
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		scanGeneration = scanGeneration + 1;
+		const gen = scanGeneration;
+		c.scanOnAdv = options.onAdvertisement;
+		c.scanNamePrefix = options.namePrefix;
+		c.scanOnErr = options.onError;
+
+		let services : CBUUID[] | null = null;
+		if (options.services.length > 0) {
+			const arr = new Array<CBUUID>();
+			for (let i = 0; i < options.services.length; i++) {
+				arr.push(new CBUUID(string = options.services[i]));
+			}
+			services = arr;
+		}
+		// 是否允许重复上报同一设备：CoreBluetooth 默认(options=null)对同一设备仅上报一次，
+		// 需重复上报时通过 CBCentralManagerScanOptionAllowDuplicatesKey 开启
+		let scanOpts : Map<string, any> | null = null;
+		const adOpt = options.allowDuplicates;
+		if (adOpt != null && adOpt) {
+			const m = new Map<string, any>();
+			m.set(CBCentralManagerScanOptionAllowDuplicatesKey, true);
+			scanOpts = m;
+		}
+		c.central?.scanForPeripherals(withServices = services, options = scanOpts);
+
+		// 扫描超时自动结束，默认 15 秒
+		let to = 15000;
+		const t = options.timeout;
+		if (t != null) { to = t; }
+		if (to > 0) {
+			// setTimeout 延时参数要求 Int，而 to 因来自可选 options.timeout 被推断为 NSNumber，故显式 toInt()
+			this.scanTimer = setTimeout(() => {
+				// 仅当本次扫描代次仍有效时才自动结束，避免误停其他扫描器
+				if (gen == scanGeneration) {
+					this.stopScan();
+					options.onEnd?.();
+				}
+			}, to.toInt());
+		}
+	}
+
+	stopScan() {
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		// 递增代次，使任何遗留的计时器回调失效
+		scanGeneration = scanGeneration + 1;
+		const c = getCentral();
+		c.central?.stopScan();
+		c.scanOnAdv = null;
+	}
+}
+
+/* ---------------- 外围设备 ---------------- */
+
+export type VoidResolver = {
+	resolve : (v : boolean) => void,
+	reject : (e : any) => void
+}
+export type BufferResolver = {
+	resolve : (v : string) => void,
+	reject : (e : any) => void
+}
+export type NumberResolver = {
+	resolve : (v : number) => void,
+	reject : (e : any) => void
+}
+
+export class IOSPeripheral extends NSObject implements CBPeripheralDelegate, IPeripheral {
+	readonly deviceId : string;
+	private cbp : CBPeripheral | null = null;
+	private state : BleConnectionState = BLE_STATE_DISCONNECTED;
+	private stateCb : ((state : BleConnectionState) => void) | null = null;
+
+	private pendingConnect : VoidResolver | null = null;
+	private pendingDiscover : VoidResolver | null = null;
+	private pendingRssi : NumberResolver | null = null;
+	private pendingRead : Map<string, BufferResolver> = new Map<string, BufferResolver>();
+	private pendingWrite : Map<string, VoidResolver> = new Map<string, VoidResolver>();
+	private pendingNotify : Map<string, VoidResolver> = new Map<string, VoidResolver>();
+	private observers : Map<string, (v : string) => void> = new Map<string, (v : string) => void>();
+	// 连接超时计时器
+	private connectTimer : number = -1;
+	// 挂起的断开回调（等待 didDisconnect 委托触发后结算）
+	private pendingDisconnect : ((v : boolean) => void) | null = null;
+
+	// 服务发现进度计数
+	private pendingServiceCount : number = 0;
+	// 服务发现过程中是否出现特征发现错误（用布尔标记，避免 Error/NSError 桥接类型不匹配）
+	private discoverFailed : boolean = false;
+	// 发现特征的逐条回调（每发现一个特征回调一次，传基础类型规避 iOS 对象跨边界字段丢失）
+	private discoverOnChar : ((serviceUuid : string, uuid : string, properties : number) => void) | null = null;
+
+	constructor(deviceId : string) {
+		// Swift 要求：调用 super() 前必须先初始化当前类的非可选存储属性
+		this.deviceId = deviceId;
+		super();
+		// 尝试从系统检索已知外设
+		const c = getCentral();
+		const uuid = new UUID(uuidString = deviceId);
+		if (uuid != null) {
+			const list = c.central?.retrievePeripherals(withIdentifiers = [uuid!]);
+			if (list != null && list!.length > 0) {
+				this.cbp = list![0];
+				this.cbp!.delegate = this;
+			}
+		}
+	}
+
+	bindCBPeripheral(p : CBPeripheral) {
+		this.cbp = p;
+		p.delegate = this;
+	}
+
+	private setState(s : BleConnectionState) {
+		this.state = s;
+		const cb = this.stateCb;
+		cb?.(s);
+	}
+
+	getState() : BleConnectionState {
+		return this.state;
+	}
+
+	onStateChange(cb : (state : BleConnectionState) => void) {
+		this.stateCb = cb;
+	}
+
+	connect() : Promise<void> {
+		return new Promise<boolean>((resolve : (v : boolean) => void, reject : (e : any) => void) => {
+			const c = getCentral();
+			c.peripherals.set(this.deviceId, this);
+			const p = this.cbp;
+			if (p == null) {
+				reject(new BleFailImpl(9020004, 'peripheral not found, scan first'));
+				return;
+			}
+			this.pendingConnect = { resolve: resolve, reject: reject } as VoidResolver;
+			this.setState(BLE_STATE_CONNECTING);
+			c.central?.connect(p!, options = null);
+			// 连接超时保护：默认 30 秒未回调则判定连接失败并取消连接
+			this.connectTimer = setTimeout(() => {
+				const pc = this.pendingConnect;
+				if (pc != null) {
+					this.pendingConnect = null;
+					const cbp2 = this.cbp;
+					if (cbp2 != null) {
+						getCentral().central?.cancelPeripheralConnection(cbp2!);
+					}
+					this.setState(BLE_STATE_DISCONNECTED);
+					pc.reject(new BleFailImpl(9020004, 'connect timeout'));
+				}
+			}, 30000);
+		}).then((_v : boolean) : void => { });
+	}
+
+	private clearConnectTimer() {
+		if (this.connectTimer != -1) {
+			clearTimeout(this.connectTimer);
+			this.connectTimer = -1;
+		}
+	}
+
+	disconnect() : Promise<void> {
+		return new Promise<boolean>((resolve : (v : boolean) => void, _reject : (e : any) => void) => {
+			const p = this.cbp;
+			if (p == null) {
+				this.setState(BLE_STATE_DISCONNECTED);
+				resolve(true);
+				return;
+			}
+			this.setState(BLE_STATE_DISCONNECTING);
+			// 等待 didDisconnectPeripheral 委托触发后再 resolve，与 Android/Harmony 行为保持一致
+			this.pendingDisconnect = resolve;
+			getCentral().central?.cancelPeripheralConnection(p!);
+			// 超时兜底：2 秒内未收到断开回调则强制结算
+			setTimeout(() => {
+				const d = this.pendingDisconnect;
+				if (d != null) {
+					this.pendingDisconnect = null;
+					this.setState(BLE_STATE_DISCONNECTED);
+					d(true);
+				}
+			}, 2000);
+		}).then((_v : boolean) : void => { });
+	}
+
+	private findCharacteristic(target : CharacteristicRef) : CBCharacteristic | null {
+		const p = this.cbp;
+		if (p == null) {
+			return null;
+		}
+		const services = p!.services;
+		if (services == null) {
+			return null;
+		}
+		// 空串会导致 CBUUID(string:) 抛异常崩溃，先做非空校验
+		if (target.serviceUuid.length == 0 || target.characteristicUuid.length == 0) {
+			return null;
+		}
+		const su = new CBUUID(string = target.serviceUuid);
+		const cu = new CBUUID(string = target.characteristicUuid);
+		for (let i = 0; i < services!.length; i++) {
+			const s = services![i];
+			if (s.uuid.isEqual(su)) {
+				const chars = s.characteristics;
+				if (chars != null) {
+					for (let j = 0; j < chars!.length; j++) {
+						if (chars![j].uuid.isEqual(cu)) {
+							return chars![j];
+						}
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	@UTSJS.keepAlive
+	discoverServices(onCharacteristic : (serviceUuid : string, uuid : string, properties : number) => void) : Promise<void> {
+		return new Promise<boolean>((resolve : (v : boolean) => void, reject : (e : any) => void) => {
+			const p = this.cbp;
+			if (p == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			this.discoverOnChar = onCharacteristic;
+			this.pendingDiscover = { resolve: resolve, reject: reject } as VoidResolver;
+			this.pendingServiceCount = 0;
+			this.discoverFailed = false;
+			p!.discoverServices(null);
+		}).then((_v : boolean) : void => { });
+	}
+
+	read(target : CharacteristicRef) : Promise<string> {
+		return new Promise<string>((resolve : (v : string) => void, reject : (e : any) => void) => {
+			const p = this.cbp;
+			if (p == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = this.findCharacteristic(target);
+			if (ch == null) {
+				reject(new BleFailImpl(9020006));
+				return;
+			}
+			this.pendingRead.set(ch!.uuid.uuidString, { resolve: resolve, reject: reject } as BufferResolver);
+			p!.readValue(for = ch!);
+		});
+	}
+
+	write(target : CharacteristicRef, value : string, wtype : number) : Promise<void> {
+		return new Promise<boolean>((resolve : (v : boolean) => void, reject : (e : any) => void) => {
+			const p = this.cbp;
+			if (p == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = this.findCharacteristic(target);
+			if (ch == null) {
+				reject(new BleFailImpl(9020006));
+				return;
+			}
+			const data = hexToData(value);
+			if (wtype == 1) { // 1 = 无响应写
+				p!.writeValue(data, for = ch!, type = CBCharacteristicWriteType.withoutResponse);
+				// 无响应写不会触发 didWriteValueFor 回调，直接 resolve
+				resolve(true);
+			} else {
+				this.pendingWrite.set(ch!.uuid.uuidString, { resolve: resolve, reject: reject } as VoidResolver);
+				p!.writeValue(data, for = ch!, type = CBCharacteristicWriteType.withResponse);
+			}
+		}).then((_v : boolean) : void => { });
+	}
+
+	@UTSJS.keepAlive
+	observe(target : CharacteristicRef, options : BleObserveOptions) : void {
+		const p = this.cbp;
+		if (p == null) {
+			options.onError?.(new BleFailImpl(9020005));
+			return;
+		}
+		const ch = this.findCharacteristic(target);
+		if (ch == null) {
+			options.onError?.(new BleFailImpl(9020006));
+			return;
+		}
+		// 保存持久通知回调（本方法 void 返回 + keepAlive，回调不会在调用后被回收）
+		this.observers.set(ch!.uuid.uuidString, options.onValue);
+		// setNotifyValue 结果经 didUpdateNotificationStateFor 回传：成功 resolve → onSuccess，失败 reject → onError
+		this.pendingNotify.set(ch!.uuid.uuidString, {
+			resolve: (_v : boolean) => { options.onSuccess?.(); },
+			reject: (e : any) => { options.onError?.(e as BleFailImpl); }
+		} as VoidResolver);
+		p!.setNotifyValue(true, for = ch!);
+	}
+
+	stopObserve(target : CharacteristicRef) : Promise<void> {
+		return new Promise<boolean>((resolve : (v : boolean) => void, reject : (e : any) => void) => {
+			const p = this.cbp;
+			if (p == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = this.findCharacteristic(target);
+			if (ch == null) {
+				reject(new BleFailImpl(9020006));
+				return;
+			}
+			this.observers.delete(ch!.uuid.uuidString);
+			p!.setNotifyValue(false, for = ch!);
+			resolve(true);
+		}).then((_v : boolean) : void => { });
+	}
+
+	readRssi() : Promise<number> {
+		return new Promise<number>((resolve : (v : number) => void, reject : (e : any) => void) => {
+			const p = this.cbp;
+			if (p == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			this.pendingRssi = { resolve: resolve, reject: reject } as NumberResolver;
+			p!.readRSSI();
+		});
+	}
+
+	requestMtu(mtu : number) : Promise<number> {
+		return new Promise<number>((resolve : (v : number) => void, _reject : (e : any) => void) => {
+			const p = this.cbp;
+			// iOS 自动协商 MTU，返回可写最大长度
+			if (p == null) {
+				resolve(mtu);
+				return;
+			}
+			resolve(Number.from(p!.maximumWriteValueLength(for = CBCharacteristicWriteType.withoutResponse)));
+		});
+	}
+
+	/* ------ 中心管理器回调 ------ */
+
+	_onConnected() {
+		this.clearConnectTimer();
+		this.setState(BLE_STATE_CONNECTED);
+		const c = this.pendingConnect;
+		this.pendingConnect = null;
+		c?.resolve(true);
+	}
+
+	_onConnectFailed() {
+		this.clearConnectTimer();
+		this.setState(BLE_STATE_DISCONNECTED);
+		const c = this.pendingConnect;
+		this.pendingConnect = null;
+		c?.reject(new BleFailImpl(9020004));
+	}
+
+	_onDisconnected() {
+		this.clearConnectTimer();
+		this.setState(BLE_STATE_DISCONNECTED);
+		const c = this.pendingConnect;
+		if (c != null) {
+			this.pendingConnect = null;
+			c.reject(new BleFailImpl(9020004));
+		}
+		// 结算挂起的断开请求
+		const d = this.pendingDisconnect;
+		if (d != null) {
+			this.pendingDisconnect = null;
+			d(true);
+		}
+		// 拒绝其余挂起操作，避免 Promise 悬挂
+		this.rejectAllPending();
+	}
+
+	// 拒绝除 connect/disconnect 外的所有挂起操作并清理
+	private rejectAllPending() {
+		const d = this.pendingDiscover;
+		this.pendingDiscover = null;
+		this.discoverOnChar = null;
+		if (d != null) { d.reject(new BleFailImpl(9020005)); }
+		const r = this.pendingRssi;
+		this.pendingRssi = null;
+		if (r != null) { r.reject(new BleFailImpl(9020005)); }
+		this.pendingRead.forEach((x : BufferResolver) => { x.reject(new BleFailImpl(9020005)); });
+		this.pendingRead.clear();
+		this.pendingWrite.forEach((x : VoidResolver) => { x.reject(new BleFailImpl(9020005)); });
+		this.pendingWrite.clear();
+		this.pendingNotify.forEach((x : VoidResolver) => { x.reject(new BleFailImpl(9020005)); });
+		this.pendingNotify.clear();
+		this.observers.clear();
+	}
+
+	// 供 closeAdapter 强制释放：拒绝所有挂起 Promise
+	_forceCleanup() {
+		this.clearConnectTimer();
+		const cc = this.pendingConnect;
+		this.pendingConnect = null;
+		if (cc != null) { cc.reject(new BleFailImpl(9020005)); }
+		const dd = this.pendingDisconnect;
+		this.pendingDisconnect = null;
+		if (dd != null) { dd(true); }
+		this.rejectAllPending();
+	}
+
+	/* ------ CBPeripheralDelegate ------ */
+
+	peripheral(peripheral : CBPeripheral, @argumentLabel("didDiscoverServices") didDiscoverServices : NSError | null) {
+		if (didDiscoverServices != null) {
+			const d = this.pendingDiscover;
+			this.pendingDiscover = null;
+			d?.reject(new BleFailImpl(9020006));
+			return;
+		}
+		const services = peripheral.services;
+		if (services == null || services!.length == 0) {
+			const d = this.pendingDiscover;
+			this.pendingDiscover = null;
+			this.discoverOnChar = null;
+			d?.resolve(true);
+			return;
+		}
+		this.pendingServiceCount = Number.from(services!.length);
+		this.discoverFailed = false;
+		for (let i = 0; i < services!.length; i++) {
+			peripheral.discoverCharacteristics(null, for = services![i]);
+		}
+	}
+
+	peripheral(peripheral : CBPeripheral, @argumentLabel("didDiscoverCharacteristicsFor") didDiscoverCharacteristicsFor : CBService, @argumentLabel("error") error : NSError | null) {
+		// 记录特征发现错误，供所有服务处理完成后统一判断
+		if (error != null) {
+			this.discoverFailed = true;
+		}
+		// 直接从回调参数(刚发现特征的 CBService)逐条回调，避免最终读 peripheral.services 时特征未就绪
+		const svc = didDiscoverCharacteristicsFor;
+		const cl = svc.characteristics;
+		const cb = this.discoverOnChar;
+		if (cl != null && cb != null) {
+			for (let j = 0; j < cl!.length; j++) {
+				const c = cl![j];
+				cb!(svc.uuid.uuidString, c.uuid.uuidString, Number.from(c.properties.rawValue));
+			}
+		}
+		this.pendingServiceCount = this.pendingServiceCount - 1;
+		if (this.pendingServiceCount > 0) {
+			return;
+		}
+		// 所有服务的特征均已发现（回调已逐条发出），结算 Promise
+		const d = this.pendingDiscover;
+		this.pendingDiscover = null;
+		this.discoverOnChar = null;
+		if (d == null) {
+			return;
+		}
+		// 若特征发现过程中出现错误，则判定服务发现失败
+		if (this.discoverFailed) {
+			this.discoverFailed = false;
+			d.reject(new BleFailImpl(9020006));
+			return;
+		}
+		d.resolve(true);
+	}
+
+	peripheral(peripheral : CBPeripheral, @argumentLabel("didUpdateValueFor") didUpdateValueFor : CBCharacteristic, @argumentLabel("error") error : NSError | null) {
+		const key = didUpdateValueFor.uuid.uuidString;
+		const value = didUpdateValueFor.value;
+		// 读请求回调
+		const r = this.pendingRead.get(key);
+		if (r != null) {
+			this.pendingRead.delete(key);
+			if (error != null || value == null) {
+				r.reject(new BleFailImpl(9020007));
+			} else {
+				r.resolve(dataToHex(value!));
+			}
+			return;
+		}
+		// 通知回调
+		const obs = this.observers.get(key);
+		if (obs != null && value != null) {
+			obs(dataToHex(value!));
+		}
+	}
+
+	peripheral(peripheral : CBPeripheral, @argumentLabel("didWriteValueFor") didWriteValueFor : CBCharacteristic, @argumentLabel("error") error : NSError | null) {
+		const key = didWriteValueFor.uuid.uuidString;
+		const w = this.pendingWrite.get(key);
+		if (w == null) {
+			return;
+		}
+		this.pendingWrite.delete(key);
+		if (error != null) {
+			w.reject(new BleFailImpl(9020008));
+		} else {
+			w.resolve(true);
+		}
+	}
+
+	peripheral(peripheral : CBPeripheral, @argumentLabel("didUpdateNotificationStateFor") didUpdateNotificationStateFor : CBCharacteristic, @argumentLabel("error") error : NSError | null) {
+		const key = didUpdateNotificationStateFor.uuid.uuidString;
+		const n = this.pendingNotify.get(key);
+		if (n == null) {
+			return;
+		}
+		this.pendingNotify.delete(key);
+		if (error != null) {
+			n.reject(new BleFailImpl(9020009));
+		} else {
+			n.resolve(true);
+		}
+	}
+
+	peripheral(peripheral : CBPeripheral, @argumentLabel("didReadRSSI") didReadRSSI : NSNumber, @argumentLabel("error") error : NSError | null) {
+		const r = this.pendingRssi;
+		this.pendingRssi = null;
+		if (r == null) {
+			return;
+		}
+		if (error != null) {
+			r.reject(new BleFailImpl(9020007));
+		} else {
+			r.resolve(Number.from(didReadRSSI.doubleValue));
+		}
+	}
+}
+
+/* ---------------- 工厂导出 ---------------- */
+
+export const createScanner : CreateScanner = function () : IScanner {
+	return new IOSScanner();
+}
+
+export const createPeripheral : CreatePeripheral = function (deviceId : string) : IPeripheral {
+	return new IOSPeripheral(deviceId);
+}

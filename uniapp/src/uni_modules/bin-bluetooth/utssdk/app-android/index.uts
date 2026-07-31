@@ -1,0 +1,985 @@
+/**
+ * bin-bluetooth Android BLE 实现（Central 中心设备）
+ * 底层对接 android.bluetooth.* 的 BluetoothLeScanner / BluetoothGatt。
+ *
+ * 注意：GATT 回调运行在 binder 线程，所有面向 UTS 的回调统一切回主线程执行。
+ */
+
+import { IScanner, IPeripheral, BleScanOptions, BleObserveOptions, Advertisement, CharacteristicRef, BleConnectionState, Uuid, OpenAdapter, CloseAdapter, CreateScanner, CreatePeripheral } from '../interface.uts';
+import { BleFailImpl } from '../unierror';
+
+/**
+ * 连接状态，对应 kable 的 State
+ * 0=disconnected 1=connecting 2=connected 3=disconnecting
+ * 注意：iOS 下 enum 无法作为 public 方法出入参，故用 number 别名 + 常量替代
+ */
+export const BLE_STATE_DISCONNECTED : BleConnectionState = 0;
+export const BLE_STATE_CONNECTING : BleConnectionState = 1;
+export const BLE_STATE_CONNECTED : BleConnectionState = 2;
+export const BLE_STATE_DISCONNECTING : BleConnectionState = 3;
+
+import Context from 'android.content.Context';
+import Intent from 'android.content.Intent';
+import Activity from 'android.app.Activity';
+import Build from 'android.os.Build';
+import ParcelUuid from 'android.os.ParcelUuid';
+import BluetoothManager from 'android.bluetooth.BluetoothManager';
+import BluetoothAdapter from 'android.bluetooth.BluetoothAdapter';
+import BluetoothDevice from 'android.bluetooth.BluetoothDevice';
+import BluetoothGatt from 'android.bluetooth.BluetoothGatt';
+import BluetoothGattCallback from 'android.bluetooth.BluetoothGattCallback';
+import BluetoothGattCharacteristic from 'android.bluetooth.BluetoothGattCharacteristic';
+import BluetoothGattDescriptor from 'android.bluetooth.BluetoothGattDescriptor';
+import BluetoothProfile from 'android.bluetooth.BluetoothProfile';
+import BluetoothStatusCodes from 'android.bluetooth.BluetoothStatusCodes';
+import BluetoothLeScanner from 'android.bluetooth.le.BluetoothLeScanner';
+import ScanCallback from 'android.bluetooth.le.ScanCallback';
+import ScanResult from 'android.bluetooth.le.ScanResult';
+import ScanRecord from 'android.bluetooth.le.ScanRecord';
+import ScanSettings from 'android.bluetooth.le.ScanSettings';
+import ScanFilter from 'android.bluetooth.le.ScanFilter';
+import UUID from 'java.util.UUID';
+
+/* CCCD 描述符 UUID，用于开启/关闭通知 */
+const CCCD_UUID = '00002902-0000-1000-8000-00805f9b34fb';
+
+/* 扫描代次：每次 startScan/stopScan/closeAdapter 递增，用于让遗留的超时计时器失效，
+   避免重复扫描、手动停止或关闭适配器后旧计时器误触发 stopScan/onEnd */
+let scanGeneration : number = 0;
+
+/* ---------------- 工具函数 ---------------- */
+
+/**
+ * 归一化 UUID：短 UUID(如 "180d") 补全为 128 位标准格式
+ */
+function normalizeUuid(uuid : string) : string {
+	const u = uuid.toLowerCase();
+	if (u.length == 4) {
+		return '0000' + u + '-0000-1000-8000-00805f9b34fb';
+	}
+	if (u.length == 8) {
+		return u + '-0000-1000-8000-00805f9b34fb';
+	}
+	return u;
+}
+
+/**
+ * Kotlin ByteArray 转十六进制字符串（小写、无分隔符）
+ * 用于 read/observe 的值回传（uni-app 非 x 不能透传 ArrayBuffer，改用 hex 字符串）
+ */
+function bytesToHex(bytes : ByteArray) : string {
+	const len = bytes.size;
+	let hex = '';
+	for (let i = 0; i < len; i++) {
+		const v = bytes[i.toInt()].toInt() & 0xFF;
+		const s = v.toString(16);
+		if (s.length < 2) { hex += '0'; }
+		hex += s;
+	}
+	return hex;
+}
+
+/**
+ * 十六进制字符串转 Kotlin ByteArray（奇数长度自动前补 0）
+ */
+function hexToBytes(hex : string) : ByteArray {
+	const clean = hex.length % 2 == 0 ? hex : '0' + hex;
+	const len = Math.floor(clean.length / 2) as number;
+	const bytes = new ByteArray(len.toInt());
+	for (let i = 0; i < len; i++) {
+		const byteStr = clean.substring((i * 2).toInt(), (i * 2 + 2).toInt());
+		const v = parseInt(byteStr, 16);
+		bytes[i.toInt()] = v.toInt().toByte();
+	}
+	return bytes;
+}
+
+/**
+ * 从广播包中解析厂商自定义数据段(AD Type 0xFF)，返回十六进制字符串（小写、无分隔符）
+ * 返回内容含前 2 字节小端公司标识，与微信小程序 advertisData 语义一致；无厂商数据时返回 null
+ */
+function parseManufacturerData(record : ScanRecord | null) : string | null {
+	if (record == null) {
+		return null;
+	}
+	const bytes = record.getBytes();
+	if (bytes == null) {
+		return null;
+	}
+	const total = bytes.size;
+	let i = 0;
+	while (i < total) {
+		const len = bytes[i.toInt()].toInt() & 0xFF;
+		if (len == 0) {
+			break;
+		}
+		// 长度越界保护：AD 结构需覆盖到 i+len
+		if (i + len >= total) {
+			break;
+		}
+		const adType = bytes[(i + 1).toInt()].toInt() & 0xFF;
+		if (adType == 0xFF) {
+			// 数据段为 bytes[i+2 .. i+len]（长度 len-1）
+			let hex = '';
+			for (let j = i + 2; j <= i + len; j++) {
+				const v = bytes[j.toInt()].toInt() & 0xFF;
+				const s = v.toString(16);
+				if (s.length < 2) { hex += '0'; }
+				hex += s;
+			}
+			return hex;
+		}
+		i = i + len + 1;
+	}
+	return null;
+}
+
+/* 特征引用辅助构造函数 */
+export function characteristicOf(serviceUuid : Uuid, characteristicUuid : Uuid) : CharacteristicRef {
+	return { serviceUuid: serviceUuid, characteristicUuid: characteristicUuid };
+}
+
+/* 切主线程执行；Activity 不可用时直接执行，避免 GATT 回调中的 resolve/reject 被丢弃 */
+function runOnMain(action : () => void) {
+	const activity = UTSAndroid.getUniActivity();
+	if (activity != null) {
+		activity.runOnUiThread(action);
+	} else {
+		action();
+	}
+}
+
+/* ---------------- 适配器 ---------------- */
+
+function getAdapter() : BluetoothAdapter | null {
+	const ctx = UTSAndroid.getAppContext();
+	if (ctx == null) {
+		return null;
+	}
+	const manager = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager;
+	return manager.getAdapter();
+}
+
+/* 系统蓝牙开启请求码 */
+const REQUEST_ENABLE_BT : Int = 10001;
+
+/**
+ * 申请 BLE 所需运行时权限，结果通过 resolve 回传
+ */
+function requestBlePermission(resolve : (value : boolean) => void) {
+	// 根据系统版本组装需要申请的权限
+	let permissions : string[];
+	if (Build.VERSION.SDK_INT >= 31) {
+		permissions = ['android.permission.BLUETOOTH_SCAN', 'android.permission.BLUETOOTH_CONNECT'];
+	} else {
+		permissions = ['android.permission.ACCESS_FINE_LOCATION'];
+	}
+	const activity = UTSAndroid.getUniActivity();
+	if (activity == null) {
+		resolve(false);
+		return;
+	}
+	if (UTSAndroid.checkSystemPermissionGranted(activity, permissions)) {
+		resolve(true);
+		return;
+	}
+	// 未授权则弹系统权限对话框动态申请（Android 12+ 需 BLUETOOTH_SCAN/CONNECT，低版本需定位权限）。
+	// 权限已在 manifest.json 声明，故此处直接发起申请；异常时兜底返回失败，避免打成运行时红错。
+	try {
+		UTSAndroid.requestSystemPermission(activity, permissions, (_allRight : boolean, _grantedList : string[]) => {
+			resolve(_allRight);
+		}, (_doNotAskAgain : boolean, _grantedList : string[]) => {
+			resolve(false);
+		});
+	} catch (e) {
+		resolve(false);
+	}
+}
+
+/**
+ * 初始化：检测系统蓝牙，未开启则弹系统对话框请求用户开启，再申请权限
+ */
+export const openAdapter : OpenAdapter = function () : Promise<boolean> {
+	return new Promise<boolean>((resolve) => {
+		const adapter = getAdapter();
+		if (adapter == null) {
+			resolve(false);
+			return;
+		}
+		if (!adapter.isEnabled()) {
+			// 系统蓝牙未开启：弹出系统标准对话框请求用户开启
+			const activity = UTSAndroid.getUniActivity();
+			if (activity == null) {
+				resolve(false);
+				return;
+			}
+			let onResult : ((requestCode : Int, resultCode : Int, data : Intent | null) => void) | null = null;
+			onResult = (requestCode : Int, resultCode : Int) => {
+				if (requestCode == REQUEST_ENABLE_BT) {
+					UTSAndroid.offAppActivityResult(onResult!);
+					if (resultCode == Activity.RESULT_OK) {
+						// 用户已同意开启，继续申请权限
+						requestBlePermission(resolve);
+					} else {
+						resolve(false);
+					}
+				}
+			};
+			UTSAndroid.onAppActivityResult(onResult!);
+			try {
+				const intent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+				activity.startActivityForResult(intent, REQUEST_ENABLE_BT);
+			} catch (e) {
+				UTSAndroid.offAppActivityResult(onResult!);
+				resolve(false);
+			}
+			return;
+		}
+		requestBlePermission(resolve);
+	});
+}
+
+export const closeAdapter : CloseAdapter = function () {
+	// 使所有进行中的扫描计时器失效，避免关闭适配器后旧计时器仍触发 onEnd
+	scanGeneration = scanGeneration + 1;
+}
+
+/* ---------------- 扫描器 ---------------- */
+
+class AndroidScanner implements IScanner {
+	private scanner : BluetoothLeScanner | null = null;
+	private callback : ScanCallback | null = null;
+	private scanning : boolean = false;
+	private scanTimer : number = -1;
+
+	@UTSJS.keepAlive
+	startScan(options : BleScanOptions) {
+		// 扫描前先检查/申请蓝牙相关权限，授权通过后再真正开始扫描，避免直接调用原生扫描抛 SecurityException
+		requestBlePermission((granted : boolean) => {
+			if (!granted) {
+				options.onError?.(new BleFailImpl(9020002));
+				return;
+			}
+			this.doStartScan(options);
+		});
+	}
+
+	private doStartScan(options : BleScanOptions) {
+		// 取消上一次扫描遗留的计时器，并递增代次使其失效
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		scanGeneration = scanGeneration + 1;
+		const gen = scanGeneration;
+		const adapter = getAdapter();
+		if (adapter == null || !adapter.isEnabled()) {
+			options.onError?.(new BleFailImpl(9020001));
+			return;
+		}
+		this.scanner = adapter.getBluetoothLeScanner();
+		if (this.scanner == null) {
+			options.onError?.(new BleFailImpl(9020003));
+			return;
+		}
+
+		const namePrefix = options.namePrefix;
+		// 是否允许重复上报同一设备：Android 原生按广播包持续上报，false 时需自行按 deviceId 去重
+		let allowDup = false;
+		const adOpt = options.allowDuplicates;
+		if (adOpt != null) { allowDup = adOpt; }
+		const cb = new ScanCallbackImpl(options.onAdvertisement, namePrefix, allowDup, (err : BleFailImpl) => {
+			options.onError?.(err);
+		});
+		this.callback = cb;
+
+		// 构建服务过滤
+		const filters = new Array<ScanFilter>();
+		for (let i = 0; i < options.services.length; i++) {
+			const pu = ParcelUuid.fromString(normalizeUuid(options.services[i]));
+			const f = new ScanFilter.Builder().setServiceUuid(pu).build();
+			filters.push(f);
+		}
+		const settings = new ScanSettings.Builder()
+			.setScanMode(ScanSettings.SCAN_MODE_BALANCED)
+			.build();
+
+		this.scanning = true;
+		try {
+			if (filters.length > 0) {
+				this.scanner!.startScan(filters, settings, cb);
+			} else {
+				this.scanner!.startScan(cb);
+			}
+		} catch (e) {
+			this.scanning = false;
+			options.onError?.(new BleFailImpl(9020002, '' + e));
+		}
+
+		// 扫描超时自动结束，默认 15 秒
+		if (this.scanning) {
+			let to = 15000;
+			const t = options.timeout;
+			if (t != null) { to = t; }
+			if (to > 0) {
+				this.scanTimer = setTimeout(() => {
+					// 仅当本次扫描代次仍有效时才自动结束，避免误停后续扫描
+					if (gen == scanGeneration) {
+						this.stopScan();
+						options.onEnd?.();
+					}
+				}, to);
+			}
+		}
+	}
+
+	stopScan() {
+		// 递增代次，使任何遗留的计时器回调失效
+		scanGeneration = scanGeneration + 1;
+		if (this.scanTimer != -1) {
+			clearTimeout(this.scanTimer);
+			this.scanTimer = -1;
+		}
+		if (this.scanning && this.scanner != null && this.callback != null) {
+			this.scanner!.stopScan(this.callback!);
+		}
+		this.scanning = false;
+		this.callback = null;
+	}
+}
+
+/* ScanCallback 实现 */
+class ScanCallbackImpl extends ScanCallback {
+	private onAdv : (adv : Advertisement) => void;
+	private namePrefix : string | null;
+	private allowDuplicates : boolean;
+	private onErr : (err : BleFailImpl) => void;
+	// 去重集合：allowDuplicates 为 false 时记录已上报过的 deviceId
+	private seen : Set<string> = new Set<string>();
+
+	constructor(onAdv : (adv : Advertisement) => void, namePrefix : string | null, allowDuplicates : boolean, onErr : (err : BleFailImpl) => void) {
+		super();
+		this.onAdv = onAdv;
+		this.namePrefix = namePrefix;
+		this.allowDuplicates = allowDuplicates;
+		this.onErr = onErr;
+	}
+
+	override onScanResult(_callbackType : Int, result : ScanResult) {
+		const device = result.getDevice();
+		const record = result.getScanRecord();
+		const name = record?.getDeviceName() ?? null;
+
+		// 名称前缀过滤
+		if (this.namePrefix != null) {
+			if (name == null || !name.startsWith(this.namePrefix!)) {
+				return;
+			}
+		}
+
+		// 同一设备去重（不允许重复上报时）
+		const deviceId = device.getAddress();
+		if (!this.allowDuplicates) {
+			if (this.seen.has(deviceId)) {
+				return;
+			}
+			this.seen.add(deviceId);
+		}
+
+		// 服务 UUID 列表
+		const serviceUuids = new Array<string>();
+		const parcelUuids = record?.getServiceUuids();
+		if (parcelUuids != null) {
+			for (let i = 0; i < parcelUuids.size; i++) {
+				serviceUuids.push(parcelUuids[i.toInt()].toString());
+			}
+		}
+
+		const adv : Advertisement = {
+			deviceId: deviceId,
+			name: name,
+			rssi: result.getRssi(),
+			serviceUuids: serviceUuids,
+			advertisData: parseManufacturerData(record)
+		};
+		runOnMain(() => {
+			this.onAdv(adv);
+		});
+	}
+
+	override onScanFailed(errorCode : Int) {
+		runOnMain(() => {
+			this.onErr(new BleFailImpl(9020003, 'scan failed code=' + errorCode));
+		});
+	}
+}
+
+/* ---------------- 外围设备 ---------------- */
+
+type VoidResolver = {
+	resolve : (v : boolean) => void,
+	reject : (e : any) => void
+}
+type BufferResolver = {
+	resolve : (v : string) => void,
+	reject : (e : any) => void
+}
+type NumberResolver = {
+	resolve : (v : number) => void,
+	reject : (e : any) => void
+}
+
+class AndroidPeripheral implements IPeripheral {
+	readonly deviceId : string;
+
+	private gatt : BluetoothGatt | null = null;
+	private state : BleConnectionState = BLE_STATE_DISCONNECTED;
+	private stateCb : ((state : BleConnectionState) => void) | null = null;
+
+	// 待完成的异步操作
+	private pendingConnect : VoidResolver | null = null;
+	private pendingDiscover : VoidResolver | null = null;
+	private pendingRssi : NumberResolver | null = null;
+	private pendingMtu : NumberResolver | null = null;
+	private pendingRead : Map<string, BufferResolver> = new Map<string, BufferResolver>();
+	private pendingWrite : Map<string, VoidResolver> = new Map<string, VoidResolver>();
+	private pendingDescWrite : Map<string, VoidResolver> = new Map<string, VoidResolver>();
+	// 通知订阅回调（值以 hex 字符串回传）
+	private observers : Map<string, (v : string) => void> = new Map<string, (v : string) => void>();
+	// 发现特征的逐条回调（每发现一个特征回调一次，传基础类型规避跨边界对象字段丢失，与 iOS 保持一致）
+	private discoverOnChar : ((serviceUuid : string, uuid : string, properties : number) => void) | null = null;
+	// 连接超时计时器
+	private connectTimer : number = -1;
+
+	constructor(deviceId : string) {
+		this.deviceId = deviceId;
+	}
+
+	private setState(s : BleConnectionState) {
+		this.state = s;
+		const cb = this.stateCb;
+		if (cb != null) {
+			runOnMain(() => {
+				cb(s);
+			});
+		}
+	}
+
+	getState() : BleConnectionState {
+		return this.state;
+	}
+
+	onStateChange(cb : (state : BleConnectionState) => void) {
+		this.stateCb = cb;
+	}
+
+	async connect() : Promise<void> {
+		// 连接前先检查/申请蓝牙相关权限（Android 12+ 需 BLUETOOTH_CONNECT），未授权直接拒绝
+		const granted = await new Promise<boolean>((resolve) => {
+			requestBlePermission(resolve);
+		});
+		if (!granted) {
+			throw new BleFailImpl(9020002);
+		}
+		await new Promise<boolean>((resolve, reject) => {
+			const adapter = getAdapter();
+			if (adapter == null || !adapter.isEnabled()) {
+				reject(new BleFailImpl(9020001));
+				return;
+			}
+			let device : BluetoothDevice;
+			try {
+				device = adapter.getRemoteDevice(this.deviceId);
+			} catch (e) {
+				reject(new BleFailImpl(9020010, 'invalid deviceId'));
+				return;
+			}
+			this.pendingConnect = { resolve: resolve, reject: reject };
+			this.setState(BLE_STATE_CONNECTING);
+			const ctx = UTSAndroid.getAppContext()!;
+			this.gatt = device.connectGatt(ctx, false, new GattCallbackImpl(this));
+			// 连接超时保护：默认 30 秒未回调则判定连接失败并释放资源
+			this.connectTimer = setTimeout(() => {
+				const pc = this.pendingConnect;
+				if (pc != null) {
+					this.pendingConnect = null;
+					const g = this.gatt;
+					if (g != null) {
+						g.disconnect();
+						g.close();
+						this.gatt = null;
+					}
+					this.setState(BLE_STATE_DISCONNECTED);
+					pc.reject(new BleFailImpl(9020004, 'connect timeout'));
+				}
+			}, 30000);
+		});
+	}
+
+	private clearConnectTimer() {
+		if (this.connectTimer != -1) {
+			clearTimeout(this.connectTimer);
+			this.connectTimer = -1;
+		}
+	}
+
+	async disconnect() : Promise<void> {
+		const g = this.gatt;
+		if (g == null) {
+			this.cleanup();
+			this.setState(BLE_STATE_DISCONNECTED);
+			return;
+		}
+		this.setState(BLE_STATE_DISCONNECTING);
+		g.disconnect();
+		g.close();
+		this.gatt = null;
+		this.cleanup();
+		this.setState(BLE_STATE_DISCONNECTED);
+	}
+
+	// 断开时拒绝所有挂起操作并清理，避免 Promise 永不结算与内存泄漏
+	private cleanup() {
+		this.clearConnectTimer();
+		const pc = this.pendingConnect;
+		this.pendingConnect = null;
+		if (pc != null) { pc.reject(new BleFailImpl(9020005)); }
+		this.rejectAllPending();
+	}
+
+	@UTSJS.keepAlive
+	async discoverServices(onCharacteristic : (serviceUuid : string, uuid : string, properties : number) => void) : Promise<void> {
+		await new Promise<boolean>((resolve, reject) => {
+			const g = this.gatt;
+			if (g == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			this.discoverOnChar = onCharacteristic;
+			this.pendingDiscover = { resolve: resolve, reject: reject };
+			g.discoverServices();
+		});
+	}
+
+	private findCharacteristic(target : CharacteristicRef) : BluetoothGattCharacteristic | null {
+		const g = this.gatt;
+		if (g == null) {
+			return null;
+		}
+		// 校验并解析 UUID，非法/空串直接返回 null，避免 UUID.fromString 抛 IllegalArgumentException 导致崩溃
+		let serviceId : UUID;
+		let charId : UUID;
+		try {
+			serviceId = UUID.fromString(normalizeUuid(target.serviceUuid));
+			charId = UUID.fromString(normalizeUuid(target.characteristicUuid));
+		} catch (e) {
+			return null;
+		}
+		const service = g.getService(serviceId);
+		if (service == null) {
+			return null;
+		}
+		return service.getCharacteristic(charId);
+	}
+
+	read(target : CharacteristicRef) : Promise<string> {
+		return new Promise<string>((resolve, reject) => {
+			const g = this.gatt;
+			if (g == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = this.findCharacteristic(target);
+			if (ch == null) {
+				reject(new BleFailImpl(9020006));
+				return;
+			}
+			const key = normalizeUuid(target.characteristicUuid);
+			this.pendingRead.set(key, { resolve: resolve, reject: reject });
+			if (!g.readCharacteristic(ch)) {
+				this.pendingRead.delete(key);
+				reject(new BleFailImpl(9020007, 'readCharacteristic returned false'));
+			}
+		});
+	}
+
+	// 兼容 Android 13(API 33) 的特征写入：API 33+ 使用新签名（返回状态码），旧系统回退到已废弃的 setValue+writeCharacteristic
+	@Suppress("DEPRECATION")
+	private writeCharCompat(g : BluetoothGatt, ch : BluetoothGattCharacteristic, value : ByteArray, writeType : Int) : boolean {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			return g.writeCharacteristic(ch, value, writeType) == BluetoothStatusCodes.SUCCESS;
+		}
+		ch.setWriteType(writeType);
+		ch.setValue(value);
+		return g.writeCharacteristic(ch);
+	}
+
+	// 兼容 Android 13(API 33) 的描述符写入：同上
+	@Suppress("DEPRECATION")
+	private writeDescCompat(g : BluetoothGatt, descriptor : BluetoothGattDescriptor, value : ByteArray) : boolean {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			return g.writeDescriptor(descriptor, value) == BluetoothStatusCodes.SUCCESS;
+		}
+		descriptor.setValue(value);
+		return g.writeDescriptor(descriptor);
+	}
+
+	async write(target : CharacteristicRef, value : string, wtype : number) : Promise<void> {
+		await new Promise<boolean>((resolve, reject) => {
+			const g = this.gatt;
+			if (g == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = this.findCharacteristic(target);
+			if (ch == null) {
+				reject(new BleFailImpl(9020006));
+				return;
+			}
+			const writeType = wtype == 1 ? BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE : BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT;
+			const key = normalizeUuid(target.characteristicUuid);
+			this.pendingWrite.set(key, { resolve: resolve, reject: reject });
+			if (!this.writeCharCompat(g, ch, hexToBytes(value), writeType)) {
+				this.pendingWrite.delete(key);
+				reject(new BleFailImpl(9020008, 'writeCharacteristic failed'));
+			}
+		});
+	}
+
+	@UTSJS.keepAlive
+	observe(target : CharacteristicRef, options : BleObserveOptions) : void {
+		const g = this.gatt;
+		if (g == null) {
+			options.onError?.(new BleFailImpl(9020005));
+			return;
+		}
+		const ch = this.findCharacteristic(target);
+		if (ch == null) {
+			options.onError?.(new BleFailImpl(9020006));
+			return;
+		}
+		if (!g.setCharacteristicNotification(ch, true)) {
+			options.onError?.(new BleFailImpl(9020009, 'setCharacteristicNotification failed'));
+			return;
+		}
+		const key = normalizeUuid(target.characteristicUuid);
+		// 保存持久通知回调（本方法 void 返回 + keepAlive，回调不会在调用后被回收）
+		this.observers.set(key, options.onValue);
+		// 写 CCCD 描述符开启通知/指示
+		const descriptor = ch.getDescriptor(UUID.fromString(CCCD_UUID));
+		if (descriptor == null) {
+			// 无 CCCD 时仅本地开启即可
+			options.onSuccess?.();
+			return;
+		}
+		const isIndicate = (ch.getProperties() & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0;
+		const enableValue = isIndicate ? BluetoothGattDescriptor.ENABLE_INDICATION_VALUE : BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+		// CCCD 写入结果经 _onDescriptorWrite 回传：成功 resolve → onSuccess，失败 reject → onError
+		this.pendingDescWrite.set(key, {
+			resolve: (_v : boolean) => { options.onSuccess?.(); },
+			reject: (e : any) => { options.onError?.(e as BleFailImpl); }
+		});
+		if (!this.writeDescCompat(g, descriptor, enableValue)) {
+			this.pendingDescWrite.delete(key);
+			options.onError?.(new BleFailImpl(9020009, 'writeDescriptor failed'));
+		}
+	}
+
+	async stopObserve(target : CharacteristicRef) : Promise<void> {
+		await new Promise<boolean>((resolve, reject) => {
+			const g = this.gatt;
+			if (g == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			const ch = this.findCharacteristic(target);
+			if (ch == null) {
+				reject(new BleFailImpl(9020006));
+				return;
+			}
+			const key = normalizeUuid(target.characteristicUuid);
+			this.observers.delete(key);
+			g.setCharacteristicNotification(ch, false);
+			const descriptor = ch.getDescriptor(UUID.fromString(CCCD_UUID));
+			if (descriptor == null) {
+				resolve(true);
+				return;
+			}
+			this.pendingDescWrite.set(key, { resolve: resolve, reject: reject });
+			if (!this.writeDescCompat(g, descriptor, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE)) {
+				this.pendingDescWrite.delete(key);
+				resolve(true);
+			}
+		});
+	}
+
+	readRssi() : Promise<number> {
+		return new Promise<number>((resolve, reject) => {
+			const g = this.gatt;
+			if (g == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			this.pendingRssi = { resolve: resolve, reject: reject };
+			if (!g.readRemoteRssi()) {
+				this.pendingRssi = null;
+				reject(new BleFailImpl(9020007, 'readRemoteRssi failed'));
+			}
+		});
+	}
+
+	requestMtu(mtu : number) : Promise<number> {
+		return new Promise<number>((resolve, reject) => {
+			const g = this.gatt;
+			if (g == null) {
+				reject(new BleFailImpl(9020005));
+				return;
+			}
+			this.pendingMtu = { resolve: resolve, reject: reject };
+			if (!g.requestMtu(mtu.toInt())) {
+				this.pendingMtu = null;
+				reject(new BleFailImpl(9020007, 'requestMtu failed'));
+			}
+		});
+	}
+
+	/* ------ 供 GattCallbackImpl 回调的内部方法（已在主线程调用外自行切换） ------ */
+
+	_onConnectionStateChange(status : Int, newState : Int) {
+		// 回调运行在 binder 线程，整体切回主线程串行执行，避免与 disconnect/cleanup 竞态
+		runOnMain(() => {
+			this.clearConnectTimer();
+			if (newState == BluetoothProfile.STATE_CONNECTED) {
+				this.setState(BLE_STATE_CONNECTED);
+				const p = this.pendingConnect;
+				this.pendingConnect = null;
+				if (p != null) {
+					p.resolve(true);
+				}
+			} else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+				const wasConnecting = this.pendingConnect;
+				this.setState(BLE_STATE_DISCONNECTED);
+				if (wasConnecting != null) {
+					this.pendingConnect = null;
+					wasConnecting.reject(new BleFailImpl(9020004, 'status=' + status));
+				}
+				// 断开时拒绝所有挂起操作
+				this.rejectAllPending();
+				const g = this.gatt;
+				if (g != null) {
+					g.close();
+					this.gatt = null;
+				}
+			}
+		});
+	}
+
+	// 拒绝除 connect 外的所有挂起操作（调用方已处于主线程，无需再切线程）
+	private rejectAllPending() {
+		const d = this.pendingDiscover;
+		this.pendingDiscover = null;
+		this.discoverOnChar = null;
+		if (d != null) { d.reject(new BleFailImpl(9020005)); }
+		const pr = this.pendingRssi;
+		this.pendingRssi = null;
+		if (pr != null) { pr.reject(new BleFailImpl(9020005)); }
+		const pm = this.pendingMtu;
+		this.pendingMtu = null;
+		if (pm != null) { pm.reject(new BleFailImpl(9020005)); }
+		this.pendingRead.forEach((r : BufferResolver) => {
+			r.reject(new BleFailImpl(9020005));
+		});
+		this.pendingRead.clear();
+		this.pendingWrite.forEach((r : VoidResolver) => {
+			r.reject(new BleFailImpl(9020005));
+		});
+		this.pendingWrite.clear();
+		this.pendingDescWrite.forEach((r : VoidResolver) => {
+			r.reject(new BleFailImpl(9020005));
+		});
+		this.pendingDescWrite.clear();
+		this.observers.clear();
+	}
+
+	_onServicesDiscovered(status : Int) {
+		runOnMain(() => {
+			const p = this.pendingDiscover;
+			this.pendingDiscover = null;
+			const cb = this.discoverOnChar;
+			this.discoverOnChar = null;
+			if (p == null) {
+				return;
+			}
+			const g = this.gatt;
+			if (status != BluetoothGatt.GATT_SUCCESS || g == null) {
+				p.reject(new BleFailImpl(9020006, 'discover status=' + status));
+				return;
+			}
+			// 逐条回调返回特征（每个特征带 serviceUuid），传基础类型，与 iOS 保持一致
+			const list = g.getServices();
+			for (let i = 0; i < list.size; i++) {
+				const s = list[i.toInt()];
+				const cl = s.getCharacteristics();
+				for (let j = 0; j < cl.size; j++) {
+					const c = cl[j.toInt()];
+					if (cb != null) {
+						cb(s.getUuid().toString(), c.getUuid().toString(), c.getProperties());
+					}
+				}
+			}
+			p.resolve(true);
+		});
+	}
+
+	_onCharacteristicRead(uuid : string, value : ByteArray, status : Int) {
+		// 先在回调线程同步转换原生字节为 hex，避免延迟到主线程后原生缓冲区被复用
+		const hex = bytesToHex(value);
+		runOnMain(() => {
+			const key = normalizeUuid(uuid);
+			const p = this.pendingRead.get(key);
+			if (p == null) {
+				return;
+			}
+			this.pendingRead.delete(key);
+			if (status != BluetoothGatt.GATT_SUCCESS) {
+				p.reject(new BleFailImpl(9020007, 'status=' + status));
+				return;
+			}
+			p.resolve(hex);
+		});
+	}
+
+	_onCharacteristicWrite(uuid : string, status : Int) {
+		runOnMain(() => {
+			const key = normalizeUuid(uuid);
+			const p = this.pendingWrite.get(key);
+			if (p == null) {
+				return;
+			}
+			this.pendingWrite.delete(key);
+			if (status != BluetoothGatt.GATT_SUCCESS) {
+				p.reject(new BleFailImpl(9020008, 'status=' + status));
+				return;
+			}
+			p.resolve(true);
+		});
+	}
+
+	_onDescriptorWrite(charUuid : string, status : Int) {
+		runOnMain(() => {
+			const key = normalizeUuid(charUuid);
+			const p = this.pendingDescWrite.get(key);
+			if (p == null) {
+				return;
+			}
+			this.pendingDescWrite.delete(key);
+			if (status != BluetoothGatt.GATT_SUCCESS) {
+				p.reject(new BleFailImpl(9020009, 'status=' + status));
+				return;
+			}
+			p.resolve(true);
+		});
+	}
+
+	_onCharacteristicChanged(uuid : string, value : ByteArray) {
+		const hex = bytesToHex(value);
+		runOnMain(() => {
+			const key = normalizeUuid(uuid);
+			const cb = this.observers.get(key);
+			if (cb == null) {
+				return;
+			}
+			cb(hex);
+		});
+	}
+
+	_onReadRemoteRssi(rssi : Int, status : Int) {
+		runOnMain(() => {
+			const p = this.pendingRssi;
+			this.pendingRssi = null;
+			if (p == null) {
+				return;
+			}
+			if (status != BluetoothGatt.GATT_SUCCESS) {
+				p.reject(new BleFailImpl(9020007, 'rssi status=' + status));
+				return;
+			}
+			p.resolve(rssi.toDouble());
+		});
+	}
+
+	_onMtuChanged(mtu : Int, status : Int) {
+		runOnMain(() => {
+			const p = this.pendingMtu;
+			this.pendingMtu = null;
+			if (p == null) {
+				return;
+			}
+			if (status != BluetoothGatt.GATT_SUCCESS) {
+				p.reject(new BleFailImpl(9020007, 'mtu status=' + status));
+				return;
+			}
+			p.resolve(mtu.toDouble());
+		});
+	}
+}
+
+/* BluetoothGattCallback 实现，转发到 AndroidPeripheral */
+class GattCallbackImpl extends BluetoothGattCallback {
+	private owner : AndroidPeripheral;
+
+	constructor(owner : AndroidPeripheral) {
+		super();
+		this.owner = owner;
+	}
+
+	override onConnectionStateChange(_gatt : BluetoothGatt, status : Int, newState : Int) {
+		this.owner._onConnectionStateChange(status, newState);
+	}
+
+	override onServicesDiscovered(_gatt : BluetoothGatt, status : Int) {
+		this.owner._onServicesDiscovered(status);
+	}
+
+	// 旧版回调在 API 33 已废弃，但需兼容低版本设备，故抑制废弃警告
+	// DEPRECATION 抑制对 getValue() 等废弃 API 的调用警告，OVERRIDE_DEPRECATION 抑制重写废弃成员的警告
+	@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+	override onCharacteristicRead(_gatt : BluetoothGatt, characteristic : BluetoothGattCharacteristic, status : Int) {
+		const v = characteristic.getValue();
+		this.owner._onCharacteristicRead(characteristic.getUuid().toString(), v ?? new ByteArray(0), status);
+	}
+
+	override onCharacteristicWrite(_gatt : BluetoothGatt, characteristic : BluetoothGattCharacteristic, status : Int) {
+		this.owner._onCharacteristicWrite(characteristic.getUuid().toString(), status);
+	}
+
+	override onDescriptorWrite(_gatt : BluetoothGatt, descriptor : BluetoothGattDescriptor, status : Int) {
+		this.owner._onDescriptorWrite(descriptor.getCharacteristic().getUuid().toString(), status);
+	}
+
+	// 旧版回调在 API 33 已废弃，但需兼容低版本设备，故抑制废弃警告
+	// DEPRECATION 抑制对 getValue() 等废弃 API 的调用警告，OVERRIDE_DEPRECATION 抑制重写废弃成员的警告
+	@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+	override onCharacteristicChanged(_gatt : BluetoothGatt, characteristic : BluetoothGattCharacteristic) {
+		const v = characteristic.getValue();
+		this.owner._onCharacteristicChanged(characteristic.getUuid().toString(), v ?? new ByteArray(0));
+	}
+
+	override onReadRemoteRssi(_gatt : BluetoothGatt, rssi : Int, status : Int) {
+		this.owner._onReadRemoteRssi(rssi, status);
+	}
+
+	override onMtuChanged(_gatt : BluetoothGatt, mtu : Int, status : Int) {
+		this.owner._onMtuChanged(mtu, status);
+	}
+}
+
+/* ---------------- 工厂导出 ---------------- */
+
+export const createScanner : CreateScanner = function () : IScanner {
+	return new AndroidScanner();
+}
+
+export const createPeripheral : CreatePeripheral = function (deviceId : string) : IPeripheral {
+	return new AndroidPeripheral(deviceId);
+}

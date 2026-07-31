@@ -1,0 +1,165 @@
+/**
+ * interface.uts
+ * bin-bluetooth BLE 插件跨平台接口定义（三端共享）
+ *
+ * 设计参考 kable(https://github.com/JuulLabs/kable)：
+ * - Scanner 负责扫描并产生 Advertisement
+ * - Peripheral 提供 connect/disconnect/read/write/observe/state 能力
+ * UTS 无 Kotlin Flow/协程，使用 Promise + 回调 做等价映射。
+ */
+
+/* UUID 字符串类型别名，形如 "0000180d-0000-1000-8000-00805f9b34fb" 或短 UUID "180d" */
+export type Uuid = string
+
+/**
+ * 写入类型
+ * withResponse: 带响应写（等待外设 ACK）
+ * withoutResponse: 无响应写（吞吐更高，无确认）
+ */
+export enum BleWriteType {
+  withResponse = 0,
+  withoutResponse = 1
+}
+
+/**
+ * 连接状态，对应 kable 的 State
+ * 0=disconnected 1=connecting 2=connected 3=disconnecting
+ * 注意：iOS 下 enum 无法作为 public 方法出入参，故用 number 别名 + 常量替代
+ */
+export type BleConnectionState = number
+export const BLE_STATE_DISCONNECTED : BleConnectionState = 0
+export const BLE_STATE_CONNECTING : BleConnectionState = 1
+export const BLE_STATE_CONNECTED : BleConnectionState = 2
+export const BLE_STATE_DISCONNECTING : BleConnectionState = 3
+
+/**
+ * 错误码，以 902 开头，遵循 uni 错误码规范
+ */
+export type BleErrorCode = 9020001 | 9020002 | 9020003 | 9020004 | 9020005 | 9020006 | 9020007 | 9020008 | 9020009 | 9020010
+
+/**
+ * BLE 错误回调参数
+ */
+export interface BleFail extends IUniError {
+  errCode : BleErrorCode
+}
+
+/**
+ * 扫描到的广播包
+ * deviceId: Android 为 MAC，iOS 为 UUID，HarmonyOS 为 deviceId
+ */
+export type Advertisement = {
+  deviceId : string
+  name : string | null
+  rssi : number
+  serviceUuids : Uuid[]
+  /* 厂商自定义数据段（Manufacturer Specific Data）的十六进制字符串（小写、无分隔符）。
+     四端语义统一：均取广播数据中 AD Type 0xFF 的厂商数据段（前 2 字节为小端公司标识，其后为厂商自定义内容），
+     与微信小程序 advertisData 一致；广播未携带厂商数据时为 null。
+     采用 hex 字符串而非 ArrayBuffer，是因为 ArrayBuffer 作为对象字段经 UTS↔原生回调传递时会丢失
+     （与 discoverServices 说明同理，仅基础类型可靠透传）；业务可自行将 hex 转回字节数组解析。 */
+  advertisData : string | null
+}
+
+/**
+ * 特征引用（定位一个特征所需的服务 UUID + 特征 UUID）
+ */
+export type CharacteristicRef = {
+  serviceUuid : Uuid
+  characteristicUuid : Uuid
+}
+
+/**
+ * 订阅参数
+ * 通知回调需在订阅成功后持续触发，故采用 options 回调对象 + void 返回（与 startScan 一致）。
+ * 原因：经典 uni-app(非 x) 中，返回 Promise 的原生方法，其回调参数会在 Promise settle 后被自动回收，
+ * @UTSJS.keepAlive 无法在返回 Promise 的方法上生效，导致“订阅成功”后收不到后续通知；
+ * 改为 void 返回 + keepAlive 后回调可持续触发（与可持续回调的 startScan 范式相同）。
+ */
+export type BleObserveOptions = {
+  /* 收到通知/指示时回调，值为十六进制字符串（小写、无分隔符），原因同 read */
+  onValue : (value : string) => void
+  /* 订阅（开启通知/写 CCCD）成功回调 */
+  onSuccess ?: (() => void) | null
+  /* 订阅失败回调 */
+  onError ?: ((err : BleFail) => void) | null
+}
+
+/**
+ * 扫描参数
+ * services: 服务 UUID 过滤，空数组表示不过滤
+ * namePrefix: 设备名前缀过滤，null 表示不过滤
+ */
+export type BleScanOptions = {
+  services : Uuid[]
+  namePrefix : string | null
+  onAdvertisement : (adv : Advertisement) => void
+  onError : ((err : BleFail) => void) | null
+  /* 扫描超时时间，单位毫秒，不传默认 15000（15 秒）自动结束扫描；传入 0 或负数表示不自动结束 */
+  timeout ?: number | null
+  /* 扫描因超时自动结束时的回调 */
+  onEnd ?: (() => void) | null
+  /* 是否允许重复上报同一设备。
+     true：同一设备的每个广播包都会触发一次 onAdvertisement（可持续获取最新 rssi / 广播数据）；
+     false 或不传（默认）：同一设备在一次扫描过程中仅上报一次 */
+  allowDuplicates ?: boolean | null
+}
+
+/**
+ * 扫描器接口
+ */
+export interface IScanner {
+  startScan(options : BleScanOptions) : void
+  stopScan() : void
+}
+
+/**
+ * 外围设备接口
+ */
+export interface IPeripheral {
+  /* 设备唯一标识（Android:MAC / iOS:UUID / Harmony:deviceId） */
+  readonly deviceId : string
+  /* 建立连接 */
+  connect() : Promise<void>
+  /* 断开连接并释放资源 */
+  disconnect() : Promise<void>
+  /* 当前连接状态 */
+  getState() : BleConnectionState
+  /* 监听连接状态变化 */
+  onStateChange(cb : (state : BleConnectionState) => void) : void
+  /* 发现服务与特征。每发现一个特征回调一次 onCharacteristic(serviceUuid, uuid, properties)，
+     全部发现完成后 Promise resolve()。
+     采用“回调逐条 + 基础类型参数”而非“Promise 返回对象数组”，是因为 iOS(Swift) 端自定义对象/
+     UTSJSONObject 放进数组经 Promise 返回时字段值会丢失(数组长度保留但字段全 undefined)，
+     而基础类型经回调可靠透传（与扫描的 onAdvertisement 同理）。 */
+  discoverServices(onCharacteristic : (serviceUuid : string, uuid : string, properties : number) => void) : Promise<void>
+  /* 读取特征值，以十六进制字符串（小写、无分隔符）返回。
+     采用 hex 字符串而非 ArrayBuffer，是因为 uni-app(非 x) 的 UTS↔JS 桥接无法透传 ArrayBuffer
+     作为原生方法的返回值/入参/回调参数（会被 fastjson 尝试 JSON 解析而崩溃），仅基础类型可靠透传。 */
+  read(target : CharacteristicRef) : Promise<string>
+  /* 写入特征值。value 为十六进制字符串（小写/大写、无分隔符，如 "01ff"）。
+     wtype: 0=带响应(withResponse)，1=无响应(withoutResponse)。
+     注意：
+     - 枚举作为入参会被 UTS↔JS 桥接序列化为 Integer 并尝试 JSON.parseObject，导致
+       "Integer cannot be cast to JSONObject" 崩溃，故 wtype 统一用 number 基础类型；
+     - value 用 hex 字符串而非 ArrayBuffer，原因同 read（ArrayBuffer 无法经桥接透传）。 */
+  write(target : CharacteristicRef, value : string, wtype : number) : Promise<void>
+  /* 订阅特征通知/指示。通知内容以十六进制字符串（小写、无分隔符）持续回传（原因同 read）。
+     采用 options 回调对象 + void 返回并 keepAlive，而非 Promise，原因见 BleObserveOptions。 */
+  observe(target : CharacteristicRef, options : BleObserveOptions) : void
+  /* 取消订阅 */
+  stopObserve(target : CharacteristicRef) : Promise<void>
+  /* 读取信号强度 */
+  readRssi() : Promise<number>
+  /* 请求 MTU（iOS 无需协商，直接返回当前可写长度） */
+  requestMtu(mtu : number) : Promise<number>
+}
+
+/* 初始化蓝牙适配器并申请权限，返回是否成功 */
+export type OpenAdapter = () => Promise<boolean>
+/* 创建扫描器 */
+export type CreateScanner = () => IScanner
+/* 根据 deviceId 创建外围设备对象 */
+export type CreatePeripheral = (deviceId : string) => IPeripheral
+/* 关闭适配器，释放全局资源 */
+export type CloseAdapter = () => void

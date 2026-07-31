@@ -1,0 +1,136 @@
+{
+	"id": "bin-bluetooth",
+	"displayName": "BLE低功耗蓝牙插件支持Android、IOS、鸿蒙、微信小程序，支持扫描 连接 读写 订阅通知",
+	"version": "1.5.0",
+	"description": "跨平台 BLE 低功耗蓝牙插件， 支持 Android / iOS / HarmonyOS(Next) / 微信小程序 / 支付宝小程序，提供扫描、连接、服务发现、读写、订阅通知等能力。",
+	"keywords": [
+        "bin-bluetooth",
+        "bluetooth",
+        "ble"
+    ],
+	"repository": "https://github.com/binbinbox/bluetooth-uts.git",
+	"engines": {
+		"HBuilderX": "^3.6.8",
+		"uni-app": "^5.07",
+		"uni-app-x": "^5.21"
+	},
+	"dcloudext": {
+		"type": "uts",
+		"sale": {
+			"regular": {
+				"price": "0.00"
+			},
+			"sourcecode": {
+				"price": "0.00"
+			}
+		},
+		"contact": {
+			"qq": "514693519"
+		},
+		"declaration": {
+			"ads": "无",
+			"data": "插件不采集任何数据",
+			"permissions": "Android: BLUETOOTH_SCAN/BLUETOOTH_CONNECT(API31+)、ACCESS_FINE_LOCATION(API23-30); iOS: NSBluetoothAlwaysUsageDescription; HarmonyOS: ohos.permission.ACCESS_BLUETOOTH; 微信小程序: 蓝牙权限(scope.bluetooth，运行时授权，无需 manifest 配置)"
+		},
+		"npmurl": "",
+		"darkmode": "x",
+		"i18n": "x",
+		"widescreen": "x"
+	},
+	"uni_modules": {
+		"dependencies": [],
+		"encrypt": [],
+		"platforms": {
+			"cloud": {
+				"tcb": "x",
+				"aliyun": "x",
+				"alipay": "x"
+			},
+			"client": {
+				"uni-app": {
+					"vue": {
+						"vue2": "-",
+						"vue3": {
+							"extVersion": "1.5.0",
+							"minVersion": ""
+						}
+					},
+					"web": {
+						"safari": "x",
+						"chrome": "x"
+					},
+					"app": {
+						"vue": {
+							"extVersion": "1.5.0",
+							"minVersion": ""
+						},
+						"nvue": {
+							"extVersion": "1.5.0",
+							"minVersion": ""
+						},
+						"android": {
+							"extVersion": "1.5.0",
+							"minVersion": "21"
+						},
+						"ios": {
+							"extVersion": "1.5.0",
+							"minVersion": "12"
+						},
+						"harmony": {
+							"extVersion": "1.5.0",
+							"minVersion": ""
+						}
+					},
+					"mp": {
+						"weixin": {
+							"extVersion": "1.5.0",
+							"minVersion": ""
+						},
+						"alipay": {
+							"extVersion": "1.5.0",
+							"minVersion": ""
+						},
+						"toutiao": "x",
+						"baidu": "x",
+						"kuaishou": "x",
+						"jd": "x",
+						"harmony": "x",
+						"qq": "x",
+						"lark": "x",
+						"xhs": "x"
+					},
+					"quickapp": {
+						"huawei": "x",
+						"union": "x"
+					}
+				},
+				"uni-app-x": {
+					"web": {
+						"safari": "x",
+						"chrome": "x"
+					},
+					"app": {
+						"android": {
+							"extVersion": "1.4.0",
+							"minVersion": "21"
+						},
+						"ios": {
+							"extVersion": "1.4.0",
+							"minVersion": "12"
+						},
+						"harmony": {
+							"extVersion": "1.4.0",
+							"minVersion": ""
+						}
+					},
+					"mp": {
+						"weixin": {
+							"extVersion": "1.4.0",
+							"minVersion": ""
+						}
+					}
+				}
+			}
+		}
+	}
+}
