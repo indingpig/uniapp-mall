@@ -1,4 +1,5 @@
 import { defineUniPages } from '@uni-helper/vite-plugin-uni-pages';
+import { NAVIGATION_STYLE } from './src/config/navigation';
 
 export default defineUniPages({
   pages: [],
@@ -10,7 +11,7 @@ export default defineUniPages({
     navigationBarBackgroundColor: '#000000',
     navigationBarTextStyle: '@navTxtStyle',
     navigationBarTitleText: '婴儿监护器',
-    navigationStyle: 'custom',
+    navigationStyle: NAVIGATION_STYLE,
   },
   tabBar: {
     color: '#7a7e83',
