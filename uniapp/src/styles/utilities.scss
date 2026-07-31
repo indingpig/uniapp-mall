@@ -1,0 +1,42 @@
+/**
+ * 原子化工具类
+ *
+ * 在模板中直接使用，无需 @include。
+ */
+
+/* 固定全屏（钉在窗口四边，高度由 top/bottom 自动计算，不依赖 vh） */
+.fixed-inset {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+// .page {
+//   height: 100%;
+// }
+
+/* 宽度 */
+.w-full {
+  width: 100%;
+}
+
+/* 高度 */
+.h-full {
+  height: 100%;
+}
+
+.h-screen {
+  height: 100vh;
+}
+
+/* 滚动 */
+.overflow-hidden {
+  overflow: hidden;
+}
+.overflow-auto {
+  overflow-y: auto;
+}
+uni-page-body {
+    height: 100%;
+}

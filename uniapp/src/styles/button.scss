@@ -1,0 +1,40 @@
+@use '@/styles/uni.scss' as *;
+
+/**
+ * 按钮样式
+ *
+ * @example
+ *   <button class="btn btn--primary">确定</button>
+ *   <button class="btn btn--secondary" disabled>取消</button>
+ */
+
+@mixin btn-base {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 88rpx;
+  border-radius: 44rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  border: none;
+}
+
+@mixin btn-primary {
+  background-color: $color-primary;
+  color: #fff;
+}
+
+@mixin btn-secondary {
+  background-color: $color-card;
+  color: $color-text-primary;
+}
+
+@mixin btn-disabled {
+  opacity: 0.6;
+}
+
+@mixin btn-row {
+  padding: 40rpx;
+  display: flex;
+  gap: 24rpx;
+}

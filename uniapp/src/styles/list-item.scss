@@ -1,0 +1,50 @@
+@use '@/styles/uni.scss' as *;
+
+/**
+ * 列表项卡片样式
+ *
+ * 用于设置页菜单项、设备列表卡片等场景。
+ *
+ * @example
+ *   <view class="list-card">
+ *     <view class="list-card__body">
+ *       <text class="list-card__label">设备配对</text>
+ *       <text class="list-card__desc">通过蓝牙连接新设备</text>
+ *     </view>
+ *     <text class="list-card__arrow">›</text>
+ *   </view>
+ */
+
+@mixin list-card {
+  display: flex;
+  align-items: center;
+  padding: 28rpx 24rpx;
+  background-color: $color-card;
+  border-radius: $radius-md;
+}
+
+@mixin list-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  min-width: 0;
+}
+
+@mixin list-card-label {
+  font-size: 30rpx;
+  font-weight: 500;
+  color: $color-text-primary;
+}
+
+@mixin list-card-desc {
+  font-size: 24rpx;
+  color: $color-text-secondary;
+}
+
+@mixin list-card-arrow {
+  font-size: 36rpx;
+  color: #ccc;
+  flex-shrink: 0;
+  margin-left: 16rpx;
+}

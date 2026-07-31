@@ -1,0 +1,27 @@
+/**
+ * 页面骨架布局 Mixin
+ *
+ * 各页面 .page / .main 的公共样式，通过 @include 引入。
+ * 页面特有的样式在 include 后继续追加即可覆盖。
+ *
+ * 使用方式：
+ *   .page { @include page-layout; }
+ *   .main { @include main-layout; }
+ */
+
+@use '@/styles/uni.scss' as *;
+
+@mixin page-layout {
+  background-color: $color-bg;
+  padding-top: var(--status-bar-height);
+  // padding-bottom: env(safe-area-inset-bottom);  // 按需解开
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+@mixin main-layout {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}

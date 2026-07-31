@@ -1,0 +1,16 @@
+@use '@/styles/uni.scss' as *;
+
+/**
+ * 区块标题样式
+ *
+ * @example
+ *   <view class="section">
+ *     <text class="section__title">设备管理</text>
+ *     ...
+ *   </view>
+ */
+
+@mixin section-title {
+  font-size: 24rpx;
+  color: $color-text-secondary;
+}
