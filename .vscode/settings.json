@@ -4,11 +4,13 @@
     "manifest.json": "jsonc"
   },
   "editor.codeActionsOnSave": {
-    "source.fixAll.eslint": "explicit",
-    "source.organizeImports": "never"
+    "source.fixAll.eslint": "explicit"
   },
   "prettier.enable": false,
   "editor.formatOnSave": false,
+  "eslint.workingDirectories": [
+    "./uniapp"
+  ],
   "eslint.validate": [
     "javascript",
     "javascriptreact",
