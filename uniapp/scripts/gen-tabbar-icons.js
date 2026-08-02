@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync } from 'node:fs';
 import sharp from 'sharp';
 
 const OUT_DIR = 'src/static/tabbar';
