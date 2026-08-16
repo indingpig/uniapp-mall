@@ -10,18 +10,18 @@
 #define RECORD_SECONDS 3
 #define RECORD_SIZE (SAMPLE_RATE * RECORD_SECONDS)
 
-int32_t rawBuffer[RECORD_SIZE];
+int16_t rawBuffer[RECORD_SIZE];
 
 void setupI2S() {
   i2s_config_t config = {
     .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
     .sample_rate = SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
     .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
+    .communication_format = I2S_COMM_FORMAT_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
     .dma_buf_count = 8,
-    .dma_buf_len = 256,
+    .dma_buf_len = 512,
     .use_apll = false,
     .tx_desc_auto_clear = false,
     .fixed_mclk = 0
@@ -43,10 +43,7 @@ void setup() {
   Serial.begin(2000000);  // 高波特率，传输更快
   delay(2000);
 
-  pinMode(7, OUTPUT);
-  digitalWrite(7, LOW);
-
-  Serial.println("=== I2S Recorder ===");
+  Serial.println("=== I2S Recorder (16-bit, 16kHz) ===");
   Serial.println("Send any character to start recording...");
   setupI2S();
 }
@@ -55,31 +52,30 @@ void loop() {
   if (Serial.available() > 0) {
     Serial.read();  // 清掉输入
 
-    Serial.println("Recording 2 seconds...");
+    Serial.println("Recording 3 seconds...");
 
-    // 连续读取 2 秒音频
+    // 连续读取 3 秒音频
     size_t totalRead = 0;
     while (totalRead < RECORD_SIZE) {
       size_t bytesRead = 0;
       i2s_read(I2S_PORT,
                rawBuffer + totalRead,
-               (RECORD_SIZE - totalRead) * sizeof(int32_t),
+               (RECORD_SIZE - totalRead) * sizeof(int16_t),
                &bytesRead,
                portMAX_DELAY);
-      totalRead += bytesRead / sizeof(int32_t);
+      totalRead += bytesRead / sizeof(int16_t);
     }
 
-    Serial.println("Recording done. Computing DC offset...");
+    Serial.println("Recording done. Scaling...");
 
-    // 计算 DC 偏置（所有样本的平均值）
-    double dcSum = 0;
+    // 与推理固件相同的增益处理 (AUDIO_GAIN = 1)
+    #ifndef AUDIO_GAIN
+    #define AUDIO_GAIN 1
+    #endif
     for (int i = 0; i < RECORD_SIZE; i++) {
-      dcSum += (int16_t)(rawBuffer[i] >> 16);
+      rawBuffer[i] = (int16_t)(rawBuffer[i]) * AUDIO_GAIN;
     }
-    int16_t dcOffset = (int16_t)(dcSum / RECORD_SIZE);
 
-    Serial.print("  DC offset: ");
-    Serial.println(dcOffset);
     Serial.println("Sending data...");
 
     // 发送数据头
@@ -88,11 +84,9 @@ void loop() {
 
     delay(100);
 
-    // 发送去 DC 后的 16-bit 样本
+    // 发送 16-bit 样本 (已放大, 与推理固件输入一致)
     for (int i = 0; i < RECORD_SIZE; i++) {
-      int16_t sample = (int16_t)(rawBuffer[i] >> 16);
-      sample -= dcOffset;   // 减去 DC 偏置，让波形围绕 0
-      Serial.write((uint8_t*)&sample, 2);
+      Serial.write((uint8_t*)&rawBuffer[i], 2);
     }
 
     Serial.println("\nEND");

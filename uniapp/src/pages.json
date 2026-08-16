@@ -38,6 +38,13 @@
     {
       "path": "pages/stats/index",
       "type": "page"
+    },
+    {
+      "path": "pages/pairing/index"
+    },
+    {
+      "path": "pages/ble-test/index",
+      "type": "page"
     }
   ],
   "subPackages": [],

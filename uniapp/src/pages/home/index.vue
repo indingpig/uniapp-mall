@@ -1,77 +1,39 @@
 <script setup lang="ts">
 import type { IconKey } from '@/utils/icons';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useBabyMonitor } from '@/hooks/useBabyMonitor';
+import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
 
 /* ------------------------------------------------------------------ */
-/*  类型定义                                                            */
+/*  服务端数据                                                          */
 /* ------------------------------------------------------------------ */
 
-type Status = 'sleeping' | 'awake' | 'crying' | 'playing' | 'offline';
-
-interface BabyStatus {
-  status: Status;
-  durationSec: number;
-  statusText: string;
-  iconColor: string;
-  iconKey: IconKey;
-}
-
-interface DeviceInfo {
-  name: string;
-  connectionText: string;
-  batteryPercent: number;
-}
+const { status, volume, device, durationSec } = useBabyMonitor();
 
 /* ------------------------------------------------------------------ */
-/*  状态数据                                                            */
-/* ------------------------------------------------------------------ */
-
-const STATUS_MAP: Record<Status, Omit<BabyStatus, 'durationSec'>> = {
-  sleeping: { status: 'sleeping', statusText: '正在安睡', iconColor: '#7ea279', iconKey: 'face-cry' },
-  awake: { status: 'awake', statusText: '清醒中', iconColor: '#7ea279', iconKey: 'face-cry' },
-  crying: { status: 'crying', statusText: '正在哭泣', iconColor: '#d8896a', iconKey: 'face-cry' },
-  playing: { status: 'playing', statusText: '在玩耍', iconColor: '#7ea279', iconKey: 'face-cry' },
-  offline: { status: 'offline', statusText: '设备离线', iconColor: '#b3b3b3', iconKey: 'face-cry' },
-};
-
-/* ------------------------------------------------------------------ */
-/*  响应式数据                                                          */
+/*  本地数据                                                            */
 /* ------------------------------------------------------------------ */
 
 const greeting = ref<string>('晚上好');
 const userName = ref<string>('Sheldon');
-const isOnline = ref<boolean>(true);
-const capsuleTopGap = ref<number>(0); // 小程序胶囊避让高度
-
-const baby = ref<BabyStatus>({
-  ...STATUS_MAP.crying,
-  durationSec: 2 * 60 + 35, // 设计稿：02:35
-});
-
-const volume = ref<number>(68); // dB
-const MAX_DB = 100; // 进度条映射上限
-const device = ref<DeviceInfo>({
-  name: '婴儿监护器 Pro',
-  connectionText: '已连接 · 信号强',
-  batteryPercent: 86,
-});
+const { capsuleTopGap } = useCapsuleGap();
+const MAX_DB = 100;
 
 /* ------------------------------------------------------------------ */
 /*  计算属性                                                            */
 /* ------------------------------------------------------------------ */
 
 const volumePercent = computed<number>(() =>
-  Math.min(100, Math.round((volume.value / MAX_DB) * 100)),
+  Math.min(100, Math.round((volume.value.db / MAX_DB) * 100)),
 );
 
-const durationText = computed<string>(() => formatDuration(baby.value.durationSec));
+const durationText = computed<string>(() => formatDuration(durationSec.value));
 
 /* ------------------------------------------------------------------ */
 /*  方法                                                                */
 /* ------------------------------------------------------------------ */
 
-/** 秒数 -> mm:ss / hh:mm:ss */
 function formatDuration(totalSec: number): string {
   const s = Math.max(0, Math.floor(totalSec));
   const hh = Math.floor(s / 3600);
@@ -81,7 +43,6 @@ function formatDuration(totalSec: number): string {
   return hh > 0 ? `${pad(hh)}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
 }
 
-/** 问候语：根据本地小时返回「早上好/下午好/晚上好」 */
 function buildGreeting(): string {
   const h = new Date().getHours();
   if (h < 6)
@@ -99,39 +60,13 @@ function buildGreeting(): string {
 /*  生命周期                                                            */
 /* ------------------------------------------------------------------ */
 
-let timer: ReturnType<typeof setInterval> | null = null;
-
 onMounted(() => {
   greeting.value = buildGreeting();
-
-  // 小程序胶囊按钮避让：顶栏整体下移，不被胶囊遮挡
-  // #ifdef MP-WEIXIN
-  try {
-    const menuButton = uni.getMenuButtonBoundingClientRect();
-    console.warn('menuButton', menuButton.bottom);
-    // 胶囊底部到页面顶部的距离 + 额外间距
-    capsuleTopGap.value = menuButton.bottom - 23;
-  }
-  catch {
-    // 非微信环境或 API 不可用，保持默认值
-  }
-  // #endif
-
-  timer = setInterval(() => {
-    baby.value = { ...baby.value, durationSec: baby.value.durationSec + 1 };
-  }, 1000);
-});
-
-onBeforeUnmount(() => {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
 });
 </script>
 
 <template>
-  <view class="page">
+  <view class="page h-full">
     <!-- ============== 主体内容 ============== -->
     <view
       class="main"
@@ -140,7 +75,7 @@ onBeforeUnmount(() => {
       <!-- 头部：问候语 + 设备在线徽章 -->
       <view class="header">
         <text class="header__greeting">{{ greeting }}，{{ userName }}</text>
-        <view v-if="isOnline" class="badge">
+        <view v-if="status.isOnline" class="badge">
           <view class="badge__dot" />
           <text class="badge__text">设备在线</text>
         </view>
@@ -152,12 +87,12 @@ onBeforeUnmount(() => {
         <view class="status-icon">
           <image
             class="status-icon__img"
-            :src="getIcon(baby.iconKey)"
+            :src="getIcon((status.iconKey as IconKey))"
             mode="aspectFit"
           />
         </view>
-        <text class="card__title" :style="{ color: baby.iconColor }">
-          {{ baby.statusText }}
+        <text class="card__title" :style="{ color: status.iconColor }">
+          {{ status.statusText }}
         </text>
         <text class="card__subtitle">已持续 {{ durationText }}</text>
       </view>
@@ -166,7 +101,7 @@ onBeforeUnmount(() => {
       <view class="card card--volume">
         <view class="row-between">
           <text class="card__title card__title--dark">实时音量</text>
-          <text class="volume-value">{{ volume }} dB</text>
+          <text class="volume-value">{{ volume.db }} dB</text>
         </view>
         <view class="progress">
           <view
@@ -196,7 +131,6 @@ onBeforeUnmount(() => {
 /* 小程序根元素 — 100vh 在小程序中不准确，用 100% 继承 */
 page {
   height: 100%;
-  overflow: hidden;
 }
 </style>
 
@@ -205,23 +139,16 @@ page {
 /*  页面骨架                                                            */
 /* ------------------------------------------------------------------ */
 .page {
-  height: 100%;
-  background-color: $color-bg;
-  padding-top: var(--status-bar-height);
+  @include page-layout;
   /* padding-bottom: env(safe-area-inset-bottom); */
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
 }
 
 /* ------------------------------------------------------------------ */
 /*  主体                                                                */
 /* ------------------------------------------------------------------ */
 .main {
-  flex: 1;
+  @include main-layout;
   padding: 12rpx 40rpx 0;
-  display: flex;
-  flex-direction: column;
   gap: 24rpx;
 }
 

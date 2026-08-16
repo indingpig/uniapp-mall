@@ -7,6 +7,8 @@ onLaunch(() => {
 </script>
 
 <style lang="scss">
+@use '@/styles/utilities.scss';
+
 page {
   background-color: #f4ede0;
   font-family:

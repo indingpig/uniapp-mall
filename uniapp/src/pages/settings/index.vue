@@ -1,11 +1,33 @@
 <script setup lang="ts">
+import { useCapsuleGap } from '@/hooks/useCapsuleGap';
+
+const { capsuleTopGap } = useCapsuleGap();
+
+function goPairing() {
+  uni.navigateTo({ url: '/pages/pairing/index' });
+}
+
+function goBLETest() {
+  uni.navigateTo({ url: '/pages/ble-test/index' });
+}
 </script>
 
 <template>
-  <view class="page">
-    <view class="main">
-      <text class="title">设置</text>
-      <text class="placeholder">暂无设置项</text>
+  <view class="page h-full">
+    <view class="main" :style="{ paddingTop: `${capsuleTopGap}px` }">
+      <view class="section">
+        <text class="section__title">设备管理</text>
+        <view class="menu-item" @tap="goPairing">
+          <text class="menu-item__label">设备配对</text>
+          <text class="menu-item__desc">通过蓝牙连接新设备</text>
+          <text class="menu-item__arrow">›</text>
+        </view>
+        <view class="menu-item" @tap="goBLETest">
+          <text class="menu-item__label">BLE 串口测试</text>
+          <text class="menu-item__desc">蓝牙收发调试工具</text>
+          <text class="menu-item__arrow">›</text>
+        </view>
+      </view>
     </view>
   </view>
 </template>
@@ -13,39 +35,42 @@
 <style lang="scss">
 page {
   height: 100%;
-  overflow: hidden;
 }
 </style>
 
 <style lang="scss" scoped>
 .page {
-  height: 100%;
-  background-color: $color-bg;
-  padding-top: var(--status-bar-height);
+  @include page-layout;
   /* padding-bottom: env(safe-area-inset-bottom); */
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
 }
 
 .main {
-  flex: 1;
-  padding: 12rpx 40rpx 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 24rpx;
+  @include main-layout;
+  padding: 0 40rpx;
+  gap: 32rpx;
 }
 
-.title {
-  font-size: $font-size-lg;
-  font-weight: 600;
-  color: $color-text-primary;
+.section {
+  &__title {
+    @include section-title;
+    padding-left: 4rpx;
+    margin-bottom: 16rpx;
+  }
 }
 
-.placeholder {
-  font-size: $font-size-base;
-  color: $color-text-secondary;
+.menu-item {
+  @include list-card;
+  flex-wrap: wrap;
+
+  &__label {
+    width: 100%;
+    @include list-card-label;
+  }
+  &__desc {
+    @include list-card-desc;
+  }
+  &__arrow {
+    @include list-card-arrow;
+  }
 }
 </style>

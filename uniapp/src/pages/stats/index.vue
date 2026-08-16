@@ -1,9 +1,12 @@
 <script setup lang="ts">
+import { useCapsuleGap } from '@/hooks/useCapsuleGap';
+
+const { capsuleTopGap } = useCapsuleGap();
 </script>
 
 <template>
-  <view class="page">
-    <view class="main">
+  <view class="page h-full">
+    <view class="main" :style="{ paddingTop: `${capsuleTopGap}px` }">
       <text class="title">数据统计</text>
       <text class="placeholder">暂无统计数据</text>
     </view>
@@ -19,33 +22,23 @@ page {
 
 <style lang="scss" scoped>
 .page {
-  height: 100%;
-  background-color: $color-bg;
-  padding-top: var(--status-bar-height);
+  @include page-layout;
   /* padding-bottom: env(safe-area-inset-bottom); */
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
 }
 
 .main {
-  flex: 1;
-  padding: 12rpx 40rpx 0;
-  display: flex;
-  flex-direction: column;
+  @include main-layout;
+  padding: 0 40rpx;
   align-items: center;
   justify-content: center;
   gap: 24rpx;
 }
 
 .title {
-  font-size: $font-size-lg;
-  font-weight: 600;
-  color: $color-text-primary;
+  @include empty-title;
 }
 
 .placeholder {
-  font-size: $font-size-base;
-  color: $color-text-secondary;
+  @include empty-desc;
 }
 </style>

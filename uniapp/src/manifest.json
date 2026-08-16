@@ -1,97 +1,104 @@
 {
-  "name": "宝宝监护器",
-  "appid": "__UNI__F18597F",
-  "description": "婴儿监护器 - 实时监测宝宝状态",
-  "versionName": "1.0.0",
-  "versionCode": "100",
-  "transformPx": false,
-  "app-plus": {
-    "usingComponents": true,
-    "nvueStyleCompiler": "uni-app",
-    "compilerVersion": 3,
-    "splashscreen": {
-      "alwaysShowBeforeRender": true,
-      "waiting": true,
-      "autoclose": true,
-      "delay": 0
-    },
-    "modules": {
-      "bluetooth": {
-        "description": "用于扫描并连接宝宝监护器设备"
-      }
-    },
-    "distribute": {
-      "android": {
-        "permissions": [
-          "<uses-permission android:name=\"android.permission.CHANGE_NETWORK_STATE\"/>",
-          "<uses-permission android:name=\"android.permission.MOUNT_UNMOUNT_FILESYSTEMS\"/>",
-          "<uses-permission android:name=\"android.permission.VIBRATE\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
-          "<uses-permission android:name=\"android.permission.CHANGE_WIFI_STATE\"/>",
-          "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
-          "<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>",
-          "<uses-permission android:name=\"android.permission.BLUETOOTH\"/>",
-          "<uses-permission android:name=\"android.permission.BLUETOOTH_ADMIN\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
-          "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>",
-          "<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\"/>",
-          "<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>",
-          "<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\" />",
-          "<uses-feature android:name=\"android.hardware.bluetooth_le\" android:required=\"true\"/>"
-        ]
-      },
-      "ios": {
-        "appid": "",
-        "password": "",
-        "p12": "ios_distribution.p12",
-        "mobileprovision": "ios_distribution.mobileprovision",
-        "privacyDescription": {
-          "NSPhotoLibraryUsageDescription": "用于保存宝宝状态截图",
-          "NSMicrophoneUsageDescription": "用于监测宝宝哭声",
-          "NSBluetoothAlwaysUsageDescription": "用于蓝牙扫描并连接宝宝监护器设备",
-          "NSBluetoothPeripheralUsageDescription": "用于与宝宝监护器设备通信"
+    "name" : "宝宝监护器",
+    "appid" : "__UNI__F18597F",
+    "description" : "婴儿监护器 - 实时监测宝宝状态",
+    "versionName" : "1.0.0",
+    "versionCode" : "100",
+    "transformPx" : false,
+    "app-plus" : {
+        "usingComponents" : true,
+        "nvueStyleCompiler" : "uni-app",
+        "compilerVersion" : 3,
+        "splashscreen" : {
+            "alwaysShowBeforeRender" : true,
+            "waiting" : true,
+            "autoclose" : true,
+            "delay" : 0
+        },
+        "modules" : {
+            "bluetooth" : {
+                "description" : "用于扫描并连接宝宝监护器设备"
+            }
+        },
+        "distribute" : {
+            "android" : {
+                "permissions" : [
+                    "<uses-permission android:name=\"android.permission.CHANGE_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.MOUNT_UNMOUNT_FILESYSTEMS\"/>",
+                    "<uses-permission android:name=\"android.permission.VIBRATE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_WIFI_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.CHANGE_WIFI_STATE\"/>",
+                    "<uses-permission android:name=\"android.permission.WAKE_LOCK\"/>",
+                    "<uses-permission android:name=\"android.permission.WRITE_SETTINGS\"/>",
+                    "<uses-permission android:name=\"android.permission.BLUETOOTH\"/>",
+                    "<uses-permission android:name=\"android.permission.BLUETOOTH_ADMIN\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>",
+                    "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>",
+                    "<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\"/>",
+                    "<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>",
+                    "<uses-feature android:name=\"android.hardware.bluetooth_le\" android:required=\"true\"/>"
+                ]
+            },
+            "ios" : {
+                "appid" : "",
+                "password" : "",
+                "p12" : "ios_distribution.p12",
+                "mobileprovision" : "ios_distribution.mobileprovision",
+                "privacyDescription" : {
+                    "NSPhotoLibraryUsageDescription" : "用于保存宝宝状态截图",
+                    "NSMicrophoneUsageDescription" : "用于监测宝宝哭声",
+                    "NSBluetoothAlwaysUsageDescription" : "用于蓝牙扫描并连接宝宝监护器设备",
+                    "NSBluetoothPeripheralUsageDescription" : "用于与宝宝监护器设备通信"
+                }
+            },
+            "sdkConfigs" : {}
         }
-      },
-      "sdkConfigs": {}
-    }
-  },
-  "app-harmony": {
-    "distribute": {}
-  },
-  "mp-harmony": {
-    "distribute": {}
-  },
-  "quickapp": {},
-  "mp-weixin": {
-    "appid": "",
-    "setting": {
-      "urlCheck": false
     },
-    "usingComponents": true,
-    "darkmode": true,
-    "themeLocation": "theme.json",
-    "permission": {
-      "scope.bluetooth": {
-        "desc": "用于扫描并连接宝宝监护器设备"
-      }
+    "app-harmony" : {
+        "distribute" : {}
+    },
+    "mp-harmony" : {
+        "distribute" : {}
+    },
+    "quickapp" : {},
+    "mp-weixin" : {
+        "appid" : "",
+        "setting" : {
+            "urlCheck" : false
+        },
+        "usingComponents" : true,
+        "darkmode" : true,
+        "themeLocation" : "theme.json",
+        "permission" : {
+            "scope.bluetooth" : {
+                "desc" : "用于扫描并连接宝宝监护器设备"
+            }
+        }
+    },
+    "mp-alipay" : {
+        "usingComponents" : true
+    },
+    "mp-baidu" : {
+        "usingComponents" : true
+    },
+    "mp-toutiao" : {
+        "usingComponents" : true
+    },
+    "uniStatistics" : {
+        "enable" : false
+    },
+    "vueVersion" : "3",
+    "h5" : {
+        "darkmode" : true,
+        "themeLocation" : "theme.json",
+        "router" : {
+            "mode" : "hash"
+        },
+        "optimization" : {
+            "treeShaking" : {
+                "enable" : true
+            }
+        }
     }
-  },
-  "mp-alipay": {
-    "usingComponents": true
-  },
-  "mp-baidu": {
-    "usingComponents": true
-  },
-  "mp-toutiao": {
-    "usingComponents": true
-  },
-  "uniStatistics": {
-    "enable": false
-  },
-  "vueVersion": "3",
-  "h5": {
-    "darkmode": true,
-    "themeLocation": "theme.json"
-  }
 }
