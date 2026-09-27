@@ -1,30 +1,61 @@
 /**
  * 全局 SCSS 变量
  * 在 vue 组件 <style lang="scss"> 中可直接使用
+ *
+ * 色值为设计规范 v1.1 画布真值（disign/宝宝监控App-设计规范-v1.1.md 第 2 节），
+ * TS 侧对应常量在 constants/babyStatus.ts，改动需两边同步。
  */
 
-/* 主题色 */
-$color-primary: #7ea279;            // 主绿色（按钮、徽章、进度条）
-$color-primary-soft: #cfe1c8;       // 主绿色浅色（进度条轨道）
-$color-coral: #d8896a;              // 珊瑚色（"正在哭泣"文字、状态图标）
-$color-coral-soft: #f6dccd;         // 珊瑚色浅色
+/* 主色（green 系） */
+$color-primary: #7BA05B;            // 主绿（主按钮、激活 Tab、在线、音量填充）
+$color-primary-soft: #E9F0E1;       // 浅绿容器（green-bg）
+$color-primary-deep: #55823F;       // green-ink（状态文字、绿胶囊文字）
+
+/* 状态语义色（设计规范 06 图例：绿=平稳 琥珀=留意 红=立即提醒） */
+$color-amber: #D99A3D;              // 琥珀（留意态、扫描中雷达）
+$color-amber-soft: #F7EBD4;         // 浅琥珀底
+$color-amber-ink: #B07A28;          // 琥珀胶囊文字
+$color-danger: #D96A5B;             // 红（哭闹/立即推送/退出登录/未读红点）
+$color-danger-soft: #F8E3DE;        // 浅红底
+$color-coral: #D96A5B;              // 红色别名（历史命名，值已对齐规范红）
+$color-coral-soft: #F8E3DE;         // 浅红底别名
+$color-warm-gray: #8C8578;          // 暖灰（有动静、离线，ink-2）
+
+/* 品牌表情色（首页大表情双轨制：大脸固定品牌橙，小图标随状态语义色） */
+$color-orange: #E8825A;             // 品牌橙（首页宝宝脸、清醒活跃表情）
+$color-gold: #F2C14E;               // 月亮 / 星星
+$color-tear: #8FB8D8;               // 哭闹泪滴
 
 /* 背景与卡片 */
-$color-bg: #f4ede0;                 // 页面暖米色背景
-$color-card: #ffffff;               // 卡片白色
-$color-card-soft: #fbf8f1;          // 卡片次级（备用）
+$color-bg: #F4EDE1;                 // 页面暖奶油底
+$color-card: #FFFFFF;               // 卡片 / 输入框
+$color-card-soft: #EDE6D8;          // 中性图标底（neutral-bg：有动静/添加设备/未激活步骤圆）
 
-/* 文字 */
-$color-text-primary: #1f1f1f;       // 主文字
-$color-text-regular: #4a4a4a;
-$color-text-secondary: #8a8a8a;
-$color-text-muted: #b3b3b3;
+/* 文字（暖墨色系） */
+$color-text-primary: #3B362E;       // 主文字（ink）
+$color-text-secondary: #8C8578;     // 说明 / 时间戳（ink-2）
+$color-text-muted: #B3AB9D;         // chevron / 弱元素 / 占位（ink-3）
+$color-ink-group: #6E675B;          // 卡片组标题（对比度达标）
 
-/* 圆角 */
+/* 描边与分割线 */
+$color-divider: #F2EDE2;            // 卡内分割线
+$color-border: #EBE3D4;             // 卡片描边
+$color-border-tab: #E8E1D3;         // TabBar 描边
+$color-border-btn: #E5DECF;         // 次按钮（白底描边）描边
+
+/* 音量条三分区（正常 0-60% / 偏高 60-80% / 哭声区 80-100%），与 babyStatus.ts VOLUME_ZONES 同步 */
+$volume-zone-1: #DDE9D3;
+$volume-zone-2: #F2E3C8;
+$volume-zone-3: #F5D9D3;
+
+/* 圆角（设计基准 390×844，1px ≈ 1.923rpx） */
 $radius-sm: 12rpx;
 $radius-md: 20rpx;
 $radius-lg: 28rpx;
 $radius-pill: 999rpx;
+$radius-card: 32rpx;                // 16px（常规卡片/图例卡）
+$radius-card-lg: 40rpx;             // 20px（状态卡）
+$radius-input: 24rpx;               // 12px（输入框）
 
 /* 间距 */
 $space-xs: 8rpx;

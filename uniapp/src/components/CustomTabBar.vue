@@ -20,7 +20,7 @@ interface TabItem {
 const TABS: readonly TabItem[] = [
   { key: 'home', label: '首页', icon: 'home' },
   { key: 'history', label: '历史', icon: 'clock' },
-  { key: 'stats', label: '统计', icon: 'chart' },
+  { key: 'stats', label: '统计', icon: 'bar-chart' },
   { key: 'settings', label: '设置', icon: 'gear' },
 ];
 
@@ -40,11 +40,11 @@ function onTap(key: string) {
     >
       <image
         class="tab__icon"
-        :src="getIcon(tab.icon, current === tab.key ? '#ffffff' : '#1f1f1f')"
+        :src="getIcon(tab.icon, current === tab.key ? '#ffffff' : '#A39B8C')"
         mode="aspectFit"
       />
       <text
-        class="tab__label text-xs text-main"
+        class="tab__label text-xs"
         :class="{ 'tab__label--active': current === tab.key }"
       >
         {{ tab.label }}
@@ -76,6 +76,8 @@ function onTap(key: string) {
   }
 
   &__label {
+    color: #A39B8C; // 规范：未激活 Tab
+
     &--active {
       color: #ffffff;
       font-weight: 500;

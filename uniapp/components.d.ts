@@ -7,6 +7,10 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    BaseIcon: typeof import('./src/components/BaseIcon.vue')['default']
+    Cell: typeof import('./src/components/Cell.vue')['default']
     CustomTabBar: typeof import('./src/components/CustomTabBar.vue')['default']
+    Pill: typeof import('./src/components/Pill.vue')['default']
+    VolumeBar: typeof import('./src/components/VolumeBar.vue')['default']
   }
 }

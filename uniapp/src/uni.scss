@@ -14,11 +14,11 @@
 
 /* 颜色变量 */
 
-/* 行为相关颜色 */
-$uni-color-primary: #007aff;
-$uni-color-success: #4cd964;
-$uni-color-warning: #f0ad4e;
-$uni-color-error: #dd524d;
+/* 行为相关颜色（设计规范 14.4-1：对齐设计色板，防止 uni-ui 默认蓝破坏主题） */
+$uni-color-primary: #7BA05B;
+$uni-color-success: #7BA05B;
+$uni-color-warning: #D99A3D;
+$uni-color-error: #D96A5B;
 
 /* 文字基本颜色 */
 $uni-text-color: #333; // 基本色
