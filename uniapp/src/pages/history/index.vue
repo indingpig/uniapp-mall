@@ -6,7 +6,7 @@ const { capsuleTopGap } = useCapsuleGap();
 
 <template>
   <view class="page h-full">
-    <view class="main" :style="{ paddingTop: `${capsuleTopGap}px` }">
+    <view class="main px-5 gap-3 items-center justify-center" :style="{ paddingTop: `${capsuleTopGap}px` }">
       <text class="title">历史记录</text>
       <text class="placeholder">暂无历史数据</text>
     </view>
@@ -27,10 +27,6 @@ const { capsuleTopGap } = useCapsuleGap();
 
 .main {
   @include main-layout;
-  padding: 0 40rpx;
-  align-items: center;
-  justify-content: center;
-  gap: 24rpx;
 }
 
 .title {

@@ -1,8 +1,196 @@
 /**
- * 原子化工具类
+ * Tailwind 风格原子化工具类（全局类，由 App.vue 引入，模板中直接使用）
  *
- * 在模板中直接使用，无需 @include。
+ * 约定：
+ * - 间距/尺寸数字刻度与 Tailwind 一致，1 单位 = 8rpx（375 设计稿下的 4px），
+ *   如 p-4 = 32rpx；为保证多端类名安全，不含 0.5/1.5/2.5 小数刻度
+ * - 字号取用项目自有刻度（uni.scss 的 $font-size-*），不照搬 Tailwind 的 px 值
+ * - 颜色类与 uni.scss 主题 token 一一对应：
+ *     text-primary   → $color-primary（主绿）      bg-primary   → $color-primary
+ *     text-coral     → $color-coral（珊瑚色）      bg-coral     → $color-coral
+ *     text-main      → $color-text-primary（主文字）bg-page      → $color-bg（页面米色）
+ *     text-regular   → $color-text-regular        bg-card      → $color-card
+ *     text-secondary → $color-text-secondary      bg-card-soft → $color-card-soft
+ *     text-muted     → $color-text-muted
+ * - 不使用 * 选择器 / 属性选择器 / 转义类名，保证微信小程序 WXSS 可编译
+ * - 需要新刻度或负值（-mt-2 等）时，往对应 $xxx-scale 映射里加即可
  */
+
+@use 'sass:math';
+@use '@/styles/uni.scss' as *;
+
+/* ========== 原子类专用补充 token（现有主题未覆盖的部分） ========== */
+$color-border: #e9e1d3;                                   // 暖灰描边，配米色背景
+$shadow-sm: 0 2rpx 8rpx rgba(31, 31, 31, 0.04);          // 轻投影
+$shadow-md: 0 8rpx 24rpx rgba(31, 31, 31, 0.08);         // 卡片投影
+
+/* 间距/尺寸刻度（数字 → rpx） */
+$space-scale: (
+  0: 0,
+  1: 8rpx,
+  2: 16rpx,
+  3: 24rpx,
+  4: 32rpx,
+  5: 40rpx,
+  6: 48rpx,
+  8: 64rpx,
+  10: 80rpx,
+  12: 96rpx,
+  16: 128rpx,
+);
+
+/* ========== 布局 display ========== */
+.block { display: block; }
+.inline-block { display: inline-block; }
+.flex { display: flex; }
+.inline-flex { display: inline-flex; }
+.grid { display: grid; }
+.hidden { display: none; }
+
+/* ========== Flex ========== */
+.flex-row { flex-direction: row; }
+.flex-col { flex-direction: column; }
+.flex-wrap { flex-wrap: wrap; }
+.flex-nowrap { flex-wrap: nowrap; }
+.items-start { align-items: flex-start; }
+.items-center { align-items: center; }
+.items-end { align-items: flex-end; }
+.items-baseline { align-items: baseline; }
+.items-stretch { align-items: stretch; }
+.justify-start { justify-content: flex-start; }
+.justify-center { justify-content: center; }
+.justify-end { justify-content: flex-end; }
+.justify-between { justify-content: space-between; }
+.justify-around { justify-content: space-around; }
+.justify-evenly { justify-content: space-evenly; }
+.flex-1 { flex: 1 1 0%; }
+.shrink-0 { flex-shrink: 0; }
+.grow { flex-grow: 1; }
+.self-center { align-self: center; }
+
+/* ========== Grid ========== */
+.grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* ========== 间距 ========== */
+@each $k, $v in $space-scale {
+  .p-#{$k} { padding: $v; }
+  .px-#{$k} { padding-left: $v; padding-right: $v; }
+  .py-#{$k} { padding-top: $v; padding-bottom: $v; }
+  .pt-#{$k} { padding-top: $v; }
+  .pr-#{$k} { padding-right: $v; }
+  .pb-#{$k} { padding-bottom: $v; }
+  .pl-#{$k} { padding-left: $v; }
+
+  .m-#{$k} { margin: $v; }
+  .mx-#{$k} { margin-left: $v; margin-right: $v; }
+  .my-#{$k} { margin-top: $v; margin-bottom: $v; }
+  .mt-#{$k} { margin-top: $v; }
+  .mr-#{$k} { margin-right: $v; }
+  .mb-#{$k} { margin-bottom: $v; }
+  .ml-#{$k} { margin-left: $v; }
+
+  .gap-#{$k} { gap: $v; }
+  .gap-x-#{$k} { column-gap: $v; }
+  .gap-y-#{$k} { row-gap: $v; }
+
+  .w-#{$k} { width: $v; }
+  .h-#{$k} { height: $v; }
+}
+
+/* ========== 尺寸 ========== */
+.w-full { width: 100%; }
+.h-full { height: 100%; }
+.h-screen { height: 100vh; }
+.min-h-full { min-height: 100vh; }
+.w-auto { width: auto; }
+
+/* 自动外边距（块级定宽元素水平居中等） */
+.mx-auto { margin-left: auto; margin-right: auto; }
+.ml-auto { margin-left: auto; }
+.mr-auto { margin-right: auto; }
+
+/* ========== 文字 ========== */
+.text-xs { font-size: $font-size-xs; line-height: 1.5; }
+.text-sm { font-size: $font-size-sm; line-height: 1.5; }
+.text-base { font-size: $font-size-base; line-height: 1.5; }
+.text-md { font-size: $font-size-md; line-height: 1.4; }
+.text-lg { font-size: $font-size-lg; line-height: 1.4; }
+.text-xl { font-size: $font-size-xl; line-height: 1.3; }
+.text-2xl { font-size: $font-size-xxl; line-height: 1.3; }
+
+.font-normal { font-weight: 400; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+
+.text-left { text-align: left; }
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.whitespace-nowrap { white-space: nowrap; }
+
+/* 单行省略 */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 多行省略 */
+@each $n in 1 2 3 {
+  .line-clamp-#{$n} {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: $n;
+    overflow: hidden;
+  }
+}
+
+/* ========== 颜色（映射见文件头） ========== */
+.text-primary { color: $color-primary; }
+.text-primary-soft { color: $color-primary-soft; }
+.text-coral { color: $color-coral; }
+.text-coral-soft { color: $color-coral-soft; }
+.text-main { color: $color-text-primary; }
+.text-regular { color: $color-text-regular; }
+.text-secondary { color: $color-text-secondary; }
+.text-muted { color: $color-text-muted; }
+.text-white { color: #ffffff; }
+
+.bg-primary { background-color: $color-primary; }
+.bg-primary-soft { background-color: $color-primary-soft; }
+.bg-coral { background-color: $color-coral; }
+.bg-coral-soft { background-color: $color-coral-soft; }
+.bg-page { background-color: $color-bg; }
+.bg-card { background-color: $color-card; }
+.bg-card-soft { background-color: $color-card-soft; }
+.bg-white { background-color: #ffffff; }
+
+/* ========== 边框与圆角 ========== */
+.border { border: 1px solid $color-border; }
+.border-t { border-top: 1px solid $color-border; }
+.border-b { border-bottom: 1px solid $color-border; }
+.border-l { border-left: 1px solid $color-border; }
+.border-r { border-right: 1px solid $color-border; }
+.border-none { border: none; }
+
+.rounded-none { border-radius: 0; }
+.rounded-sm { border-radius: $radius-sm; }
+.rounded-md { border-radius: $radius-md; }
+.rounded-lg { border-radius: $radius-lg; }
+.rounded-pill { border-radius: $radius-pill; }
+.rounded-full { border-radius: 50%; }
+
+/* ========== 投影 ========== */
+.shadow-sm { box-shadow: $shadow-sm; }
+.shadow-md { box-shadow: $shadow-md; }
+.shadow-none { box-shadow: none; }
+
+/* ========== 定位 ========== */
+.relative { position: relative; }
+.absolute { position: absolute; }
+.fixed { position: fixed; }
 
 /* 固定全屏（钉在窗口四边，高度由 top/bottom 自动计算，不依赖 vh） */
 .fixed-inset {
@@ -12,31 +200,44 @@
   bottom: 0;
   left: 0;
 }
-// .page {
-//   height: 100%;
-// }
 
-/* 宽度 */
-.w-full {
-  width: 100%;
-}
-
-/* 高度 */
-.h-full {
-  height: 100%;
+.absolute-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
 
-.h-screen {
-  height: 100vh;
+.inset-0 { top: 0; right: 0; bottom: 0; left: 0; }
+.top-0 { top: 0; }
+.right-0 { right: 0; }
+.bottom-0 { bottom: 0; }
+.left-0 { left: 0; }
+
+.z-0 { z-index: 0; }
+.z-10 { z-index: 10; }
+.z-20 { z-index: 20; }
+.z-50 { z-index: 50; }
+
+/* ========== 溢出 ========== */
+.overflow-hidden { overflow: hidden; }
+.overflow-auto { overflow: auto; }
+.overflow-y-auto { overflow-y: auto; }
+.overflow-x-auto { overflow-x: auto; }
+
+/* ========== 透明度 ========== */
+@each $o in 0 25 50 75 100 {
+  .opacity-#{$o} { opacity: math.div($o, 100); }
 }
 
-/* 滚动 */
-.overflow-hidden {
-  overflow: hidden;
+/* ========== 过渡 ========== */
+.transition {
+  transition-property: color, background-color, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
 }
-.overflow-auto {
-  overflow-y: auto;
-}
+
+/* H5 端页面容器撑满（App.vue 引入本文件时生效） */
 uni-page-body {
-    height: 100%;
+  height: 100%;
 }

@@ -14,9 +14,9 @@ function goBLETest() {
 
 <template>
   <view class="page h-full">
-    <view class="main" :style="{ paddingTop: `${capsuleTopGap}px` }">
+    <view class="main px-5 gap-4" :style="{ paddingTop: `${capsuleTopGap}px` }">
       <view class="section">
-        <text class="section__title">设备管理</text>
+        <text class="section__title mb-2">设备管理</text>
         <view class="menu-item" @tap="goPairing">
           <text class="menu-item__label">设备配对</text>
           <text class="menu-item__desc">通过蓝牙连接新设备</text>
@@ -46,15 +46,12 @@ page {
 
 .main {
   @include main-layout;
-  padding: 0 40rpx;
-  gap: 32rpx;
 }
 
 .section {
   &__title {
     @include section-title;
     padding-left: 4rpx;
-    margin-bottom: 16rpx;
   }
 }
 

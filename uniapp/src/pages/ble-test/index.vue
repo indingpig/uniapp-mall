@@ -178,50 +178,50 @@ onBeforeUnmount(doDisconnect);
 </script>
 
 <template>
-  <view class="page">
-    <text class="title">BLE 串口测试</text>
+  <view class="page min-h-full bg-page p-3 px-4 flex flex-col gap-3">
+    <text class="title font-bold text-main">BLE 串口测试</text>
 
     <!-- 连接控制 -->
-    <view class="card">
-      <view v-if="!connected" class="row">
-        <text class="status-text">未连接</text>
-        <button class="btn btn--primary" @tap="doScanAndConnect">
+    <view class="card bg-card rounded-md p-3">
+      <view v-if="!connected" class="flex items-center justify-between">
+        <text class="status-text text-secondary">未连接</text>
+        <button class="btn btn--primary font-semibold border-none flex items-center justify-center shrink-0" @tap="doScanAndConnect">
           扫描并连接
         </button>
       </view>
-      <view v-else class="row">
-        <text class="status-text status-text--ok">已连接: {{ deviceName }}</text>
-        <button class="btn btn--secondary" @tap="doDisconnect">
+      <view v-else class="flex items-center justify-between">
+        <text class="status-text text-primary font-medium">已连接: {{ deviceName }}</text>
+        <button class="btn btn--secondary font-semibold border-none flex items-center justify-center shrink-0" @tap="doDisconnect">
           断开
         </button>
       </view>
     </view>
 
     <!-- 文本输入 -->
-    <view v-if="connected" class="card">
-      <text class="label">发送文本 (UTF-8)</text>
-      <view class="input-row">
+    <view v-if="connected" class="card bg-card rounded-md p-3">
+      <text class="label block text-secondary">发送文本 (UTF-8)</text>
+      <view class="input-row flex items-center">
         <input
           v-model="textInput"
-          class="input"
+          class="input flex-1 rounded-md bg-page text-main"
           placeholder="输入要发送的文本..."
           confirm-type="send"
           @confirm="doSend"
         >
-        <button class="btn btn--primary btn--sm" @tap="doSend">
+        <button class="btn btn--primary btn--sm font-semibold border-none flex items-center justify-center shrink-0" @tap="doSend">
           发送
         </button>
       </view>
     </view>
 
     <!-- 日志 -->
-    <view class="card card--log">
-      <text class="label">串口日志</text>
-      <scroll-view class="log-box" scroll-y>
+    <view class="card card--log bg-card rounded-md p-3 flex-1 flex flex-col">
+      <text class="label block text-secondary">串口日志</text>
+      <scroll-view class="log-box flex-1 rounded-sm" scroll-y>
         <text
           v-for="(item, i) in log"
           :key="i"
-          class="log-line"
+          class="log-line block"
         >
           {{ item }}
         </text>
@@ -231,72 +231,31 @@ onBeforeUnmount(doDisconnect);
 </template>
 
 <style lang="scss" scoped>
-.page {
-  min-height: 100vh;
-  background-color: $color-bg;
-  padding-top: var(--status-bar-height);
-  padding: 24rpx 32rpx;
-  display: flex;
-  flex-direction: column;
-  gap: 24rpx;
-}
-
 .title {
   font-size: 36rpx;
-  font-weight: 700;
-  color: $color-text-primary;
 }
 
-.card {
-  background-color: $color-card;
-  border-radius: $radius-md;
-  padding: 24rpx;
-
-  &--log {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
+.card--log {
+  min-height: 0;
 }
 
 .label {
   font-size: 24rpx;
-  color: $color-text-secondary;
   margin-bottom: 12rpx;
-  display: block;
-}
-
-.row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
 }
 
 .status-text {
   font-size: 28rpx;
-  color: $color-text-secondary;
-
-  &--ok {
-    color: $color-primary;
-    font-weight: 500;
-  }
 }
 
 .input-row {
-  display: flex;
   gap: 12rpx;
-  align-items: center;
 }
 
 .input {
-  flex: 1;
   height: 72rpx;
-  background-color: $color-bg;
-  border-radius: $radius-md;
   padding: 0 20rpx;
   font-size: 28rpx;
-  color: $color-text-primary;
 }
 
 .btn {
@@ -304,12 +263,6 @@ onBeforeUnmount(doDisconnect);
   padding: 0 28rpx;
   border-radius: 36rpx;
   font-size: 26rpx;
-  font-weight: 600;
-  border: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 
   &--primary { background-color: $color-primary; color: #fff; }
   &--secondary { background-color: $color-bg; color: $color-text-primary; }
@@ -317,16 +270,13 @@ onBeforeUnmount(doDisconnect);
 }
 
 .log-box {
-  flex: 1;
   min-height: 400rpx;
   background-color: #1e1e1e;
-  border-radius: 12rpx;
   padding: 20rpx;
   font-family: 'Courier New', monospace;
 }
 
 .log-line {
-  display: block;
   font-size: 22rpx;
   color: #7ec87e;
   line-height: 1.8;

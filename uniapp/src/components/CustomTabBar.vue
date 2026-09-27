@@ -30,11 +30,11 @@ function onTap(key: string) {
 </script>
 
 <template>
-  <view class="tab-bar">
+  <view class="tab-bar fixed flex items-center bg-card z-10">
     <view
       v-for="tab in TABS"
       :key="tab.key"
-      class="tab"
+      class="tab flex-1 flex flex-col items-center justify-center"
       :class="{ 'tab--active': current === tab.key }"
       @tap="onTap(tab.key)"
     >
@@ -44,7 +44,7 @@ function onTap(key: string) {
         mode="aspectFit"
       />
       <text
-        class="tab__label"
+        class="tab__label text-xs text-main"
         :class="{ 'tab__label--active': current === tab.key }"
       >
         {{ tab.label }}
@@ -55,28 +55,18 @@ function onTap(key: string) {
 
 <style lang="scss" scoped>
 .tab-bar {
-  position: fixed;
   left: 32rpx;
   right: 32rpx;
   bottom: calc(24rpx + env(safe-area-inset-bottom));
   height: 112rpx;
-  background-color: $color-card;
   border-radius: 56rpx;
-  display: flex;
-  align-items: center;
   padding: 0 12rpx;
   box-shadow: 0 12rpx 32rpx rgba(60, 50, 30, 0.08);
-  z-index: 10;
 }
 
 .tab {
-  flex: 1;
   height: 88rpx;
   border-radius: 44rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 4rpx;
   transition: background-color 0.25s ease;
 
@@ -86,9 +76,6 @@ function onTap(key: string) {
   }
 
   &__label {
-    font-size: 22rpx;
-    color: $color-text-primary;
-
     &--active {
       color: #ffffff;
       font-weight: 500;

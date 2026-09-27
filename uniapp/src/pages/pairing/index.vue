@@ -66,14 +66,14 @@ function onRescan() {
 </script>
 
 <template>
-  <view class="page">
+  <view class="page flex flex-col bg-page">
     <view
       class="main"
       :style="{ paddingTop: `${capsuleTopGap}px` }"
     >
       <!-- ========= 标题栏 ========= -->
-      <view class="navbar">
-        <text class="navbar__title">设备配对</text>
+      <view class="navbar p-3 px-5">
+        <text class="navbar__title font-bold text-main">设备配对</text>
       </view>
 
       <!-- ========= H5 不支持提示 ========= -->
@@ -83,24 +83,24 @@ function onRescan() {
       </view>
 
       <!-- ========= 状态提示 ========= -->
-      <view class="status-bar">
-        <view class="status-bar__dot" :class="{ 'status-bar__dot--active': scanning || currentStep === 'pairing' }" />
-        <text class="status-bar__text">{{ statusText }}</text>
+      <view class="status-bar flex items-center gap-2 mx-5 mb-3 px-3 rounded-md bg-card">
+        <view class="status-bar__dot w-2 h-2 rounded-full shrink-0" :class="{ 'status-bar__dot--active': scanning || currentStep === 'pairing' }" />
+        <text class="status-bar__text text-secondary">{{ statusText }}</text>
       </view>
-      <text class="status-bar__text">{{ statusText }}</text>
-      <input v-model="wifiSSID" class="form__input" placeholder="WiFi 名称">
+      <text class="status-bar__text text-secondary">{{ statusText }}</text>
+      <input v-model="wifiSSID" class="form__input w-full h-10 px-3 rounded-md bg-card text-base text-main" placeholder="WiFi 名称">
       <!-- ========= 扫描阶段 ========= -->
       <template v-if="currentStep === 'scan' && !bleNotSupported">
         <view v-if="!scanning && devices.length === 0" class="empty">
           <text class="empty__desc">点击下方按钮扫描附近的宝宝监护器设备</text>
         </view>
 
-        <view v-if="devices.length > 0" class="section">
+        <view v-if="devices.length > 0" class="section px-5 pb-3">
           <text class="section__title">发现的设备</text>
           <view
             v-for="dev in devices"
             :key="dev.deviceId"
-            class="device-card"
+            class="device-card justify-between mx-5 mb-2"
             @tap="onSelectDevice(dev)"
           >
             <view class="device-card__left">
@@ -124,44 +124,44 @@ function onRescan() {
 
       <!-- ========= WiFi 表单阶段 ========= -->
       <template v-if="currentStep === 'wifi'">
-        <view class="section">
+        <view class="section px-5 pb-3">
           <text class="section__title">已连接: {{ connectedDevice?.name }}</text>
-          <text v-if="Object.keys(deviceInfo).length > 0" class="section__sub">
+          <text v-if="Object.keys(deviceInfo).length > 0" class="section__sub block text-secondary mt-1">
             固件版本: {{ deviceInfo.version || '未知' }}
           </text>
         </view>
 
-        <view class="form">
+        <view class="form px-5">
           <view class="form__group">
-            <text class="form__label">WiFi 名称 (SSID)</text>
+            <text class="form__label block text-secondary">WiFi 名称 (SSID)</text>
             <input
               v-model="wifiSSID"
-              class="form__input"
+              class="form__input w-full h-10 px-3 rounded-md bg-card text-base text-main"
               placeholder="请输入 2.4GHz WiFi 名称"
             >
           </view>
 
           <view class="form__group">
-            <text class="form__label">WiFi 密码</text>
+            <text class="form__label block text-secondary">WiFi 密码</text>
             <input
               v-model="wifiPass"
-              class="form__input"
+              class="form__input w-full h-10 px-3 rounded-md bg-card text-base text-main"
               password
               placeholder="请输入 WiFi 密码"
             >
           </view>
 
           <view class="form__group">
-            <text class="form__label">服务器地址</text>
+            <text class="form__label block text-secondary">服务器地址</text>
             <input
               v-model="serverUrl"
-              class="form__input"
+              class="form__input w-full h-10 px-3 rounded-md bg-card text-base text-main"
               placeholder="ws://192.168.3.5:3001/ws?esp32"
             >
           </view>
         </view>
 
-        <view class="form__hint">
+        <view class="form__hint px-5 text-coral">
           <text>注意：ESP32 仅支持 2.4GHz WiFi, 不支持 5GHz</text>
         </view>
 
@@ -205,10 +205,7 @@ function onRescan() {
   // height: 100vh;                // 非 Tab 二级页面用 vh，避免 App 端滚动条
   // padding-bottom: env(safe-area-inset-bottom);
   // overflow-y: visible;
-  display: flex;
-  flex-direction: column;
   padding-top: var(--status-bar-height);
-  background-color: $color-bg;
 }
 
 .main {
@@ -216,36 +213,26 @@ function onRescan() {
 }
 
 .navbar {
-  padding: 24rpx 40rpx;
   &__title {
     font-size: 40rpx;
-    font-weight: 700;
-    color: $color-text-primary;
   }
 }
 
 .status-bar {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  margin: 0 40rpx 24rpx;
-  padding: 20rpx 24rpx;
-  background-color: $color-card;
-  border-radius: $radius-md;
+  padding-top: 20rpx;
+  padding-bottom: 20rpx;
+
   &__dot {
-    width: 16rpx;
-    height: 16rpx;
-    border-radius: 50%;
     background-color: #ccc;
-    flex-shrink: 0;
+
     &--active {
       background-color: $color-primary;
       animation: pulse 1.5s infinite;
     }
   }
+
   &__text {
     font-size: 26rpx;
-    color: $color-text-secondary;
   }
 }
 
@@ -265,23 +252,19 @@ function onRescan() {
 }
 
 .section {
-  padding: 0 40rpx 24rpx;
   &__title {
     @include section-title;
     font-size: $font-size-base;
   }
+
   &__sub {
     font-size: 24rpx;
-    color: $color-text-secondary;
-    margin-top: 8rpx;
-    display: block;
   }
 }
 
 .device-card {
   @include list-card;
-  justify-content: space-between;
-  margin: 0 40rpx 16rpx;
+
   &__left {
     @include list-card-body;
   }
@@ -298,29 +281,15 @@ function onRescan() {
 }
 
 .form {
-  padding: 0 40rpx;
   &__group {
     margin-bottom: 28rpx;
   }
   &__label {
-    display: block;
     font-size: 26rpx;
-    color: $color-text-secondary;
     margin-bottom: 12rpx;
   }
-  &__input {
-    width: 100%;
-    height: 80rpx;
-    padding: 0 24rpx;
-    background-color: $color-card;
-    border-radius: $radius-md;
-    font-size: 30rpx;
-    color: $color-text-primary;
-  }
   &__hint {
-    padding: 0 40rpx;
     font-size: 24rpx;
-    color: #d8896a;
     margin-top: -8rpx;
   }
 }
