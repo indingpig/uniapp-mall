@@ -1,0 +1,16 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "宝宝哭声采集"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "宝宝哭声采集",
+    "navigationBarBackgroundColor": "#0f1420",
+    "backgroundColor": "#0f1420"
+  }
+}
