@@ -4,7 +4,18 @@
  *
  * 色值为设计规范 v1.1 画布真值（disign/宝宝监控App-设计规范-v1.1.md 第 2 节），
  * TS 侧对应常量在 constants/babyStatus.ts，改动需两边同步。
+ *
+ * 单位规则（规范第 10 节 v1.1.8/v1.1.10）：全项目 rpx 为主，样式里一律写
+ * rpx(14) 而非手算；px 仅限 1px 描边/分割线、safe-area、H5 根容器 max-width。
  */
+@use 'sass:math';
+
+/**
+ * 设计稿 px → rpx 换算（基准 390，750/390 ≈ 1.923），规范第 2 节原函数
+ */
+@function rpx($px) {
+  @return math.div($px * 750, 390) * 1rpx;   // rpx(14) → 26.9rpx
+}
 
 /* 主色（green 系） */
 $color-primary: #7BA05B;            // 主绿（主按钮、激活 Tab、在线、音量填充）

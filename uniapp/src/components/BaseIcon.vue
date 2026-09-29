@@ -7,6 +7,10 @@ import type { IconKey } from '@/utils/icons';
  * 渲染方式为 base64 data URI + <image>，四端一致；颜色通过替换 SVG 内
  * currentColor 实现，因此 color 必传默认色（SVG 独立文档中 currentColor 无上下文）。
  *
+ * 尺寸（规范第 10 节单位规则）：size prop 一律传设计稿 px（基准 390），
+ * 内部经 uni.upx2px 按 rpx 口径换算 —— 动态内联样式在 H5/App 端不会被
+ * 编译器转 rpx，必须走运行时 API，保证与静态样式的 rpx 同比例。
+ *
  * @example
  *   <BaseIcon name="chevron-right" :size="16" :color="颜色token" />
  *   <BaseIcon name="spinner" :size="20" spin />  <!-- P0 动效：1s 匀速旋转 -->
@@ -17,7 +21,7 @@ import { getIcon } from '@/utils/icons';
 interface Props {
   /** 图标名，见 utils/icons.ts 的 IconKey */
   name: IconKey;
-  /** 边长（px，设计基准 390），非正方形图标按比例适配 */
+  /** 边长（设计稿 px，基准 390），非正方形图标按比例适配 */
   size?: number;
   /** 图标颜色；多色插画无 currentColor，传了不生效 */
   color?: string;
@@ -32,6 +36,11 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const src = computed(() => getIcon(props.name, props.color));
+
+const sizeStyle = computed(() => {
+  const px = uni.upx2px((props.size * 750) / 390);
+  return { width: `${px}px`, height: `${px}px` };
+});
 </script>
 
 <template>
@@ -40,7 +49,7 @@ const src = computed(() => getIcon(props.name, props.color));
     :class="{ 'base-icon--spin': spin }"
     :src="src"
     mode="aspectFit"
-    :style="{ width: `${size}px`, height: `${size}px` }"
+    :style="sizeStyle"
   />
 </template>
 

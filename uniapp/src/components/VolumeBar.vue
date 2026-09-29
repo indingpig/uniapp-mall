@@ -60,24 +60,25 @@ const percent = computed(() => {
 </template>
 
 <style scoped>
-/* 容器高 18px：10px 轨道 + 游标 14px 的上下溢出空间 */
+/* 静态尺寸一律 rpx()（规范第 10 节单位规则）；位移动画走 transform，与单位无关 */
+/* 容器高 rpx(18)：rpx(10) 轨道 + 游标 rpx(14) 的上下溢出空间 */
 .vbar {
   position: relative;
-  height: 18px;
+  height: rpx(18);
 }
 
 /* 离线/无数据变体（12.1）：整条 #EDE6D8，无分区/填充/游标 */
 .vbar--disabled {
-  height: 10px;
-  border-radius: 5px;
+  height: rpx(10);
+  border-radius: rpx(5);
   background-color: $color-card-soft;
 }
 
 .vbar__zone {
   position: absolute;
-  top: 4px;
-  height: 10px;
-  border-radius: 5px;
+  top: rpx(4);
+  height: rpx(10);
+  border-radius: rpx(5);
 }
 
 .vbar__zone--1 {
@@ -101,36 +102,36 @@ const percent = computed(() => {
 /* 填充层宽度恒为 100%，比例由 scaleX 表达（左缘为轴，右端圆帽形变被游标遮盖） */
 .vbar__fill {
   position: absolute;
-  top: 4px;
+  top: rpx(4);
   left: 0;
   width: 100%;
-  height: 10px;
-  border-radius: 5px;
+  height: rpx(10);
+  border-radius: rpx(5);
   background-color: $color-primary;
   transform-origin: 0 50%;
   transition: transform 300ms ease;
 }
 
-/* 游标包裹层宽 = 行程（容器宽 - 14px），translateX 百分比即行程比例；
-   圆点钉在包裹层左缘外扩 7px，圆心恰好落在音量位置上 */
+/* 游标包裹层宽 = 行程（容器宽 - 游标宽），translateX 百分比即行程比例；
+   圆点钉在包裹层左缘外扩半个游标宽，圆心恰好落在音量位置上 */
 .vbar__mark {
   position: absolute;
-  top: 2px;
-  left: 7px;
-  right: 7px;
-  height: 14px;
+  top: rpx(2);
+  left: rpx(7);
+  right: rpx(7);
+  height: rpx(14);
   transition: transform 300ms ease;
 }
 
 .vbar__mark-dot {
   position: absolute;
-  left: -7px;
+  left: rpx(-7);
   top: 0;
-  width: 14px;
-  height: 14px;
+  width: rpx(14);
+  height: rpx(14);
   border-radius: 50%;
   background-color: #FFFFFF;
-  border: 3px solid $color-primary;
+  border: rpx(3) solid $color-primary;
   box-sizing: border-box;
 }
 </style>

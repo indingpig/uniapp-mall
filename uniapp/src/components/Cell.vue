@@ -79,6 +79,7 @@ const slots = useSlots();
 </template>
 
 <style scoped>
+/* 静态尺寸一律 rpx()（规范第 10 节单位规则）；1px 发丝分割线是 px 例外清单项 */
 .cell {
   position: relative;
   display: flex;
@@ -93,9 +94,9 @@ const slots = useSlots();
 .cell__row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  padding: 12px 16px;
+  gap: rpx(10);
+  min-height: rpx(44);
+  padding: rpx(12) rpx(16);
   box-sizing: border-box;
 }
 
@@ -110,11 +111,11 @@ const slots = useSlots();
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: rpx(2);
 }
 
 .cell__title-text {
-  font-size: 14px;
+  font-size: rpx(14);
   font-weight: 500;
   color: $color-text-primary;
   white-space: nowrap;
@@ -123,7 +124,7 @@ const slots = useSlots();
 }
 
 .cell__desc-text {
-  font-size: 12px;
+  font-size: rpx(12);
   color: $color-text-secondary;
   white-space: nowrap;
   overflow: hidden;
@@ -133,17 +134,17 @@ const slots = useSlots();
 .cell__right {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: rpx(8);
   flex-shrink: 0;
 }
 
 .cell__value {
-  font-size: 14px;
+  font-size: rpx(14);
   color: $color-text-secondary;
 }
 
 .cell__footer {
-  padding: 0 16px 12px;
+  padding: 0 rpx(16) rpx(12);
 }
 
 .cell__divider {

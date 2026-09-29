@@ -44,25 +44,26 @@ const slots = useSlots();
 </template>
 
 <style scoped>
+/* 静态尺寸一律 rpx()（规范第 10 节单位规则）；胶囊圆角用 999rpx 与高度无关 */
 .pill {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  border-radius: 999px;
+  gap: rpx(4);
+  border-radius: $radius-pill;
   font-weight: 600;
 }
 
 .pill--md {
-  height: 22px;
-  padding: 0 10px;
-  font-size: 11px;
+  height: rpx(22);
+  padding: 0 rpx(10);
+  font-size: rpx(11);
 }
 
 .pill--sm {
-  height: 20px;
-  padding: 0 10px;
-  font-size: 10px;
+  height: rpx(20);
+  padding: 0 rpx(10);
+  font-size: rpx(10);
 }
 
 .pill--green {
@@ -81,8 +82,8 @@ const slots = useSlots();
 }
 
 .pill__dot {
-  width: 6px;
-  height: 6px;
+  width: rpx(6);
+  height: rpx(6);
   border-radius: 50%;
   background-color: currentColor;
   animation: pill-blink 1s ease infinite;
