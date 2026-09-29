@@ -1,0 +1,17 @@
+@font-face {
+    font-family: "baby-monitor";
+    src: url("/static/fonts/baby-monitor.woff2?fb5ffe78f9d4fb20") format("woff2"),
+url("/static/fonts/baby-monitor.woff?fb5ffe78f9d4fb20") format("woff"),
+url("/static/fonts/baby-monitor.ttf?fb5ffe78f9d4fb20") format("truetype");
+}
+
+i[class^="bmi-"]:before, i[class*=" bmi-"]:before {
+    font-family: baby-monitor !important;
+    font-style: normal;
+    font-weight: normal !important;
+    font-variant: normal;
+    text-transform: none;
+    line-height: 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
