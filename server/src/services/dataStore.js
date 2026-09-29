@@ -1,5 +1,11 @@
 const MAX_HISTORY = 500;
 
+// 本地日期键（toISOString 是 UTC，跨午夜后会把日期标偏一天）
+const localDateKey = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 class DataStore {
   constructor() {
     /** 原始数据记录: { time, rms, peak, status }[] */
@@ -51,7 +57,7 @@ class DataStore {
       const dayRecords = this.records.filter(r => r.time >= dayStart.getTime() && r.time < dayEnd.getTime());
       if (dayRecords.length === 0) {
         result.unshift({
-          date: dayStart.toISOString().split('T')[0],
+          date: localDateKey(dayStart.getTime()),
           maxRms: 0,
           avgRms: 0,
           cryCount: 0,
@@ -59,7 +65,7 @@ class DataStore {
         });
       } else {
         result.unshift({
-          date: dayStart.toISOString().split('T')[0],
+          date: localDateKey(dayStart.getTime()),
           maxRms: Math.max(...dayRecords.map(r => r.rms)),
           avgRms: Math.round(dayRecords.reduce((s, r) => s + r.rms, 0) / dayRecords.length),
           cryCount: dayRecords.filter(r => r.status === 'crying').length,
@@ -67,6 +73,7 @@ class DataStore {
         });
       }
     }
+    result.sort((a, b) => a.date.localeCompare(b.date));
     return result;
   }
 
