@@ -1,6 +1,7 @@
 import type { BabyStatusData, DeviceData, VolumeData } from '@/api/baby';
 import { onBeforeUnmount, onMounted, readonly, ref } from 'vue';
 import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
+import { STATUS_META, toCardState } from '@/constants/babyStatus';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws';
 const POLL_INTERVAL = 5000;
@@ -16,22 +17,6 @@ interface WsMessage {
   to?: string;
   timestamp?: number;
 }
-
-const STATUS_TEXT: Record<string, string> = {
-  sleeping: '正在安睡',
-  awake: '清醒中',
-  crying: '正在哭泣',
-  playing: '在玩耍',
-  offline: '设备离线',
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  sleeping: '#7ea279',
-  awake: '#7ea279',
-  crying: '#d8896a',
-  playing: '#7ea279',
-  offline: '#b3b3b3',
-};
 
 export function useBabyMonitor() {
   const status = ref<BabyStatusData>({
@@ -61,11 +46,13 @@ export function useBabyMonitor() {
   let wsActive = false;
 
   function applyStatus(s: string) {
+    // 文案/取色统一走 STATUS_META（设计规范 v1.1 第 6 节），避免第二份映射漂移
+    const meta = STATUS_META[toCardState(s)];
     status.value = {
       status: s as BabyStatusData['status'],
-      statusText: STATUS_TEXT[s] || s,
+      statusText: meta.text,
       iconKey: 'face-cry',
-      iconColor: STATUS_COLOR[s] || '#b3b3b3',
+      iconColor: meta.color,
       durationSec: durationSec.value,
       isOnline: s !== 'offline',
     };
@@ -88,10 +75,11 @@ export function useBabyMonitor() {
   /* -------------------- WebSocket -------------------- */
 
   function connectWs() {
-    socket = uni.connectSocket({ url: WS_URL });
+    // H5 端不传 success/fail/complete 回调时返回 Promise 而非 SocketTask，必须带一个回调才能拿到 task
+    socket = uni.connectSocket({ url: WS_URL, success: () => {} });
 
     socket.onOpen(() => {
-      console.log('[WS] Connected');
+      console.warn('[WS] Connected');
       wsActive = true;
       stopPolling();
     });
@@ -121,7 +109,7 @@ export function useBabyMonitor() {
     });
 
     socket.onClose(() => {
-      console.log('[WS] Disconnected, falling back to polling');
+      console.warn('[WS] Disconnected, falling back to polling');
       wsActive = false;
       startPolling();
       scheduleReconnect();
@@ -188,17 +176,25 @@ export function useBabyMonitor() {
   }
 
   function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
   }
 
   /* -------------------- 本地计时器 -------------------- */
 
   function startLocalTimer() {
-    localTimer = setInterval(() => { durationSec.value++; }, 1000);
+    localTimer = setInterval(() => {
+      durationSec.value++;
+    }, 1000);
   }
 
   function stopLocalTimer() {
-    if (localTimer) { clearInterval(localTimer); localTimer = null; }
+    if (localTimer) {
+      clearInterval(localTimer);
+      localTimer = null;
+    }
   }
 
   /* -------------------- 生命周期 -------------------- */

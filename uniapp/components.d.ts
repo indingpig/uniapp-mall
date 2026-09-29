@@ -7,10 +7,18 @@ export {}
 
 declare module 'vue' {
   export interface GlobalComponents {
+    AppButton: typeof import('./src/components/AppButton.vue')['default']
+    AppSwitch: typeof import('./src/components/AppSwitch.vue')['default']
+    BabyStatusCard: typeof import('./src/components/BabyStatusCard.vue')['default']
     BaseIcon: typeof import('./src/components/BaseIcon.vue')['default']
     Cell: typeof import('./src/components/Cell.vue')['default']
     CustomTabBar: typeof import('./src/components/CustomTabBar.vue')['default']
+    EventItem: typeof import('./src/components/EventItem.vue')['default']
+    GroupCard: typeof import('./src/components/GroupCard.vue')['default']
+    IconCircle: typeof import('./src/components/IconCircle.vue')['default']
     Pill: typeof import('./src/components/Pill.vue')['default']
+    SwitchRow: typeof import('./src/components/SwitchRow.vue')['default']
+    UniLoadMore: typeof import('@dcloudio/uni-ui/lib/uni-load-more/uni-load-more.vue')['default']
     VolumeBar: typeof import('./src/components/VolumeBar.vue')['default']
   }
 }

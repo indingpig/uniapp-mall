@@ -35,3 +35,42 @@ export function fetchVolume(): Promise<VolumeData> {
 export function fetchDevice(): Promise<DeviceData> {
   return http.get<DeviceData>('/api/baby/device').then(res => res.data);
 }
+
+export interface HistoryRecord {
+  time: number;
+  rms: number;
+  peak: number;
+  db: number;
+  status: BabyStatusData['status'];
+}
+
+export function fetchBabyHistory(): Promise<{ items: HistoryRecord[] }> {
+  return http.get<{ items: HistoryRecord[] }>('/api/history').then(res => res.data);
+}
+
+export interface DailyStat {
+  date: string;
+  maxRms: number;
+  avgRms: number;
+  cryCount: number;
+  sampleCount: number;
+}
+
+export function fetchHistoryRange(from: number, to: number, pageSize = 1000): Promise<HistoryRecord[]> {
+  return http
+    .get<{ items: HistoryRecord[] }>(`/api/history?from=${from}&to=${to}&pageSize=${pageSize}`)
+    .then(res => res.data.items);
+}
+
+export function fetchDailyStats(days = 7): Promise<DailyStat[]> {
+  return http.get<DailyStat[]>(`/api/stats/daily?days=${days}`).then(res => res.data);
+}
+
+export interface StatsSummary {
+  today: { cryCount: number; maxRms: number; avgRms: number; sampleCount: number };
+  total: { cryCount: number; maxRms: number; sampleCount: number };
+}
+
+export function fetchStatsSummary(): Promise<StatsSummary> {
+  return http.get<StatsSummary>('/api/stats/summary').then(res => res.data);
+}

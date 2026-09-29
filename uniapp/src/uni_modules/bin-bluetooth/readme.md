@@ -37,10 +37,21 @@
 
 ```ts
 import {
-  openAdapter, closeAdapter, createScanner, createPeripheral, characteristicOf,
-  IScanner, IPeripheral, Advertisement, BleWriteType, BleConnectionState,
-  BLE_STATE_DISCONNECTED, BLE_STATE_CONNECTING, BLE_STATE_CONNECTED, BLE_STATE_DISCONNECTING
-} from '@/uni_modules/bin-bluetooth'
+  Advertisement,
+  BLE_STATE_CONNECTED,
+  BLE_STATE_CONNECTING,
+  BLE_STATE_DISCONNECTED,
+  BLE_STATE_DISCONNECTING,
+  BleConnectionState,
+  BleWriteType,
+  characteristicOf,
+  closeAdapter,
+  createPeripheral,
+  createScanner,
+  IPeripheral,
+  IScanner,
+  openAdapter
+} from '@/uni_modules/bin-bluetooth';
 ```
 
 | 方法 | 说明 |
@@ -78,42 +89,42 @@ import {
 ## 使用示例
 
 ```ts
-await openAdapter()
-const scanner = createScanner()
+await openAdapter();
+const scanner = createScanner();
 scanner.startScan({
   services: [] as string[],
   namePrefix: null,
   onAdvertisement: (adv: Advertisement) => {
-    console.log(adv.deviceId, adv.name, adv.rssi)
+    console.log(adv.deviceId, adv.name, adv.rssi);
     if (adv.advertisData != null) {
-      console.log('广播数据(hex)：', adv.advertisData)
+      console.log('广播数据(hex)：', adv.advertisData);
     }
   },
   onError: null,
   timeout: 15000, // 可选，默认 15000（15 秒）；传 0 表示不自动结束
   allowDuplicates: false, // 可选，默认 false；true 时同一设备重复上报
-  onEnd: () => { console.log('扫描已自动结束') } // 可选
-})
+  onEnd: () => { console.log('扫描已自动结束'); } // 可选
+});
 // 连接
-const p = createPeripheral(deviceId)
-await p.connect()
+const p = createPeripheral(deviceId);
+await p.connect();
 // 发现特征（逐条回调返回，累积成数组；每条含 serviceUuid，可自行按 serviceUuid 分组）
-type CharItem = { serviceUuid : string, uuid : string, properties : number }
-const chars = new Array<CharItem>()
-await p.discoverServices((serviceUuid : string, uuid : string, properties : number) => {
-  chars.push({ serviceUuid, uuid, properties } as CharItem)
-})
-const target = characteristicOf('0000180d-0000-1000-8000-00805f9b34fb', '00002a37-0000-1000-8000-00805f9b34fb')
+interface CharItem { serviceUuid: string; uuid: string; properties: number }
+const chars = new Array<CharItem>();
+await p.discoverServices((serviceUuid: string, uuid: string, properties: number) => {
+  chars.push({ serviceUuid, uuid, properties } as CharItem);
+});
+const target = characteristicOf('0000180d-0000-1000-8000-00805f9b34fb', '00002a37-0000-1000-8000-00805f9b34fb');
 // 订阅通知：onValue 持续接收十六进制字符串，onSuccess/onError 返回订阅结果
 p.observe(target, {
   onValue: (valueHex: string) => { /* 心率通知，hex 字符串 */ },
-  onSuccess: () => { console.log('订阅成功') },
-  onError: (e) => { console.log('订阅失败：', e.errMsg) }
-})
+  onSuccess: () => { console.log('订阅成功'); },
+  onError: (e) => { console.log('订阅失败：', e.errMsg); }
+});
 // 写入：value 为十六进制字符串，0=带响应，1=无响应
-await p.write(target, '01ff', 0)
+await p.write(target, '01ff', 0);
 // 读取：返回十六进制字符串
-const valueHex = await p.read(target)
+const valueHex = await p.read(target);
 ```
 
 ## 错误码

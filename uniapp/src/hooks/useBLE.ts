@@ -11,6 +11,7 @@ import {
   BLE_SERVICE_UUID,
   DEVICE_NAME_PREFIX,
 } from '@/constants/ble';
+import { CACHE_KEY } from '@/constants/cache';
 // #ifndef H5
 import {
   characteristicOf,
@@ -21,23 +22,33 @@ import {
 } from '@/uni_modules/bin-bluetooth';
 // #endif
 // #ifdef H5
-// H5 无原生蓝牙，声明类型占位，仅供编译通过（运行时不调用）
-type Advertisement = Record<string, never>;
+// H5 无原生蓝牙：引入模拟器（运行时把 openAdapter 等实现挂到全局），让配对流程可在浏览器完整走通
+import '@/mock/ble-adapter';
+
+type H5Advertisement = Record<string, string | number>;
 interface H5ScannerLike {
-  startScan: (options: never) => void;
+  startScan: (options: {
+    services: string[];
+    namePrefix: string;
+    onAdvertisement: (adv: H5Advertisement) => void;
+    onError: (err: { errMsg: string }) => void;
+    timeout: number;
+    allowDuplicates: boolean;
+    onEnd: () => void;
+  }) => void;
   stopScan: () => void;
 }
+declare function createScanner(): H5ScannerLike;
 interface H5PeripheralLike {
   connect: () => Promise<void>;
   disconnect: () => void;
   onStateChange: (cb: (state: number) => void) => void;
-  discoverServices: (cb: (svc: string, char: string, props: number) => void) => Promise<void>;
-  observe: (ref: never, handlers: { onValue: (v: string) => void; onError: (e: { errMsg: string }) => void }) => void;
-  write: (ref: never, value: string, type: number) => Promise<void>;
+  discoverServices: (cb: (svc: string, char: string, props: number) => Promise<void>) => Promise<void>;
+  observe: (ref: { serviceUuid: string; characterUuid: string }, handlers: { onValue: (v: string) => void; onError: (e: { errMsg: string }) => void }) => void;
+  write: (ref: { serviceUuid: string; characterUuid: string }, value: string, type: number) => Promise<void>;
 }
-declare function createScanner(): H5ScannerLike;
 declare function createPeripheral(deviceId: string): H5PeripheralLike;
-declare function characteristicOf(service: string, char: string): never;
+declare function characteristicOf(service: string, char: string): { serviceUuid: string; characterUuid: string };
 declare function openAdapter(): Promise<boolean>;
 declare function closeAdapter(): void;
 // #endif
@@ -71,7 +82,6 @@ export function useBLE() {
     status: '',
     deviceInfo: '',
   };
-  const observeUnsub: (() => void) | null = null;
 
   /* ===================== 工具 ===================== */
 
@@ -112,14 +122,15 @@ export function useBLE() {
 
   async function startScan(): Promise<void> {
     devices.value = [];
+    // 先置扫描中再等适配器：避免 await 窗口期内页面状态机误判为"扫描超时"
+    scanning.value = true;
 
     const ok = await openAdapter();
     if (!ok) {
+      scanning.value = false;
       statusText.value = '请开启手机蓝牙后再试';
       return;
     }
-
-    scanning.value = true;
     statusText.value = '正在扫描设备...';
     scanner = createScanner();
 
@@ -130,7 +141,7 @@ export function useBLE() {
         const name = adv.name || '';
         if (name.startsWith(DEVICE_NAME_PREFIX)) {
           if (!devices.value.some(d => d.deviceId === adv.deviceId)) {
-            devices.value.push({ deviceId: adv.deviceId, name, RSSI: adv.rssi });
+            devices.value.push({ deviceId: String(adv.deviceId), name, RSSI: Number(adv.rssi) });
             devices.value.sort((a, b) => b.RSSI - a.RSSI);
           }
         }
@@ -139,7 +150,7 @@ export function useBLE() {
         scanning.value = false;
         statusText.value = `扫描错误: ${err.errMsg}`;
       },
-      timeout: 15000,
+      timeout: 30000, // 设计规范 v1.1.13：扫描超时态按 30s 无结果判定
       allowDuplicates: false,
       onEnd: () => {
         scanning.value = false;
@@ -151,7 +162,10 @@ export function useBLE() {
   }
 
   function stopScan(): void {
-    if (scanner) { scanner.stopScan(); scanner = null; }
+    if (scanner) {
+      scanner.stopScan();
+      scanner = null;
+    }
     scanning.value = false;
   }
 
@@ -178,7 +192,7 @@ export function useBLE() {
 
     // 发现 services + characteristics
     const allChars: { serviceUuid: string; uuid: string; properties: number }[] = [];
-    await peripheral.discoverServices((svcUuid, charUuid, props) => {
+    await peripheral.discoverServices(async (svcUuid, charUuid, props) => {
       allChars.push({ serviceUuid: svcUuid, uuid: charUuid, properties: props });
     });
 
@@ -220,9 +234,10 @@ export function useBLE() {
     peripheral.observe(ref, {
       onValue: (hex: string) => {
         const raw = hexToStr(hex);
-        console.log('[BLE] Status:', raw);
+        console.warn('[BLE] Status:', raw);
         if (raw === 'server_connected') {
           paired.value = true;
+          uni.setStorageSync(CACHE_KEY.PAIRED_DEVICE, { name: connectedDevice.value?.name ?? '' });
         }
         else if (raw.startsWith('error:')) {
           statusText.value = `配对失败: ${raw.replace('error:', '')}`;
@@ -265,6 +280,7 @@ export function useBLE() {
       if (success) {
         statusText.value = '配对成功！设备已联网';
         paired.value = true;
+        uni.setStorageSync(CACHE_KEY.PAIRED_DEVICE, { name: connectedDevice.value?.name ?? '' });
         return { success: true, message: '配对成功' };
       }
       statusText.value = '配对超时, 请检查 WiFi 密码是否正确';
@@ -280,8 +296,14 @@ export function useBLE() {
     return new Promise((resolve) => {
       const start = Date.now();
       const check = () => {
-        if (paired.value) { resolve(true); return; }
-        if (Date.now() - start > timeout) { resolve(false); return; }
+        if (paired.value) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > timeout) {
+          resolve(false);
+          return;
+        }
         setTimeout(check, 500);
       };
       check();

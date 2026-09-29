@@ -10,7 +10,6 @@ import {
 } from '@/uni_modules/bin-bluetooth';
 // #endif
 // #ifdef H5
-type Advertisement = Record<string, never>;
 interface H5ScannerLike { startScan: (o: never) => void; stopScan: () => void }
 interface H5PeripheralLike {
   connect: () => Promise<void>;
@@ -66,7 +65,10 @@ async function doScanAndConnect() {
   log.value = [];
   addLog('初始化蓝牙...');
   const ok = await openAdapter();
-  if (!ok) { addLog('蓝牙不可用'); return; }
+  if (!ok) {
+    addLog('蓝牙不可用');
+    return;
+  }
 
   addLog('开始扫描...');
   const scanner = createScanner();

@@ -55,11 +55,17 @@
     "@vue/runtime-core": "3.4.21",
     "@vue/tsconfig": "^0.9.1",
     "eslint": "^10.2.1",
+    "fantasticon": "^4.1.0",
+    "fonteditor-core": "^2.6.3",
     "miniprogram-api-typings": "^5.1.2",
+    "opentype.js": "^2.0.0",
+    "paper": "^0.12.18",
     "sass": "1.64.2",
     "sharp": "^0.35.3",
+    "svgpath": "^2.6.0",
     "typescript": "5.9.3",
     "vite": "5.2.8",
-    "vue-tsc": "^3.2.7"
+    "vue-tsc": "^3.2.7",
+    "wawoff2": "^2.0.1"
   }
 }
