@@ -14,15 +14,18 @@
  *     text-muted     → $color-text-muted
  * - 不使用 * 选择器 / 属性选择器 / 转义类名，保证微信小程序 WXSS 可编译
  * - 需要新刻度或负值（-mt-2 等）时，往对应 $xxx-scale 映射里加即可
+ * - 【易错】垂直 margin 类（mt-*、mb-*）不得加在 flex 容器的子元素上：
+ *   items-center 按"含 margin 的完整盒模型"居中，子元素自带 mb-* 会造成视觉错位；
+ *   子元素间距一律由容器承担（gap-* 或容器上的 mb-*、pb-*）
  */
 
 @use 'sass:math';
 @use '@/styles/uni.scss' as *;
 
-/* ========== 原子类专用补充 token（现有主题未覆盖的部分） ========== */
-$color-border: #e9e1d3;                                   // 暖灰描边，配米色背景
+/* ========== 原子类专用补充 token ========== */
 $shadow-sm: 0 2rpx 8rpx rgba(31, 31, 31, 0.04);          // 轻投影
 $shadow-md: 0 8rpx 24rpx rgba(31, 31, 31, 0.08);         // 卡片投影
+// 描边/分割线 token（$color-border 等）已收口到 uni.scss 主题表
 
 /* 间距/尺寸刻度（数字 → rpx） */
 $space-scale: (
@@ -150,16 +153,23 @@ $space-scale: (
 /* ========== 颜色（映射见文件头） ========== */
 .text-primary { color: $color-primary; }
 .text-primary-soft { color: $color-primary-soft; }
+.text-primary-deep { color: $color-primary-deep; }
+.text-amber { color: $color-amber; }
+.text-danger { color: $color-danger; }
+.text-orange { color: $color-orange; }
 .text-coral { color: $color-coral; }
 .text-coral-soft { color: $color-coral-soft; }
 .text-main { color: $color-text-primary; }
-.text-regular { color: $color-text-regular; }
 .text-secondary { color: $color-text-secondary; }
 .text-muted { color: $color-text-muted; }
 .text-white { color: #ffffff; }
 
 .bg-primary { background-color: $color-primary; }
 .bg-primary-soft { background-color: $color-primary-soft; }
+.bg-amber { background-color: $color-amber; }
+.bg-amber-soft { background-color: $color-amber-soft; }
+.bg-danger { background-color: $color-danger; }
+.bg-danger-soft { background-color: $color-danger-soft; }
 .bg-coral { background-color: $color-coral; }
 .bg-coral-soft { background-color: $color-coral-soft; }
 .bg-page { background-color: $color-bg; }
@@ -179,6 +189,9 @@ $space-scale: (
 .rounded-sm { border-radius: $radius-sm; }
 .rounded-md { border-radius: $radius-md; }
 .rounded-lg { border-radius: $radius-lg; }
+.rounded-card { border-radius: $radius-card; }      // 16px 常规卡片
+.rounded-card-lg { border-radius: $radius-card-lg; } // 20px 状态卡
+.rounded-input { border-radius: $radius-input; }     // 12px 输入框
 .rounded-pill { border-radius: $radius-pill; }
 .rounded-full { border-radius: 50%; }
 
@@ -237,7 +250,30 @@ $space-scale: (
   transition-timing-function: ease;
 }
 
-/* H5 端页面容器撑满（App.vue 引入本文件时生效） */
+/* ========== 页面滚动收敛（外层永不出现滚动条） ==========
+ * html/body/uni-* 全链钉死 100% 并禁外层滚动，
+ * 滚动收敛到每页 .page 内层（page-layout mixin 已含 overflow-y: auto），
+ * 内层滚动条视觉隐藏（触控/滚轮滚动不受影响）。
+ */
+html,
+body,
+uni-app,
+uni-page,
 uni-page-body {
   height: 100%;
+  overflow: hidden;
+}
+
+uni-page-body {
+  display: block;
+}
+
+.page {
+  height: 100%; // 定高 + 内层滚动：内容超出时在 .page 内部滚动，而不是把页面撑高
+  overflow-y: auto;
+  scrollbar-width: none; // Firefox
+
+  &::-webkit-scrollbar {
+    display: none; // Chrome/Safari
+  }
 }

@@ -62,7 +62,7 @@ pio device monitor           # 串口监视器（115200）
 - 组件自动导入（vite-plugin-uni-components + UniUIResolver）：uni-ui 组件直接用，无需 import；`components.d.ts` 为生成文件
 - 路径别名 `@` → `src/`
 - 全局 SCSS 已通过 vite `additionalData` 注入（`styles/uni.scss`、`page-layout.scss`、`state.scss`、`button.scss`、`list-item.scss`、`section.scss`），页面里直接使用其中的变量/类，不要重复 @use
-- `styles/utilities.scss` 由 `App.vue` 全局引入，提供 Tailwind 风格原子类（布局/flex/间距/文字/颜色/圆角/定位等）：间距 1 单位 = 8rpx（`p-4` = 32rpx），颜色类直接映射 `uni.scss` 主题 token（`text-primary`、`bg-card`…）。写页面布局时优先用这套原子类，组件特有的复杂样式再走 scoped SCSS；新刻度加在文件内的 `$space-scale` 里。`.line-clamp-N` 会覆盖同元素上的 `display`，不要与 `.flex` 叠在同一节点。注意 scoped 样式（带 `[data-v]`，特异度更高）会压过同属性的全局原子类：同一属性不要既写在 scoped 又指望原子类生效；动态状态切换（如 `--active`）的颜色覆盖留在 scoped
+- `styles/utilities.scss` 由 `App.vue` 全局引入，提供 Tailwind 风格原子类（布局/flex/间距/文字/颜色/圆角/定位等）：间距 1 单位 = 8rpx（`p-4` = 32rpx），颜色类直接映射 `uni.scss` 主题 token（`text-primary`、`bg-card`…）。写页面布局时优先用这套原子类，组件特有的复杂样式再走 scoped SCSS；新刻度加在文件内的 `$space-scale` 里。`.line-clamp-N` 会覆盖同元素上的 `display`，不要与 `.flex` 叠在同一节点。注意 scoped 样式（带 `[data-v]`，特异度更高）会压过同属性的全局原子类：同一属性不要既写在 scoped 又指望原子类生效；动态状态切换（如 `--active`）的颜色覆盖留在 scoped。`<text>` 在 H5 端渲染为 inline，垂直 margin 原子类（`mb-*`/`mt-*`）要同时加 `block` 才生效（flex 容器的子元素会被块化，无需加）。**禁止**在 flex 容器的子元素上加垂直 margin 类：items-center 按 margin-box 居中会造成错位，间距一律用容器 gap 或容器自身的 margin/padding
 - 代码风格：`<script setup lang="ts">` + Composition API；ESLint 使用 @uni-helper/eslint-config，**强制分号**（`semi: true`），`console` 仅 warn
 - 提交前跑 `npm run lint` 和 `npm run type-check`
 - 蓝牙相关常量在 `src/constants/ble.ts`，BLE 逻辑集中在 `src/hooks/useBLE.ts`

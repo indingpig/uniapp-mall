@@ -1,15 +1,22 @@
 {
-  "recommendations": [
-    "vue.volar",
-    "mrmaoddxxaa.create-uniapp-view",
-    "uni-helper.uni-helper-vscode",
-    "uni-helper.uni-app-schemas-vscode",
-    "uni-helper.uni-highlight-vscode",
-    "uni-helper.uni-ui-snippets-vscode",
-    "uni-helper.uni-app-snippets-vscode",
-    "uni-helper.uni-cloud-snippets-vscode",
-    "yoavbls.pretty-ts-errors",
-    "johnsoncodehk.vscode-tsconfig-helper",
-    "dbaeumer.vscode-eslint"
-  ]
+    // See http://go.microsoft.com/fwlink/?LinkId=827846
+    // for the documentation about the extensions.json format
+    "recommendations": [
+        "dbaeumer.vscode-eslint",
+        "johnsoncodehk.vscode-tsconfig-helper",
+        "mrmaoddxxaa.create-uniapp-view",
+        "platformio.platformio-ide",
+        "uni-helper.uni-app-schemas-vscode",
+        "uni-helper.uni-app-snippets-vscode",
+        "uni-helper.uni-cloud-snippets-vscode",
+        "uni-helper.uni-helper-vscode",
+        "uni-helper.uni-highlight-vscode",
+        "uni-helper.uni-ui-snippets-vscode",
+        "vue.volar",
+        "yoavbls.pretty-ts-errors"
+    ],
+    "unwantedRecommendations": [
+        "ms-vscode.cpptools-extension-pack",
+        "pioarduino.pioarduino-ide"
+    ]
 }
