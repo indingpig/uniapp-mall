@@ -1,3 +1,5 @@
+#include <babyCry_inferencing.h>
+
 /* Edge Impulse Arduino examples
  * Copyright (c) 2022 EdgeImpulse Inc.
  *
@@ -64,6 +66,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <math.h>
+
 #include "driver/i2s.h"
 
 /** Audio buffers, pointers and selectors */
@@ -74,11 +78,41 @@ typedef struct {
     uint32_t n_samples;
 } inference_t;
 
+/* 高通滤波器状态.
+ * 注意: 这个类型必须定义在文件靠前的位置!
+ * Arduino IDE 会把所有函数的原型自动插入到 #include 之后、第一个类型定义之前,
+ * 若 HighPassState 定义在使用它的 hpProcess() 附近(文件中部), 自动生成的
+ *   static float hpProcess(HighPassState* st, float x);
+ * 会出现在类型定义之前 -> "HighPassState was not declared in this scope". */
+typedef struct {
+  float x1, y1, x2, y2, x3, y3;
+} HighPassState;
+
+/* 显式声明原型: Arduino 检测到已存在就不会再自动插入, 避免上述问题 */
+static float hpProcess(HighPassState* st, float x);
+
 static inference_t inference;
 static const uint32_t sample_buffer_size = 2048;
 static signed short sampleBuffer[sample_buffer_size];
-static bool debug_nn = false; // Set this to true to see e.g. features generated from the raw signal
+static bool debug_nn = false; // true 会打印 DSP 生成的 Features (刷屏), 排查时才打开
 static bool record_status = true;
+
+/* ========================================================================
+ *  AGC (自动增益控制) — 替代 Edge Impulse 示例里固定 ×8 的 int16 回绕增益
+ *
+ *  问题: 训练数据用 iPhone 12 mini 录制 (RMS 435~2744, 中位数~1354),
+ *        而设备固定 ×8 增益会把 INMP441 音频推到 RMS 4650~16000+,
+ *        远超训练分布 -> 模型把一切判成 speach。
+ *  方案: 每个推理窗口(1s)先原样缓存, 窗口满后按 目标RMS/实际RMS 计算增益,
+ *        限制在 [AGC_MIN_GAIN, AGC_MAX_GAIN], 以 float 运算并截断到 int16。
+ *        AGC_TARGET_RMS=2500 落在 iPhone 训练数据的 RMS 区间内。
+ *  效果: 设备输入电平被拉回训练分布, 主机实测任何音量/距离的哭声均判 babycry。
+ * ======================================================================== */
+#define AGC_TARGET_RMS   2500.0f
+#define AGC_MIN_GAIN     0.25f
+#define AGC_MAX_GAIN     64.0f
+
+static int16_t *window_raw = nullptr;   // 一个窗口的原始(未增益)样本, 供 AGC 计算
 
 /**
  * @brief      Arduino setup function
@@ -148,24 +182,86 @@ void loop()
     ei_printf_float(result.anomaly);
     ei_printf("\n");
 #endif
-}
 
-static void audio_inference_callback(uint32_t n_bytes)
-{
-    for(int i = 0; i < n_bytes>>1; i++) {
-        inference.buffer[inference.buf_count++] = sampleBuffer[i];
-
-        if(inference.buf_count >= inference.n_samples) {
-          inference.buf_count = 0;
-          inference.buf_ready = 1;
+    // 识别结果摘要: 取最大概率类别
+    size_t best = 0;
+    for (size_t ix = 1; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+        if (result.classification[ix].value > result.classification[best].value) {
+            best = ix;
         }
     }
+    ei_printf(">> 识别结果: %s (%.1f%%)\n",
+        result.classification[best].label,
+        result.classification[best].value * 100.0f);
+
+    // 音频音量(RMS): 排查音频输入是否正常
+    double sumSq = 0;
+    for (size_t ix = 0; ix < inference.n_samples; ix++) {
+        float v = (float)inference.buffer[ix];
+        sumSq += v * v;
+    }
+    ei_printf(">> 音量 RMS: %.0f\n", sqrt(sumSq / inference.n_samples));
+}
+
+/* ========================================================================
+ *  高通滤波: 去除 DC 偏移 + 50Hz 工频 + 亚声频隆隆声 (与采集固件一致)
+ *  保证训练数据 = 推理输入
+ *  (HighPassState 类型与 hpProcess 原型已移到文件前部, 见上方说明)
+ * ======================================================================== */
+
+static float hpProcess(HighPassState* st, float x) {
+  float y = x - st->x1 + 0.99f * st->y1;          // DC 阻断
+  st->x1 = x;
+  st->y1 = y;
+  float h1 = 0.9607f * (st->y2 + y - st->x2);     // 100Hz 高通 第1级
+  st->x2 = y;
+  st->y2 = h1;
+  float h2 = 0.9607f * (st->y3 + h1 - st->x3);    // 100Hz 高通 第2级
+  st->x3 = h1;
+  st->y3 = h2;
+  return h2;
+}
+
+/* 窗口满后执行 AGC: 高通滤波 -> RMS -> 增益(带限幅) -> float 运算 -> int16 截断 */
+static void apply_agc(void)
+{
+    static HighPassState hp = { 0, 0, 0, 0, 0, 0 };
+
+    // 1) 高通滤波 (原位)
+    for (uint32_t i = 0; i < inference.n_samples; i++) {
+        float v = hpProcess(&hp, (float)window_raw[i]);
+        if (v > 32767.0f)  v = 32767.0f;
+        else if (v < -32768.0f) v = -32768.0f;
+        window_raw[i] = (int16_t)v;
+    }
+
+    // 2) RMS + AGC
+    double sumSq = 0;
+    for (uint32_t i = 0; i < inference.n_samples; i++) {
+        double v = (double)window_raw[i];
+        sumSq += v * v;
+    }
+    double rms = sqrt(sumSq / (double)inference.n_samples);
+
+    double g = (rms > 1.0) ? (double)AGC_TARGET_RMS / rms : (double)AGC_MAX_GAIN;
+    if (g < AGC_MIN_GAIN) g = AGC_MIN_GAIN;
+    if (g > AGC_MAX_GAIN) g = AGC_MAX_GAIN;
+
+    for (uint32_t i = 0; i < inference.n_samples; i++) {
+        double v = (double)window_raw[i] * g;
+        if (v > 32767.0)  v = 32767.0;
+        if (v < -32768.0) v = -32768.0;
+        inference.buffer[i] = (int16_t)v;
+    }
+
+    ei_printf(">> AGC: src_rms=%.0f gain=%.2f out_rms=%.0f\n", rms, g,
+        sqrt(sumSq / (double)inference.n_samples) * g);
 }
 
 static void capture_samples(void* arg) {
 
   const int32_t i2s_bytes_to_read = (uint32_t)arg;
-  size_t bytes_read = i2s_bytes_to_read;
+  size_t bytes_read = 0;
 
   while (record_status) {
 
@@ -180,16 +276,20 @@ static void capture_samples(void* arg) {
         ei_printf("Partial I2S read");
         }
 
-        // scale the data (otherwise the sound is too quiet)
-        for (int x = 0; x < i2s_bytes_to_read/2; x++) {
-            sampleBuffer[x] = (int16_t)(sampleBuffer[x]) * 8;
-        }
-
-        if (record_status) {
-            audio_inference_callback(i2s_bytes_to_read);
-        }
-        else {
-            break;
+        // 原样缓存 (不做增益), 窗口满后统一 AGC
+        int n = (int)(bytes_read / 2);   // int16 样本数
+        for (int x = 0; x < n; x++) {
+            window_raw[inference.buf_count++] = sampleBuffer[x];
+            if (inference.buf_count >= inference.n_samples) {
+                inference.buf_count = 0;
+                if (record_status) {
+                    apply_agc();
+                    inference.buf_ready = 1;
+                }
+                else {
+                    break;
+                }
+            }
         }
     }
   }
@@ -206,8 +306,9 @@ static void capture_samples(void* arg) {
 static bool microphone_inference_start(uint32_t n_samples)
 {
     inference.buffer = (int16_t *)malloc(n_samples * sizeof(int16_t));
+    window_raw = (int16_t *)malloc(n_samples * sizeof(int16_t));
 
-    if(inference.buffer == NULL) {
+    if(inference.buffer == NULL || window_raw == NULL) {
         return false;
     }
 
@@ -262,6 +363,8 @@ static void microphone_inference_end(void)
 {
     i2s_deinit();
     ei_free(inference.buffer);
+    ei_free(window_raw);
+    window_raw = nullptr;
 }
 
 
