@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { mkdirSync } from 'node:fs';
 import sharp from 'sharp';
 
