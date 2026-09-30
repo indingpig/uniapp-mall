@@ -6,7 +6,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
-
+*.zip
 node_modules
 .DS_Store
 dist
@@ -23,3 +23,6 @@ dist
 # PlatformIO 构建产物
 .pio/
 /uniapp/dist/
+
+# PlatformIO 自动生成（每台机器各一份，勿提交）
+.vscode/c_cpp_properties.json

@@ -71,8 +71,10 @@ pio device monitor           # 串口监视器（115200）
 
 - PlatformIO 配置在**仓库根** `platformio.ini`（不在 arduino/ 目录），`src_dir` 指向 `arduino/baby_cry_detector/`
 - **代码使用旧版 I2S 驱动 `driver/i2s.h`，必须用 arduino-esp32 2.0.x（platform espressif32@6.x）**；升级到 3.x 需整体迁移到 `ESP_I2S.h`，不要随手升级 platform
-- 每个子目录（`audio_app/`、`audio_streamer/`、`i2s_recorder/`、`waveform_viewer/` 等）是独立子工程，各有自己的 setup/loop；通过各 `[env:*]` 的 `src_filter` 只编译该工程的文件 —— **给某环境新增源文件时，必须同步更新 platformio.ini 的 src_filter**
-- 依赖 Edge Impulse 推理库 `babyCry_inferencing`，位于本机 `D:/ArduinoProject/libraries`（`lib_extra_dirs`）
+- 每个子目录（`audio_app/`、`audio_streamer/`、`i2s_recorder/`、`waveform_viewer/` 等）是独立子工程，各有自己的 setup/loop；通过各 `[env:*]` 的 `build_src_filter` 只编译该工程的文件 —— **给某环境新增源文件时，必须同步更新 platformio.ini 的 src_filter**
+- **PlatformIO 不会把 `build_src_filter` 里的 `.ino` 当源文件编译**（可编译扩展只有 c/cpp/cc/cxx/c++/S/asm）：`src_dir` 根目录的 `.ino` 会先被转成临时的 `.ino.cpp` 再编译，所以过滤要用 `+<xxx.ino*>` 匹配转换后的文件名；子目录里的 `.ino` 永不转换，子工程若要编译须在环境里把 `src_dir` 指到该子目录（参考 `[env:audio_app]`）
+- 依赖 Edge Impulse 推理库 `babyCry_inferencing`，`lib_extra_dirs` 同时列出两台开发机的库目录（家用 Windows 机 `D:/ArduinoProject/libraries`、Mac `/Users/sheldon/Documents/Arduino/libraries`），不存在的目录会被自动跳过
+- Mac 上 `pio` 未进 PATH，用 `~/.platformio/penv/bin/pio`（VS Code PlatformIO 扩展自带）
 - BLE + WiFi + EI 模型体积大，使用 `huge_app.csv` 分区（3MB App，无 OTA）
 - 主固件 `baby_cry_detector` 的编译组成：`baby_cry_detector.ino` + `ble_provision.*` + `wifi_connect.*` + `led.*` + `config.h`
 
