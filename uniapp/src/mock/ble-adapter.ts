@@ -1,11 +1,10 @@
 /**
- * H5 端蓝牙模拟器（设计验收用）
+ * H5 端蓝牙适配器挂载点（按浏览器能力二选一）
  *
- * 真实蓝牙实现见 uni_modules/bin-bluetooth（仅 App/小程序编译）。
- * 本模块模拟同一套接口，让配对流程（扫描 → 连接 → 配网 → 状态通知）
- * 可以在浏览器里完整走通。
+ * - 浏览器支持 Web Bluetooth（Chrome/Edge，需 HTTPS 或 localhost）→ 挂真实适配器，
+ *   可直接连接真机（见 utils/web-bluetooth-adapter.ts）
+ * - 不支持（iOS Safari / 微信内置浏览器等）→ 挂模拟器，让配对流程在浏览器里走通
  *
- * 开关：BLE_MOCK_ENABLED（配对页据此决定展示引导态还是真实流程）
  * 模拟行为：扫描 0.6s/1.5s 后先后发现两台设备；30s 无停止则 onEnd；
  *          连接 0.6s 成功；写入 serverUrl 后 1.5s 推送 server_connected
  *          （WiFi 密码为空时推送 error，用于验证失败路径）。
@@ -19,8 +18,13 @@ import {
   BLE_SERVICE_UUID,
   DEVICE_NAME_PREFIX,
 } from '@/constants/ble';
+import * as webBle from '@/utils/web-bluetooth-adapter';
 
-export const BLE_MOCK_ENABLED = true;
+/** 浏览器是否支持 Web Bluetooth（支持则挂真实适配器，否则挂模拟器） */
+export const WEB_BLUETOOTH_SUPPORTED = webBle.isWebBluetoothSupported();
+
+/** 当前挂载的是否为模拟器（true = 浏览器不支持 Web Bluetooth，走假数据） */
+export const BLE_MOCK_ENABLED = !WEB_BLUETOOTH_SUPPORTED;
 
 export interface MockAdvertisement {
   deviceId: string;
@@ -180,10 +184,17 @@ export function createPeripheral(_deviceId: string) {
 
 /* ---------- 运行时挂载 ----------
  * useBLE 通过 declare function 裸调用这些名字（无 import，避免双分支冲突），
- * 裸调用在运行时解析到全局 —— 这里把模拟实现挂上去。
+ * 裸调用在运行时解析到全局 —— 按浏览器能力挂载真实适配器或模拟实现。
  */
-if (BLE_MOCK_ENABLED) {
-  const g = globalThis as unknown as Record<string, unknown>;
+const g = globalThis as unknown as Record<string, unknown>;
+if (WEB_BLUETOOTH_SUPPORTED) {
+  g.openAdapter = webBle.openAdapter;
+  g.closeAdapter = webBle.closeAdapter;
+  g.createScanner = webBle.createScanner;
+  g.createPeripheral = webBle.createPeripheral;
+  g.characteristicOf = webBle.characteristicOf;
+}
+else {
   g.openAdapter = openAdapter;
   g.closeAdapter = closeAdapter;
   g.createScanner = createScanner;

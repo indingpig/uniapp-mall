@@ -4,7 +4,6 @@ import { onShow } from '@dcloudio/uni-app';
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { useBLE } from '@/hooks/useBLE';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
-import { BLE_MOCK_ENABLED } from '@/mock/ble-adapter';
 import { getIcon } from '@/utils/icons';
 
 const {
@@ -20,7 +19,8 @@ const {
 
 const bleNotSupported = ref(false);
 // #ifdef H5
-bleNotSupported.value = !BLE_MOCK_ENABLED; // H5 无原生蓝牙；模拟器开启时走完整配对流程
+// H5 恒走适配器：支持 Web Bluetooth 的浏览器挂真实蓝牙，其余挂模拟器（见 mock/ble-adapter.ts）
+bleNotSupported.value = false;
 // #endif
 
 const { capsuleTopGap } = useCapsuleGap();
