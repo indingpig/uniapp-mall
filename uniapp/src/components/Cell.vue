@@ -78,7 +78,7 @@ const slots = useSlots();
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 /* 静态尺寸一律 rpx()（规范第 10 节单位规则）；1px 发丝分割线是 px 例外清单项 */
 .cell {
   position: relative;

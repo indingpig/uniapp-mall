@@ -43,7 +43,7 @@ const slots = useSlots();
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 /* 静态尺寸一律 rpx()（规范第 10 节单位规则）；胶囊圆角用 999rpx 与高度无关 */
 .pill {
   display: inline-flex;

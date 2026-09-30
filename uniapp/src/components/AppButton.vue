@@ -44,7 +44,7 @@ const hoverClass = computed(() => (props.disabled ? 'none' : 'app-btn--hover'));
   </button>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 /* 重置 uni-app <button> 默认样式（含小程序 ::after 边框） */
 .app-btn {
   display: flex;

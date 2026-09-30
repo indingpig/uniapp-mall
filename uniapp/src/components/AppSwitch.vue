@@ -40,7 +40,7 @@ function toggle() {
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .switch {
   position: relative;
   width: rpx(44);

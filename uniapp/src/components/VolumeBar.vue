@@ -59,7 +59,7 @@ const percent = computed(() => {
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 /* 静态尺寸一律 rpx()（规范第 10 节单位规则）；位移动画走 transform，与单位无关 */
 /* 容器高 rpx(18)：rpx(10) 轨道 + 游标 rpx(14) 的上下溢出空间 */
 .vbar {

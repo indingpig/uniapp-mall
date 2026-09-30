@@ -58,7 +58,7 @@ const meta = computed(() => EVENT_META[props.state]);
   </Cell>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .event-item__title {
   font-size: rpx(14);
   font-weight: 500;

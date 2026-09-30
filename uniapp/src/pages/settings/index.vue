@@ -69,12 +69,6 @@ function persistSettings() {
   catch { /* 存储失败不阻塞 UI */ }
 }
 
-function onSwitchChange(key: 'cryAlert' | 'pushNotify', e: unknown) {
-  const value = (e as { detail: { value: boolean } }).detail.value;
-  settings.value[key] = value;
-  persistSettings();
-}
-
 function pickSensitivity() {
   uni.showActionSheet({
     itemList: SENSITIVITY_OPTIONS,
@@ -205,12 +199,7 @@ onShow(() => {
           <view class="row">
             <text class="row-title text-main">哭声提醒</text>
             <view class="flex-1" />
-            <switch
-              :checked="settings.cryAlert"
-              color="#7BA05B"
-              class="row-switch"
-              @change="onSwitchChange('cryAlert', $event)"
-            />
+            <AppSwitch v-model="settings.cryAlert" @change="persistSettings" />
           </view>
           <view class="row" @tap="pickSensitivity">
             <text class="row-title text-main">灵敏度阈值</text>
@@ -227,12 +216,7 @@ onShow(() => {
           <view class="row">
             <text class="row-title text-main">推送通知</text>
             <view class="flex-1" />
-            <switch
-              :checked="settings.pushNotify"
-              color="#7BA05B"
-              class="row-switch"
-              @change="onSwitchChange('pushNotify', $event)"
-            />
+            <AppSwitch v-model="settings.pushNotify" @change="persistSettings" />
           </view>
         </view>
       </view>
@@ -359,10 +343,6 @@ page {
   width: 28rpx;
   height: 28rpx;
   margin-left: 8rpx;
-}
-
-.row-switch {
-  transform: scale(0.88);
 }
 
 /* ------------------------------------------------------------------ */

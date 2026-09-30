@@ -31,7 +31,7 @@ withDefaults(defineProps<Props>(), {
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .group-card {
   display: flex;
   flex-direction: column;

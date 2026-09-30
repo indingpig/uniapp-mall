@@ -43,7 +43,7 @@ const meta = computed(() => STATUS_META[props.state]);
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .status-card {
   display: flex;
   flex-direction: column;

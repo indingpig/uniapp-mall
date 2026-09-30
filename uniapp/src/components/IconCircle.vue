@@ -32,7 +32,7 @@ withDefaults(defineProps<Props>(), {
   </view>
 </template>
 
-<style scoped>
+<style scoped lang="scss">
 .icon-circle {
   display: flex;
   align-items: center;
