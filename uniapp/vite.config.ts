@@ -41,7 +41,10 @@ export default defineConfig({
       resolvers: [UniUIResolver()],
     }),
     // https://uni-helper.js.org/vite-plugin-uni-pages
-    UniPages(),
+    UniPages({
+      // 固定启动页为首页（文件扫描顺序不稳定，不能依赖目录序）
+      homePage: 'pages/home/index',
+    }),
     // https://uni-helper.js.org/vite-plugin-uni-layouts
     UniLayouts(),
     // https://uni-helper.js.org/vite-plugin-uni-manifest

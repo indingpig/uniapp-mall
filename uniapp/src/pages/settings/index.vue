@@ -1,3 +1,7 @@
+<route lang="json">
+{ "layout": "tabbar" }
+</route>
+
 <script setup lang="ts">
 import type { DeviceData } from '@/api/baby';
 import { onShow } from '@dcloudio/uni-app';
@@ -270,8 +274,7 @@ onShow(() => {
       </view>
     </view>
 
-    <!-- 自定义底部导航（设计稿样式） -->
-    <CustomTabBar current="settings" />
+    <!-- 底部导航由 layouts/tabbar.vue 布局统一挂载 -->
   </view>
 </template>
 

@@ -1,3 +1,7 @@
+<route lang="json">
+{ "layout": "tabbar" }
+</route>
+
 <script setup lang="ts">
 import type { HistoryRecord } from '@/api/baby';
 import type { IconKey } from '@/utils/icons';
@@ -203,7 +207,7 @@ const sleepText = computed(() => fmtDuration(sleepMs.value));
       </view>
     </template>
 
-    <CustomTabBar current="history" />
+    <!-- 底部导航由 layouts/tabbar.vue 布局统一挂载 -->
   </view>
 </template>
 

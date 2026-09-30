@@ -1,3 +1,7 @@
+<route lang="json">
+{ "layout": "tabbar" }
+</route>
+
 <script setup lang="ts">
 import type { DailyStat, HistoryRecord, StatsSummary } from '@/api/baby';
 import { onShow } from '@dcloudio/uni-app';
@@ -352,7 +356,7 @@ const barCount = computed(() => daily.value.length);
       </view>
     </template>
 
-    <CustomTabBar current="stats" />
+    <!-- 底部导航由 layouts/tabbar.vue 布局统一挂载 -->
   </view>
 </template>
 
