@@ -22,6 +22,9 @@ export default defineConfig({
     },
   },
   server: {
+    // 绑全部接口：与其他 vite 项目同端口时能正确检测冲突（自动 +1 生效），
+    // 手机/局域网设备也可通过 http://<本机IP>:5173 访问
+    host: true,
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
