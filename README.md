@@ -54,10 +54,12 @@ babycryMonitor/
 
 ### 后端 (server)
 
+> 📦 本项目统一使用 [pnpm](https://pnpm.io/zh/) 作为包管理器（Mac / Windows 两台开发机一致），`npm install` 会被 preinstall 守卫拦截。
+
 ```bash
 cd server
-npm install
-npm run dev        # node --watch 开发运行
+pnpm install
+pnpm run dev       # node --watch 开发运行
 ```
 
 - 端口：读 `.env` 的 `PORT`（当前 3001，代码默认 8080）
@@ -68,10 +70,10 @@ npm run dev        # node --watch 开发运行
 
 ```bash
 cd uniapp
-npm install
-npm run dev                        # H5 开发服务器（默认连 ws://localhost:3001）
-npm run dev -- --platform mp-weixin    # 微信小程序
-npm run dev -- --platform app-plus     # App
+pnpm install
+pnpm run dev                       # H5 开发服务器（默认连 ws://localhost:3001）
+pnpm run dev -- --platform mp-weixin   # 微信小程序
+pnpm run dev -- --platform app-plus    # App
 ```
 
 ### 硬件端 (ESP32 / PlatformIO)

@@ -26,3 +26,7 @@ dist
 
 # PlatformIO 自动生成（每台机器各一份，勿提交）
 .vscode/c_cpp_properties.json
+.vscode/launch.json
+
+# PlatformIO 自动生成（每台机器各一份，勿提交）
+.vscode/launch.json
