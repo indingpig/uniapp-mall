@@ -1,5 +1,5 @@
 <route lang="json">
-{ "layout": "tabbar" }
+{ "layout": "tabbar", "type": "home" }
 </route>
 
 <script setup lang="ts">
