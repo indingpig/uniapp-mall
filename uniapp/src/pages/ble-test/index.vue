@@ -9,6 +9,9 @@ import {
   openAdapter,
 } from '@/uni_modules/bin-bluetooth';
 // #endif
+// 注意:getIcon 导入必须放在平台条件块之外 —— eslint 导入排序曾把它挪进上方
+// 平台块内,H5 编译剥掉该块后 getIcon 未定义,返回按钮会渲染成注释节点
+import { getIcon } from '@/utils/icons';
 // #ifdef H5
 interface H5ScannerLike { startScan: (o: never) => void; stopScan: () => void }
 interface H5PeripheralLike {
@@ -176,12 +179,28 @@ function doDisconnect() {
   addLog('已断开');
 }
 
+/* ==================== 返回 ==================== */
+
+function goBack() {
+  // 深链直接进入时无页面历史,回首页兜底
+  if (getCurrentPages().length > 1)
+    uni.navigateBack();
+  else
+    uni.reLaunch({ url: '/pages/home/index' });
+}
+
 onBeforeUnmount(doDisconnect);
 </script>
 
 <template>
   <view class="page min-h-full bg-page p-3 px-4 flex flex-col gap-3">
-    <text class="title font-bold text-main">BLE 串口测试</text>
+    <!-- 顶部导航行:全局 navigationStyle=custom,自绘返回按钮 -->
+    <view class="nav-row flex items-center">
+      <view class="nav-row__back rounded-full flex items-center justify-center" @tap="goBack">
+        <image class="nav-row__icon" :src="getIcon('chevron-left', '#3B362E')" mode="aspectFit" />
+      </view>
+      <text class="nav-row__title font-bold text-main">BLE 串口测试</text>
+    </view>
 
     <!-- 连接控制 -->
     <view class="card bg-card rounded-md p-3">
@@ -233,12 +252,39 @@ onBeforeUnmount(doDisconnect);
 </template>
 
 <style lang="scss" scoped>
-.title {
-  font-size: 36rpx;
+// 确定高度(而非仅 min-height):flex 容器高度不定时,Chrome 会把列内容
+// 布局得比视口高出一个 gap,日志卡底部被推出屏幕外。
+// box-sizing 必须 border-box:uni-h5 的 view 默认 content-box,
+// height:100% + 页面 padding 会恰好高出两个内边距、底部贴边
+.page {
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.nav-row {
+  gap: 16rpx;
+  // 全局 navigationStyle=custom,顶部让出状态栏
+  padding-top: calc(env(safe-area-inset-top) + 8rpx);
+
+  &__back {
+    width: 64rpx;
+    height: 64rpx;
+    background-color: $color-card-soft;
+  }
+
+  &__icon {
+    width: 40rpx;
+    height: 40rpx;
+  }
+
+  &__title {
+    font-size: 34rpx;
+  }
 }
 
 .card--log {
   min-height: 0;
+  min-width: 0; // 页面级 flex 项:允许收缩,防长日志行把卡片撑破
 }
 
 .label {
@@ -261,6 +307,7 @@ onBeforeUnmount(doDisconnect);
 }
 
 .btn {
+  margin: 0; // uni-h5 button 默认水平 auto 居中,会顶乱 flex 行布局
   height: 72rpx;
   padding: 0 28rpx;
   border-radius: 36rpx;
@@ -273,6 +320,11 @@ onBeforeUnmount(doDisconnect);
 
 .log-box {
   min-height: 400rpx;
+  min-width: 0; // uni-h5 scroll-view 外层不受 flex 拉伸约束(min-width:auto),会按内容+padding 撑出容器
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   background-color: #1e1e1e;
   padding: 20rpx;
   font-family: 'Courier New', monospace;
@@ -282,5 +334,7 @@ onBeforeUnmount(doDisconnect);
   font-size: 22rpx;
   color: #7ec87e;
   line-height: 1.8;
+  white-space: pre-wrap; // 长十六进制串换行,不横向撑破日志框
+  word-break: break-all;
 }
 </style>
