@@ -139,6 +139,12 @@ function drillToDay() {
   const d = selectedDay.value;
   if (!d)
     return;
+  // 选中的就是今天 → 就地切到「今日」周期查看当天明细，不跳历史页
+  // （今日视图本身就是当天数据；历史页仅用于回看更早的日子）
+  if (daily.value.length > 0 && selectedDayIndex.value === daily.value.length - 1) {
+    setPeriod('today');
+    return;
+  }
   uni.setStorageSync('STATS_DRILL_DATE', d.date);
   uni.switchTab({ url: '/pages/history/index' });
 }
@@ -458,7 +464,11 @@ page {
   }
 
   &__label {
-    font-size: 23rpx;
+    // text 在 H5 渲染为 inline,width/text-align 需要显式 block,才能与居中的立柱对中
+    display: block;
+    width: 100%;
+    text-align: center;
+    font-size: 20rpx;
 
     &--today {
       font-weight: 500;
