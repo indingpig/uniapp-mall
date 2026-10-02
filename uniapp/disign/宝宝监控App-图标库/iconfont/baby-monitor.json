@@ -19,12 +19,13 @@
   "moon": 59665,
   "plus": 59666,
   "radar": 59667,
-  "search": 59668,
-  "signal-bars": 59669,
-  "signal-off": 59670,
-  "spinner": 59671,
-  "stop": 59672,
-  "wifi": 59673,
-  "wifi-off": 59674,
-  "wifi-signal": 59675
+  "refresh": 59668,
+  "search": 59669,
+  "signal-bars": 59670,
+  "signal-off": 59671,
+  "spinner": 59672,
+  "stop": 59673,
+  "wifi": 59674,
+  "wifi-off": 59675,
+  "wifi-signal": 59676
 }

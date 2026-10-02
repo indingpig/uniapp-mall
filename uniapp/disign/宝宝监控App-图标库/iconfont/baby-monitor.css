@@ -1,10 +1,3 @@
-@font-face {
-    font-family: "baby-monitor";
-    src: url("/static/fonts/baby-monitor.woff2?fb5ffe78f9d4fb20") format("woff2"),
-url("/static/fonts/baby-monitor.woff?fb5ffe78f9d4fb20") format("woff"),
-url("/static/fonts/baby-monitor.ttf?fb5ffe78f9d4fb20") format("truetype");
-}
-
 i[class^="bmi-"]:before, i[class*=" bmi-"]:before {
     font-family: baby-monitor !important;
     font-style: normal;
@@ -13,5 +6,41 @@ i[class^="bmi-"]:before, i[class*=" bmi-"]:before {
     text-transform: none;
     line-height: 1;
     -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
 }
+
+@font-face {
+    font-family: "baby-monitor";
+    src: url("/static/fonts/baby-monitor.woff2") format("woff2"),
+         url("/static/fonts/baby-monitor.woff") format("woff"),
+         url("/static/fonts/baby-monitor.ttf") format("truetype");
+}
+
+.bmi-activity:before { content: "\e900"; }
+.bmi-bar-chart:before { content: "\e901"; }
+.bmi-battery:before { content: "\e902"; }
+.bmi-bell:before { content: "\e903"; }
+.bmi-bell-off:before { content: "\e904"; }
+.bmi-bluetooth:before { content: "\e905"; }
+.bmi-bluetooth-off:before { content: "\e906"; }
+.bmi-chevron-left:before { content: "\e907"; }
+.bmi-chevron-right:before { content: "\e908"; }
+.bmi-clock:before { content: "\e909"; }
+.bmi-clock-empty:before { content: "\e90a"; }
+.bmi-download:before { content: "\e90b"; }
+.bmi-droplet:before { content: "\e90c"; }
+.bmi-eye:before { content: "\e90d"; }
+.bmi-gear:before { content: "\e90e"; }
+.bmi-home:before { content: "\e90f"; }
+.bmi-mic:before { content: "\e910"; }
+.bmi-moon:before { content: "\e911"; }
+.bmi-plus:before { content: "\e912"; }
+.bmi-radar:before { content: "\e913"; }
+.bmi-refresh:before { content: "\e914"; }
+.bmi-search:before { content: "\e915"; }
+.bmi-signal-bars:before { content: "\e916"; }
+.bmi-signal-off:before { content: "\e917"; }
+.bmi-spinner:before { content: "\e918"; }
+.bmi-stop:before { content: "\e919"; }
+.bmi-wifi:before { content: "\e91a"; }
+.bmi-wifi-off:before { content: "\e91b"; }
+.bmi-wifi-signal:before { content: "\e91c"; }
