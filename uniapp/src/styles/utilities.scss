@@ -22,6 +22,21 @@
 @use 'sass:math';
 @use '@/styles/uni.scss' as *;
 
+/* ========== 全局盒模型重置 ==========
+ * uni-h5 内置组件（view/text/image/scroll-view…）无任何 box-sizing 声明，
+ * 默认 content-box，是"width:100% + padding 横向撑破 flex 卡片"类布局坑的根源，
+ * 统一重置为 border-box。uni-ui 组件自带 border-box 声明，不受影响。
+ * 【MP】微信 WXSS 不支持 * 选择器，本段被条件编译排除——小程序端不生效，
+ * 关键布局节点（.page / scroll-view 等）上的显式 box-sizing 声明保留作 MP 兜底。
+ */
+/* #ifndef MP-WEIXIN */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+/* #endif */
+
 /* ========== 原子类专用补充 token ========== */
 $shadow-sm: 0 2rpx 8rpx rgba(31, 31, 31, 0.04);          // 轻投影
 $shadow-md: 0 8rpx 24rpx rgba(31, 31, 31, 0.08);         // 卡片投影

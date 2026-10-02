@@ -187,18 +187,20 @@ const sleepText = computed(() => fmtDuration(sleepMs.value));
           <text class="timeline__title text-main font-semibold">时间线</text>
           <text class="timeline__meta text-secondary">共 {{ eventCount }} 条 · 倒序</text>
         </view>
-        <view v-if="rows.length > 0" class="flex flex-col px-8 pb-4 pt-2">
-          <view v-for="r in rows" :key="r.key" class="tl-row flex items-start gap-3">
-            <text class="tl-row__time text-muted shrink-0">{{ r.timeText }}</text>
-            <view class="tl-row__chip rounded-full flex items-center justify-center shrink-0" :style="{ background: r.chipBg }">
-              <image class="tl-row__icon" :src="getIcon(r.icon, r.color)" mode="aspectFit" />
-            </view>
-            <view class="flex-1 min-w-0">
-              <text class="tl-row__title text-main block">{{ r.title }}</text>
-              <text class="tl-row__sub text-secondary block">{{ r.detail }}</text>
+        <scroll-view v-if="rows.length > 0" scroll-y class="timeline__list">
+          <view class="flex flex-col px-8 pb-4 pt-2">
+            <view v-for="r in rows" :key="r.key" class="tl-row flex items-start gap-3">
+              <text class="tl-row__time text-muted shrink-0">{{ r.timeText }}</text>
+              <view class="tl-row__chip rounded-full flex items-center justify-center shrink-0" :style="{ background: r.chipBg }">
+                <image class="tl-row__icon" :src="getIcon(r.icon, r.color)" mode="aspectFit" />
+              </view>
+              <view class="flex-1 min-w-0">
+                <text class="tl-row__title text-main block">{{ r.title }}</text>
+                <text class="tl-row__sub text-secondary block">{{ r.detail }}</text>
+              </view>
             </view>
           </view>
-        </view>
+        </scroll-view>
         <view v-else class="timeline__empty flex flex-col items-center py-8 gap-2">
           <image class="timeline__empty-icon" :src="getIcon('clock-empty', '#D5CFC2')" mode="aspectFit" />
           <text class="text-secondary">当天暂无事件记录</text>
@@ -220,9 +222,13 @@ page {
 <style lang="scss" scoped>
 .page {
   box-sizing: border-box;
+  // 固定视口骨架：外层不滚动，滚动收敛到时间线卡内（scroll-view）
+  height: 100vh;
   padding: 1.25rem;
   padding-top: var(--status-bar-height);
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background-color: $color-bg;
   padding-bottom: 160rpx;
 }
@@ -292,10 +298,16 @@ page {
   }
 }
 
-/* ---------- 时间线（行高档位：时间线行 38px） ---------- */
+/* ---------- 时间线（行高档位：时间线行 38px；卡内滚动） ---------- */
 .timeline {
   margin-top: 27rpx;
   border: 1px solid $color-border;
+  // 撑满页面剩余高度：标题/脚注固定，仅列表区滚动
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 
   &__title {
     font-size: 31rpx; // card-title 15px(600)
@@ -304,6 +316,18 @@ page {
 
   &__meta {
     font-size: 25rpx;
+  }
+
+  &__list {
+    // uni-h5 的 view 默认 content-box，scroll-view 作为 flex 子项需显式收缩
+    flex: 1;
+    min-height: 0;
+    box-sizing: border-box;
+  }
+
+  &__empty {
+    flex: 1;
+    justify-content: center;
   }
 
   &__empty-icon {
