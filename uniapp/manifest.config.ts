@@ -47,7 +47,6 @@ export default defineManifestConfig({
           // Android 12+ 蓝牙权限
           '<uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>',
           '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>',
-          '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
           // 声明使用 BLE 功能（Google Play 要求，普通 BLE 设备不需要硬件过滤）
           '<uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>',
         ],
