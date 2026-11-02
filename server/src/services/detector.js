@@ -29,14 +29,26 @@ export class Detector extends EventEmitter {
     this._startOfflineWatch();
   }
 
-  /** ESP32 每次上报调用一次 */
-  feed(rms, peak) {
+  /**
+   * ESP32 每次上报调用一次
+   * @param {number} rms
+   * @param {number} peak
+   * @param {string|null} label 设备端 Edge Impulse 识别结果 (如 'babycry')。
+   *   有 label 时以模型为准: babycry 直接计为哭闹样本, 且不算安静;
+   *   为 null 时退回纯 RMS 阈值判定 (兼容模拟器/未开监听的设备)
+   */
+  feed(rms, peak, label = null) {
     this.lastDataTime = Date.now();
     if (this.status === STATUS.OFFLINE) {
       this._changeStatus(STATUS.AWAKE);
     }
 
-    this.rmsHistory.push(rms);
+    this.rmsHistory.push({
+      rms,
+      cry: label === 'babycry' || rms >= CRY_RMS_THRESHOLD,
+      quiet: rms <= QUIET_RMS_THRESHOLD && label !== 'babycry',
+      mid: rms > QUIET_RMS_THRESHOLD && rms < CRY_RMS_THRESHOLD && label !== 'babycry',
+    });
     if (this.rmsHistory.length > CRY_HISTORY_WINDOW) {
       this.rmsHistory.shift();
     }
@@ -45,14 +57,14 @@ export class Detector extends EventEmitter {
 
     // -- 哭闹检测 (滑动窗口)
     if (this.status !== STATUS.CRYING) {
-      const cryCount = this.rmsHistory.filter(v => v >= CRY_RMS_THRESHOLD).length;
+      const cryCount = this.rmsHistory.filter(s => s.cry).length;
       if (cryCount >= CRY_TRIGGER_COUNT && now - this.lastCryTime > CRY_COOLDOWN_MS) {
         this._changeStatus(STATUS.CRYING);
         this.lastCryTime = now;
       }
     } else {
       // 正在哭闹中：如果最近窗口都很安静，切回 awake
-      const quietCount = this.rmsHistory.filter(v => v <= QUIET_RMS_THRESHOLD).length;
+      const quietCount = this.rmsHistory.filter(s => s.quiet).length;
       if (quietCount >= CRY_TRIGGER_COUNT) {
         this._changeStatus(STATUS.AWAKE);
       }
@@ -62,13 +74,13 @@ export class Detector extends EventEmitter {
     if (this.status === STATUS.AWAKE || this.status === STATUS.PLAYING) {
       if (now - this.lastStatusChange > QUIET_DURATION_MS) {
         const recent = this.rmsHistory.slice(-CRY_HISTORY_WINDOW);
-        if (recent.length > 0 && recent.every(v => v <= QUIET_RMS_THRESHOLD)) {
+        if (recent.length > 0 && recent.every(s => s.quiet)) {
           this._changeStatus(STATUS.SLEEPING);
         }
       }
     } else if (this.status === STATUS.SLEEPING) {
       // 睡中被吵醒
-      const loud = this.rmsHistory.filter(v => v >= CRY_RMS_THRESHOLD).length;
+      const loud = this.rmsHistory.filter(s => s.cry).length;
       if (loud >= 2) {
         this._changeStatus(STATUS.AWAKE);
       }
@@ -77,13 +89,13 @@ export class Detector extends EventEmitter {
     // -- 玩耍检测 (中等音量持续)
     if (this.status === STATUS.AWAKE) {
       if (now - this.lastStatusChange > 30_000) {
-        const mid = this.rmsHistory.filter(v => v > QUIET_RMS_THRESHOLD && v < CRY_RMS_THRESHOLD).length;
+        const mid = this.rmsHistory.filter(s => s.mid).length;
         if (mid >= 7) {
           this._changeStatus(STATUS.PLAYING);
         }
       }
     } else if (this.status === STATUS.PLAYING) {
-      const quiet = this.rmsHistory.filter(v => v <= QUIET_RMS_THRESHOLD).length;
+      const quiet = this.rmsHistory.filter(s => s.quiet).length;
       if (quiet >= 8) {
         this._changeStatus(STATUS.AWAKE);
       }
