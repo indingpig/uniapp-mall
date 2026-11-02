@@ -68,6 +68,8 @@ export default defineManifestConfig({
           NSMicrophoneUsageDescription: '用于监测宝宝哭声',
           NSBluetoothAlwaysUsageDescription: '用于蓝牙扫描并连接宝宝监护器设备',
           NSBluetoothPeripheralUsageDescription: '用于与宝宝监护器设备通信',
+          // 局域网直连开发板（采集页连 ws://babycry.local 或板子 IP）
+          NSLocalNetworkUsageDescription: '用于连接同一局域网内的宝宝监护器设备进行数据采集',
         },
       },
       /* SDK配置 */

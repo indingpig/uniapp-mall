@@ -8,6 +8,7 @@ type _LocationUrl =
   "/pages/ble-test/index" |
   "/pages/cart/index" |
   "/pages/category/index" |
+  "/pages/collect/index" |
   "/pages/history/index" |
   "/pages/mine/index" |
   "/pages/pairing/index" |

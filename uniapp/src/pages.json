@@ -50,6 +50,10 @@
       "path": "pages/stats/index",
       "type": "page",
       "layout": "tabbar"
+    },
+    {
+      "path": "pages/collect/index",
+      "type": "page"
     }
   ],
   "subPackages": [],

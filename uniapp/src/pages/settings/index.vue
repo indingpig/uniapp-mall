@@ -123,6 +123,10 @@ function goBLETest() {
   uni.navigateTo({ url: '/pages/ble-test/index' });
 }
 
+function goCollect() {
+  uni.navigateTo({ url: '/pages/collect/index' });
+}
+
 function onDeviceTap() {
   uni.showToast({ title: '设备详情开发中', icon: 'none' });
 }
@@ -252,6 +256,12 @@ onShow(() => {
             <text class="row-title text-main">BLE 串口测试</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">蓝牙收发调试</text>
+            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+          </view>
+          <view class="row" @tap="goCollect">
+            <text class="row-title text-main">哭声数据采集</text>
+            <view class="flex-1" />
+            <text class="row-value text-secondary">Edge Impulse 训练数据</text>
             <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
           </view>
         </view>
