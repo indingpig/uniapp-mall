@@ -1,5 +1,5 @@
 import type { BabyStatusData, DeviceData, VolumeData } from '@/api/baby';
-import { onBeforeUnmount, onMounted, readonly, ref } from 'vue';
+import { onBeforeUnmount, onMounted, readonly, ref, watch } from 'vue';
 import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
 import { STATUS_META, toCardState } from '@/constants/babyStatus';
 
@@ -8,7 +8,7 @@ const POLL_INTERVAL = 5000;
 const RECONNECT_DELAY = 3000;
 
 interface WsMessage {
-  type: 'init' | 'statusChange' | 'volume';
+  type: 'init' | 'statusChange' | 'volume' | 'inference' | 'listenState';
   status?: string;
   durationSec?: number;
   rms?: number;
@@ -16,6 +16,11 @@ interface WsMessage {
   from?: string;
   to?: string;
   timestamp?: number;
+  // inference 消息 (设备端模型识别结果)
+  label?: string;
+  score?: number;
+  // listenState 消息 (设备监听状态回执)
+  listening?: boolean;
 }
 
 export function useBabyMonitor() {
@@ -38,6 +43,8 @@ export function useBabyMonitor() {
   });
 
   const durationSec = ref(0);
+  /** 设备是否在跑推理监听（由 App 指令触发，设备回执驱动） */
+  const listening = ref(false);
 
   let socket: ReturnType<typeof uni.connectSocket> | null = null;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -75,8 +82,9 @@ export function useBabyMonitor() {
   /* -------------------- WebSocket -------------------- */
 
   function connectWs() {
-    // H5 端不传 success/fail/complete 回调时返回 Promise 而非 SocketTask，必须带一个回调才能拿到 task
-    socket = uni.connectSocket({ url: WS_URL, success: () => {} });
+    // 必须传 complete 回调才返回 SocketTask（不传回调时返回 Promise，
+    // success 回调里的 res 不是 SocketTask）
+    socket = uni.connectSocket({ url: WS_URL, complete: () => {} });
 
     socket.onOpen(() => {
       console.warn('[WS] Connected');
@@ -84,7 +92,7 @@ export function useBabyMonitor() {
       stopPolling();
     });
 
-    socket.onMessage((res) => {
+    socket.onMessage((res: { data: string | ArrayBuffer }) => {
       try {
         const msg: WsMessage = JSON.parse(res.data as string);
         switch (msg.type) {
@@ -103,6 +111,9 @@ export function useBabyMonitor() {
           case 'volume':
             applyVolume(msg.rms || 0, msg.peak || 0, msg.status);
             break;
+          case 'listenState':
+            listening.value = !!msg.listening;
+            break;
         }
       }
       catch { /* ignore malformed */ }
@@ -115,7 +126,7 @@ export function useBabyMonitor() {
       scheduleReconnect();
     });
 
-    socket.onError((err) => {
+    socket.onError((err: { errMsg?: string }) => {
       console.error('[WS] Error', err);
       socket?.close();
     });
@@ -143,6 +154,22 @@ export function useBabyMonitor() {
       socket = null;
     }
     wsActive = false;
+  }
+
+  /* -------------------- 指令下发（App → server 中继 → 设备） -------------------- */
+
+  /**
+   * 发送监听指令。发送成功后本地先置位（乐观更新给出即时反馈），
+   * 设备回执的 listenState 会覆盖为真实状态。
+   */
+  function sendCmd(cmd: 'listen_on' | 'listen_off') {
+    if (!socket || !wsActive) {
+      console.warn('[WS] sendCmd skipped: not connected');
+      return false;
+    }
+    socket.send({ data: JSON.stringify({ type: 'cmd', cmd }) });
+    listening.value = cmd === 'listen_on';
+    return true;
   }
 
   /* -------------------- 轮询（WS 断开时兜底） -------------------- */
@@ -199,6 +226,12 @@ export function useBabyMonitor() {
 
   /* -------------------- 生命周期 -------------------- */
 
+  // 设备离线 → 立即退出监听态（规范 12.3 逻辑，由 server 状态变化驱动）
+  watch(() => status.value.status, (s) => {
+    if (s === 'offline')
+      listening.value = false;
+  });
+
   onMounted(() => {
     connectWs();
     startLocalTimer();
@@ -215,6 +248,8 @@ export function useBabyMonitor() {
     volume: readonly(volume),
     device: readonly(device),
     durationSec: readonly(durationSec),
+    listening: readonly(listening),
+    sendCmd,
     refresh,
   };
 }

@@ -17,7 +17,7 @@ import { getIcon } from '@/utils/icons';
 /*  服务端数据                                                          */
 /* ------------------------------------------------------------------ */
 
-const { status, volume, device, durationSec, refresh } = useBabyMonitor();
+const { status, volume, device, durationSec, listening, sendCmd, refresh } = useBabyMonitor();
 
 /* ------------------------------------------------------------------ */
 /*  本地数据                                                            */
@@ -26,8 +26,6 @@ const { status, volume, device, durationSec, refresh } = useBabyMonitor();
 const greeting = ref<string>('晚上好');
 const userName = ref<string>('Sheldon');
 const muted = ref<boolean>(false);
-/** 监听中态（设计稿 09 / 规范 12.3）：音频流播放链路待固件/服务端对齐，当前仅驱动 UI */
-const listening = ref<boolean>(false);
 
 /* ------------------------------------------------------------------ */
 /*  设备离线态（设计稿 07 / 规范 12.1）                                   */
@@ -216,15 +214,14 @@ function toggleListen() {
     uni.showToast({ title: '设备离线，无法监听', icon: 'none' });
     return;
   }
-  // 音频流播放（WS PCM → 手机扬声器）待固件/服务端对齐，当前仅切换 UI 态
-  listening.value = !listening.value;
+  // 指令经 server 中继下发设备；hook 内乐观置位，设备回传 listenState 驱动 UI
+  const next = !listening.value;
+  if (!sendCmd(next ? 'listen_on' : 'listen_off')) {
+    uni.showToast({ title: '连接服务端失败，无法监听', icon: 'none' });
+  }
 }
 
-// 监听中设备离线 → 立即退出监听态（规范 12.3 逻辑）
-watch(() => device.value.isOnline, (online) => {
-  if (!online)
-    listening.value = false;
-});
+// （监听态随设备离线自动退出，已移入 useBabyMonitor 的 offline watch）
 
 function toggleMute() {
   if (isDeviceOffline.value)
