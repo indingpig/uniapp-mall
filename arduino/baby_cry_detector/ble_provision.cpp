@@ -4,6 +4,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include <Preferences.h>
 
 /* ================================================================== */
 /*  静态状态                                                            */
@@ -50,6 +51,12 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
     String url = String(c->getValue().c_str());
     url.trim();
     Serial.printf("[BLE] Server URL received: [%s]\n", url.c_str());
+
+    // 持久化服务器地址 (重启后由 server_link 从 NVS 读取并连接后端)
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, false);
+    prefs.putString(NVS_KEY_SERVER_URL, url);
+    prefs.end();
 
     // 服务器地址是最后一个特征值 -> 凭据齐全
     if (s_pendingSSID.length() > 0 && s_pendingPass.length() > 0) {

@@ -4,6 +4,8 @@
  */
 #pragma once
 
+#include <driver/i2s.h>   // AUDIO_I2S_PORT 用到 I2S_NUM_0
+
 /* ================================================================== */
 /*  NVS 存储                                                            */
 /* ================================================================== */
@@ -11,6 +13,7 @@
 #define NVS_NAMESPACE          "baby-monitor"
 #define NVS_KEY_WIFI_SSID      "wifi_ssid"
 #define NVS_KEY_WIFI_PASS      "wifi_pass"
+#define NVS_KEY_SERVER_URL     "server_url"
 
 /* ================================================================== */
 /*  WiFi 连接参数                                                       */
@@ -29,3 +32,45 @@
 #define BLE_STATUS_WIFI_CONNECTED   "wifi_connected"
 #define BLE_STATUS_SERVER_CONNECTED "server_connected"
 #define BLE_STATUS_ERROR_WIFI       "error:wifi_failed"
+
+/* ================================================================== */
+/*  音频链路 (audio_pipeline / baby_infer / collect_server / server_link) */
+/*  硬件与参数必须与数据采集原型 audio_app、推理原型 esp32_microphone      */
+/*  逐位一致: 训练数据 = 推理输入, 改动任何一项都要同步重训评估            */
+/* ================================================================== */
+
+#define AUDIO_SAMPLE_RATE         16000
+#define AUDIO_I2S_PORT            I2S_NUM_0
+#define AUDIO_PIN_WS              4     // INMP441 WS
+#define AUDIO_PIN_SCK             5     // INMP441 SCK
+#define AUDIO_PIN_SD              6     // INMP441 SD
+
+#define AUDIO_CHUNK_SAMPLES       1024  // 采集任务每次 I2S 读取的样本数 (2KB)
+
+// 推理窗大小 = EI_CLASSIFIER_RAW_SAMPLE_COUNT (模型元数据, 16000 = 1s @16kHz)。
+// EI 模型头文件只能被 baby_infer.cpp 一个编译单元包含 (多处包含会链接期
+// 重复定义), 因此这里用宏同步; baby_infer.cpp 有编译期一致性校验,
+// 换模型窗口大小时改这里即可
+#define INFER_WINDOW_SAMPLES      16000
+
+// 电平表环形缓冲: 0.5s (16KB)。/rms 与串口电平用, 不影响数据链路
+#define RMS_RING_SAMPLES          (AUDIO_SAMPLE_RATE / 2)
+
+// 采集推流环形缓冲: 2s (64KB)。容忍 loop 侧 run_classifier 的阻塞;
+// OOM 时可降到 1 (32KB), 代价是 App 消费不及时更容易触发 lost 重录
+#define WS_RING_SECONDS           2
+#define WS_RING_SAMPLES           (AUDIO_SAMPLE_RATE * WS_RING_SECONDS)
+
+/* AGC (与 esp32_microphone.ino 的 apply_agc / audio_app_uni 的 audio.js 一致):
+ * 每个推理窗(1s)按 目标RMS/实际RMS 计算增益, 限幅后归一化到训练分布 */
+#define AGC_TARGET_RMS            2500.0f
+#define AGC_MIN_GAIN              0.25f
+#define AGC_MAX_GAIN              64.0f
+
+/* server 上报节奏 (ws -> 后端, 消息 {"type":"audio","rms","peak"}):
+ * 监听中 500ms —— 对齐后端 detector 滑动窗口的节奏;
+ * 空闲 2s —— 仅作在线心跳 (后端 15s 无数据判离线) */
+#define SERVER_REPORT_MS_ACTIVE   500
+#define SERVER_REPORT_MS_IDLE     2000
+
+#define SERVER_RECONNECT_MS       3000  // WS 断线重连间隔
