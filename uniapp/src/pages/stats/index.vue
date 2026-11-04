@@ -607,15 +607,17 @@ page {
 
 .navbar {
   // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走（小程序端胶囊避让由模板条件内联 paddingTop 提供）
+  // 与设置页对齐：容器上避让 12rpx（对应设置页 .main 的 padding-top）+ 标题自带 16rpx，标题到内容统一 32rpx
   position: sticky;
   top: 0;
   z-index: 100;
   background-color: $color-bg;
-  padding: 32rpx 0 20rpx;
+  padding: 12rpx 0 32rpx;
 }
 
 .page-title {
-  font-size: 44rpx; // display 23px
+  padding: 16rpx 4rpx 0;
+  font-size: 56rpx;
 }
 
 /* ---------- 分段控件（h42 r22） ---------- */

@@ -138,7 +138,7 @@ const sleepText = computed(() => fmtDuration(sleepMs.value));
 
 <template>
   <view class="page">
-    <view class="navbar" :style="{ paddingTop: `${capsuleTopGap}px` }">
+    <view class="navbar" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
       <text class="page-title text-main font-bold">历史</text>
     </view>
 
@@ -235,7 +235,9 @@ page {
 
 .navbar {
   gap: 20rpx;
-  padding: 32rpx 0 20rpx;
+  // 与设置页对齐：容器上避让 12rpx（对应设置页 .main 的 padding-top）+ 标题自带 16rpx，
+  // 标题到内容统一 32rpx（本页骨架固定不滚动，无需 sticky）
+  padding: 12rpx 0 32rpx;
 
   &__back {
     width: 56rpx;
@@ -244,7 +246,8 @@ page {
 }
 
 .page-title {
-  font-size: 44rpx; // display 23px
+  padding: 16rpx 4rpx 0;
+  font-size: 56rpx;
 }
 
 /* ---------- 日期条 ---------- */
