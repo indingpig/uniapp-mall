@@ -18,6 +18,7 @@ declare module 'vue' {
     IconCircle: typeof import('./src/components/IconCircle.vue')['default']
     Pill: typeof import('./src/components/Pill.vue')['default']
     SwitchRow: typeof import('./src/components/SwitchRow.vue')['default']
+    UniLoadMore: typeof import('@dcloudio/uni-ui/lib/uni-load-more/uni-load-more.vue')['default']
     VolumeBar: typeof import('./src/components/VolumeBar.vue')['default']
   }
 }
