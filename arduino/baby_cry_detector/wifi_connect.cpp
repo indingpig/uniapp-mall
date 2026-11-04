@@ -13,6 +13,7 @@ static bool    s_attempting = false;    // 是否正在尝试连接
 static uint32_t s_attemptStart = 0;     // 本次尝试开始时间
 static uint32_t s_lastCheck = 0;        // 上次轮询时间
 static int     s_failCount = 0;         // 失败计数
+static bool    s_hasSaved = false;      // NVS 是否存有凭据 (出厂态判定)
 
 static Preferences s_prefs;
 
@@ -56,8 +57,9 @@ void wifiConnectInit(WifiStatusCallback statusCb) {
   // 读取已保存的凭据
   String savedSSID = s_prefs.getString(NVS_KEY_WIFI_SSID, "");
   String savedPass  = s_prefs.getString(NVS_KEY_WIFI_PASS, "");
+  s_hasSaved = (savedSSID.length() > 0 && savedPass.length() > 0);
 
-  if (savedSSID.length() > 0 && savedPass.length() > 0) {
+  if (s_hasSaved) {
     Serial.printf("[WiFi] Found saved WiFi: %s\n", savedSSID.c_str());
     wifiConnectBegin(savedSSID, savedPass);
   }
@@ -112,6 +114,10 @@ void wifiLoop() {
 
 bool wifiIsConnected() {
   return WiFi.status() == WL_CONNECTED;
+}
+
+bool wifiHasSavedCredentials() {
+  return s_hasSaved;
 }
 
 String wifiGetIP() {

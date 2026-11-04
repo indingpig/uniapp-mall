@@ -55,3 +55,13 @@ void bleProvisionUpdateStatus(const char* status);
  * 当前是否有 App 通过 BLE 连接
  */
 bool bleProvisionIsConnected();
+
+/**
+ * 配网窗口开关 (配网安全性, 改进点 2/4.2):
+ *   - true:  恢复广播, 接受凭据写入
+ *   - false: 停止广播, 拒绝凭据写入 (Status 回报 error:provisioning_closed)
+ * 出厂态 (NVS 无凭据) 应保持 true, 由主固件在初始化时按凭据状态设定;
+ * 已配网设备平时关闭, BOOT 短按重开
+ */
+void bleProvisionSetEnabled(bool enabled);
+bool bleProvisionIsEnabled();

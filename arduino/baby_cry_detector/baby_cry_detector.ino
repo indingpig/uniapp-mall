@@ -16,6 +16,12 @@
  *   识别结果回传 server 广播给 App; App 停止监听 → {"cmd":"listen_off"}。
  *   App 采集页连 ws://babycry.local/ws 采集训练数据 (与推理同一条滤波链)。
  *
+ * 配网安全 (BOOT 键):
+ *   出厂态 (NVS 无凭据) 常开广播 + LED 慢闪待配网;
+ *   已配网设备平时无广播、拒绝凭据写入 —— BOOT 短按 3s 打开 5 分钟配网窗口
+ *   (LED 快闪), 长按 10s 恢复出厂 (清 NVS + 重启)。
+ *   BLE 写凭据走 Just Works 会话加密 (ESP_LE_AUTH_NO_BOND, 不持久绑定)。
+ *
  * 接线 (INMP441):  WS→4, SCK→5, SD→6, VCC→3.3V, GND→GND, L/R→GND (左声道)
  */
 
@@ -34,6 +40,8 @@
 #include "baby_infer.h"
 #include "server_link.h"
 #include "collect_server.h"
+#include "led.h"
+#include <nvs_flash.h>
 
 /* ================================================================== */
 /*  全局状态                                                            */
@@ -50,6 +58,79 @@ void onServerCmd(const char* cmd);
 void onServerLinkState(bool connected);
 void startListening();
 void stopListening();
+
+/* ================================================================== */
+/*  BOOT 键: 配网窗口开关 + 恢复出厂                                     */
+/*  出厂态 (NVS 无凭据): 窗口常开, LED 慢闪待配网                        */
+/*  已配网: 窗口常闭 + 停广播, BOOT 短按 3s 开 5 分钟窗口 (LED 快闪),    */
+/*          长按 10s 恢复出厂 (清 NVS + 重启)                           */
+/* ================================================================== */
+
+static bool     s_btnDown = false;
+static uint32_t s_btnDownAt = 0;
+static uint32_t s_windowUntil = 0;   // 窗口截止时刻 (0 = 关; 出厂态常开不看它)
+// GPIO0 防误触: 开机即低说明引脚被外部钳住 (USB 串口下载电路/按键卡死),
+// 观测到一次高电平前不启用按键判定 —— 否则开个串口监视器 10s 后就会误清 NVS
+static bool     s_btnArmed = false;
+
+static bool isFactoryState() {
+  return !wifiHasSavedCredentials();
+}
+
+static void closeProvisionWindow() {
+  if (isFactoryState()) return;      // 出厂态不关
+  s_windowUntil = 0;
+  bleProvisionSetEnabled(false);
+  led_off();
+}
+
+static void openProvisionWindow() {
+  if (isFactoryState()) return;      // 出厂态本来就开
+  s_windowUntil = millis() + PROVISION_WINDOW_MS;
+  bleProvisionSetEnabled(true);
+  Serial.printf("[Provision] 配网窗口开启 %lu 分钟\n",
+                (unsigned long)(PROVISION_WINDOW_MS / 60000UL));
+}
+
+static void factoryReset() {
+  Serial.println("[FactoryReset] 清除 NVS 并重启");
+  bleProvisionUpdateStatus(BLE_STATUS_FACTORY_RESET);
+  delay(200);                        // 给 BLE notify 留发送时间
+  nvs_flash_erase();
+  nvs_flash_init();
+  ESP.restart();
+}
+
+static void bootButtonLoop() {
+  bool pressed = digitalRead(BOOT_BTN_PIN) == LOW;
+
+  if (!s_btnArmed) {
+    if (!pressed) s_btnArmed = true;   // 观测到高电平 → 装填, 开始正常判定
+    return;                            // 开机即低期间一律不判定
+  }
+
+  if (pressed && !s_btnDown) {
+    s_btnDown = true;
+    s_btnDownAt = millis();
+    return;
+  }
+  if (!s_btnDown) return;
+
+  if (!pressed) {
+    // 松开: 按住 3s ~ 10s → 打开配网窗口
+    uint32_t held = millis() - s_btnDownAt;
+    s_btnDown = false;
+    if (held >= BOOT_HOLD_WINDOW_MS && held < BOOT_HOLD_RESET_MS) {
+      openProvisionWindow();
+    }
+    return;
+  }
+
+  // 持续按住达 10s: 立即恢复出厂 (不等松开, 即时反馈)
+  if (millis() - s_btnDownAt >= BOOT_HOLD_RESET_MS) {
+    factoryReset();
+  }
+}
 
 /* ================================================================== */
 /*  模块间回调 (胶水层)                                                 */
@@ -86,10 +167,13 @@ void onServerCmd(const char* cmd) {
   }
 }
 
-// server_link 连接状态 → BLE 通知 App
+// server_link 连接状态 → BLE 通知 App; 配网闭环后关窗口停广播
 void onServerLinkState(bool connected) {
   bleProvisionUpdateStatus(connected ? BLE_STATUS_SERVER_CONNECTED
                                      : BLE_STATUS_WIFI_CONNECTED);
+  if (connected) {
+    closeProvisionWindow();
+  }
 }
 
 /* ================================================================== */
@@ -141,9 +225,19 @@ void setup() {
   // WiFi 模块 (读取 NVS 自动重连)
   wifiConnectInit(onWifiStatus);
 
+  // LED 指示灯 (板载 WS2812) 与 BOOT 键 (GPIO0, 低电平按下)
+  led_init();
+  pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
+  Serial.printf("[Boot] BOOT(GPIO0) at boot: %s%s\n",
+                digitalRead(BOOT_BTN_PIN) == LOW ? "LOW" : "HIGH",
+                digitalRead(BOOT_BTN_PIN) == LOW ? " (被外部钳住? 按键检测暂不启用)" : "");
+
   // BLE 配网模块 (WiFi 凭据 + 服务器地址写入并持久化)
   bleProvisionInit(deviceName);
   bleProvisionSetCredentialsCallback(onCredentialsReceived);
+
+  // 配网窗口: 出厂态常开; 已配网设备默认关闭 + 停广播 (BOOT 短按重开)
+  bleProvisionSetEnabled(!wifiHasSavedCredentials());
 
   // 音频采集链 (Core 0): I2S + 高通滤波, 常开
   audioPipelineStart();
@@ -155,6 +249,17 @@ void setup() {
 void loop() {
   // WiFi 连接状态机轮询
   wifiLoop();
+
+  // BOOT 键检测 + 配网窗口超时 + LED 指示
+  bootButtonLoop();
+  if (s_windowUntil != 0 && millis() >= s_windowUntil) {
+    closeProvisionWindow();
+  }
+  if (isFactoryState()) {
+    led_blink(PROV_LED_SLOW_MS);        // 出厂态: 慢闪待配网
+  } else if (s_windowUntil != 0) {
+    led_blink(PROV_LED_FAST_MS);        // 窗口期: 快闪
+  }
 
   // 采集服务端 (HTTP /rms, /setserver + WS 采集推流)
   collectServerLoop();

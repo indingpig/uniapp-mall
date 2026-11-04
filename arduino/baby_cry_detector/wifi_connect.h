@@ -49,6 +49,12 @@ void wifiLoop();
 bool wifiIsConnected();
 
 /**
+ * NVS 中是否已保存 WiFi 凭据 (wifiConnectInit 时读取)
+ * 用于判定「出厂态」: 无凭据 = 配网窗口常开
+ */
+bool wifiHasSavedCredentials();
+
+/**
  * 获取本地 IP (未连接时返回 "0.0.0.0")
  */
 String wifiGetIP();

@@ -32,6 +32,20 @@
 #define BLE_STATUS_WIFI_CONNECTED   "wifi_connected"
 #define BLE_STATUS_SERVER_CONNECTED "server_connected"
 #define BLE_STATUS_ERROR_WIFI       "error:wifi_failed"
+#define BLE_STATUS_ERROR_PROVISION  "error:provisioning_closed"  // 配网窗口未开, 写入被拒
+#define BLE_STATUS_FACTORY_RESET    "factory_reset"
+
+/* ================================================================== */
+/*  BOOT 键与配网窗口                                                    */
+/*  出厂态 (NVS 无凭据) 窗口常开; 已配网设备窗口常闭, BOOT 短按重开        */
+/* ================================================================== */
+
+#define BOOT_BTN_PIN              0      // DevKitC 自带 BOOT 键 (GPIO0, 低电平按下)
+#define BOOT_HOLD_WINDOW_MS       3000   // 按住 3s → 打开配网窗口
+#define BOOT_HOLD_RESET_MS        10000  // 按住 10s → 恢复出厂
+#define PROVISION_WINDOW_MS       (5UL * 60UL * 1000UL)  // 窗口时长: 5 分钟
+#define PROV_LED_FAST_MS          100    // 窗口期 LED 快闪周期
+#define PROV_LED_SLOW_MS          500    // 出厂态待配网 LED 慢闪周期
 
 /* ================================================================== */
 /*  音频链路 (audio_pipeline / baby_infer / collect_server / server_link) */
