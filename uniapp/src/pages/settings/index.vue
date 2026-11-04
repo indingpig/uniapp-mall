@@ -5,11 +5,12 @@
 <script setup lang="ts">
 import type { DeviceData } from '@/api/baby';
 import { onShow } from '@dcloudio/uni-app';
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { fetchDevice } from '@/api/baby';
 import { CACHE_KEY } from '@/constants/cache';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
+import { ensureNotificationEnabled, isNotificationAuthorized } from '@/utils/notify';
 
 const { capsuleTopGap } = useCapsuleGap();
 
@@ -53,6 +54,16 @@ const DEFAULT_SETTINGS: MonitorSettings = {
 
 const settings = ref<MonitorSettings>({ ...DEFAULT_SETTINGS });
 
+/* 系统通知授权状态：开关显示 = 用户偏好 ∧ 系统授权。
+ * 偏好单独存（systemAuth 掉了不代表用户想关，授权恢复后开关自动回到开） */
+const systemNotifyAuth = ref(true);
+const pushNotifySwitch = computed({
+  get: () => settings.value.pushNotify && systemNotifyAuth.value,
+  set: (v: boolean) => {
+    settings.value.pushNotify = v;
+  },
+});
+
 function loadSettings() {
   try {
     const saved = uni.getStorageSync(CACHE_KEY.MONITOR_SETTINGS);
@@ -67,6 +78,25 @@ function persistSettings() {
     uni.setStorageSync(CACHE_KEY.MONITOR_SETTINGS, { ...settings.value });
   }
   catch { /* 存储失败不阻塞 UI */ }
+}
+
+/**
+ * 推送通知开关：打开时确保通知可用——系统通知被关则确认框引导去系统设置页
+ * （Android 13+ 且未授权时先弹运行时授权）；取消则回退开关。关闭时直接保存。
+ */
+async function onPushNotifyChange() {
+  if (!settings.value.pushNotify) {
+    persistSettings();
+    return;
+  }
+  const ok = await ensureNotificationEnabled();
+  if (ok) {
+    persistSettings();
+    return;
+  }
+  settings.value.pushNotify = false;
+  persistSettings();
+  uni.showToast({ title: '需在系统设置中允许通知后再开启', icon: 'none' });
 }
 
 function pickSensitivity() {
@@ -159,6 +189,8 @@ onMounted(() => {
 onShow(() => {
   // 从配对页返回时刷新设备状态
   loadDevice();
+  // 从系统设置页返回时刷新通知授权（用户可能刚在系统里开了/关了通知）
+  systemNotifyAuth.value = isNotificationAuthorized();
 });
 </script>
 
@@ -222,7 +254,7 @@ onShow(() => {
           <view class="row">
             <text class="row-title text-main">推送通知</text>
             <view class="flex-1" />
-            <AppSwitch v-model="settings.pushNotify" @change="persistSettings" />
+            <AppSwitch v-model="pushNotifySwitch" @change="onPushNotifyChange" />
           </view>
         </view>
       </view>

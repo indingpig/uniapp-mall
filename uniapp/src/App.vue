@@ -1,9 +1,14 @@
 <script setup>
-import { onLaunch } from '@dcloudio/uni-app';
+import { onHide, onLaunch, onShow } from '@dcloudio/uni-app';
+import { setAppForeground } from '@/utils/notify';
 
 onLaunch(() => {
   console.warn('App Launch');
 });
+
+// 前后台标记：哭声通知只在后台发（前台由页面内铃声/状态卡承担提醒）
+onShow(() => setAppForeground(true));
+onHide(() => setAppForeground(false));
 </script>
 
 <style lang="scss">

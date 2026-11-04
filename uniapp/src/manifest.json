@@ -18,6 +18,9 @@
     "modules": {
       "bluetooth": {
         "description": "用于扫描并连接宝宝监护器设备"
+      },
+      "Push": {
+        "description": "本地通知（哭声后台提醒）"
       }
     },
     "distribute": {
@@ -37,6 +40,7 @@
           "<uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\"/>",
           "<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\"/>",
           "<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>",
+          "<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>",
           "<uses-feature android:name=\"android.hardware.bluetooth_le\" android:required=\"true\"/>"
         ]
       },

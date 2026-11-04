@@ -26,6 +26,10 @@ export default defineManifestConfig({
       bluetooth: {
         description: '用于扫描并连接宝宝监护器设备',
       },
+      // 推送模块：本地通知（哭声后台提醒，uni.createPushMessage 纯本地，无需个推服务）
+      Push: {
+        description: '本地通知（哭声后台提醒）',
+      },
     },
     /* 应用发布信息 */
     distribute: {
@@ -49,6 +53,8 @@ export default defineManifestConfig({
           // Android 12+ 蓝牙权限
           '<uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>',
           '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>',
+          // 通知运行时权限（Android 13+ 弹通知必需）
+          '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
           // 声明使用 BLE 功能（Google Play 要求，普通 BLE 设备不需要硬件过滤）
           '<uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>',
         ],

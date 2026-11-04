@@ -2,6 +2,7 @@ import type { BabyStatusData, DeviceData, VolumeData } from '@/api/baby';
 import { onBeforeUnmount, onMounted, readonly, ref, watch } from 'vue';
 import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
 import { STATUS_META, toCardState } from '@/constants/babyStatus';
+import { maybeNotifyCry } from '@/utils/notify';
 
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws';
 const POLL_INTERVAL = 5000;
@@ -79,6 +80,12 @@ export function useBabyMonitor() {
     }
   }
 
+  /** 状态将要转换进 crying 的瞬间发后台通知（必须在 applyStatus 之前判 prev） */
+  function notifyOnCryTransition(next?: string) {
+    if (next === 'crying' && status.value.status !== 'crying')
+      maybeNotifyCry();
+  }
+
   /* -------------------- WebSocket -------------------- */
 
   function connectWs() {
@@ -104,11 +111,13 @@ export function useBabyMonitor() {
             break;
           case 'statusChange':
             if (msg.to) {
+              notifyOnCryTransition(msg.to);
               durationSec.value = 0;
               applyStatus(msg.to);
             }
             break;
           case 'volume':
+            notifyOnCryTransition(msg.status);
             applyVolume(msg.rms || 0, msg.peak || 0, msg.status);
             break;
           case 'listenState':
