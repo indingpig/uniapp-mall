@@ -164,9 +164,11 @@ onShow(() => {
 
 <template>
   <view class="page h-full">
-    <view class="main gap-4" :style="{ paddingTop: `${capsuleTopGap}px` }">
-      <!-- 页面标题 -->
-      <text class="page-title text-main font-bold">设置</text>
+    <view class="main gap-4">
+      <!-- 页面标题（吸顶；胶囊避让必须留在本元素上，吸顶后才不钻到胶囊底下） -->
+      <view class="page-header" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
+        <text class="page-title text-main font-bold">设置</text>
+      </view>
 
       <!-- ========= 设备管理 ========= -->
       <view class="section">
@@ -290,6 +292,14 @@ page {
   @include main-layout;
   padding-top: 12rpx;
   padding-bottom: 160rpx;
+}
+
+.page-header {
+  // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: $color-bg;
 }
 
 .page-title {

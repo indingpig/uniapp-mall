@@ -7,6 +7,8 @@ export default defineManifestConfig({
   'versionName': '1.0.0',
   'versionCode': '100',
   'transformPx': false,
+  // 应用默认语言：固定 zh-Hans，H5 端内置组件文案（ActionSheet 取消、Modal 按钮等）不随浏览器语言漂移
+  'locale': 'zh-Hans',
   /* 5+App特有相关 */
   'app-plus': {
     usingComponents: true,

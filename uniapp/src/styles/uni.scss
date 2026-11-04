@@ -22,6 +22,10 @@ $color-primary: #7BA05B;            // 主绿（主按钮、激活 Tab、在线�
 $color-primary-soft: #E9F0E1;       // 浅绿容器（green-bg）
 $color-primary-deep: #55823F;       // green-ink（状态文字、绿胶囊文字）
 
+/* 全局字体栈（page 与 uni 内置浮层共用，见 App.vue） */
+$font-family-base: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue',
+  'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+
 /* 状态语义色（设计规范 06 图例：绿=平稳 琥珀=留意 红=立即提醒） */
 $color-amber: #D99A3D;              // 琥珀（留意态、扫描中雷达）
 $color-amber-soft: #F7EBD4;         // 浅琥珀底

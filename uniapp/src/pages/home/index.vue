@@ -278,9 +278,9 @@ onBeforeUnmount(() => {
 <template>
   <view class="page h-full">
     <!-- ============== 主体内容 ============== -->
-    <view class="main gap-3" :class="{ 'main--listening': listening }" :style="{ paddingTop: `${capsuleTopGap}px` }">
-      <!-- 头部：问候语 + 通知铃铛 -->
-      <view class="header flex items-center justify-between">
+    <view class="main gap-3" :class="{ 'main--listening': listening }">
+      <!-- 头部：问候语 + 通知铃铛（吸顶；胶囊避让必须留在本元素上，吸顶后才不钻到胶囊底下） -->
+      <view class="header flex items-center justify-between" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
         <text class="header__greeting text-main font-bold">{{ greeting }}，{{ userName }}</text>
         <view class="bell relative" @tap="onBellTap">
           <image class="bell__icon" :src="getIcon('bell', '#3B362E')" mode="aspectFit" />
@@ -509,6 +509,11 @@ page {
 /*  头部                                                                */
 /* ------------------------------------------------------------------ */
 .header {
+  // 吸顶：页面在 .page 内滚动，问候语头部固定不随内容滚走
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: $color-bg;
   padding: 22rpx 0 8rpx;
 
   &__greeting {

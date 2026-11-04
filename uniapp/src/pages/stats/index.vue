@@ -293,7 +293,8 @@ const selectedDayLabel = computed(() => {
     return '';
   const date = new Date(`${d.date}T00:00:00`);
   const isToday = d.date === todayKey.value;
-  return `${isToday ? '今天' : `${date.getMonth() + 1}月${date.getDate()}日`} · 周${WEEKDAY[date.getDay()]}`;
+  // 非今日日期统一 MM/DD 补零格式（如 10/03）
+  return `${isToday ? '今天' : `${pad2(date.getMonth() + 1)}/${pad2(date.getDate())}`} · 周${WEEKDAY[date.getDay()]}`;
 });
 
 const sleepSub = computed(() => {
@@ -303,7 +304,7 @@ const sleepSub = computed(() => {
     return `夜间 ${fmtDuration(sleepSplit.value.nightMs)} · 小睡 ${fmtDuration(sleepSplit.value.napMs)}`;
   if (period.value === 'month') {
     const max = monthMaxSleep.value;
-    return `合计 ${fmtDuration(monthSleepMs.value)} · 最长 ${max ? `${fmtDuration(max[1])}（${Number(max[0].slice(5, 7))}/${dayOfMonth(max[0])}）` : '--'}`;
+    return `合计 ${fmtDuration(monthSleepMs.value)} · 最长 ${max ? `${fmtDuration(max[1])}（${max[0].slice(5, 7)}/${pad2(dayOfMonth(max[0]))}）` : '--'}`;
   }
   return `日均 ${sleepAvgText.value}${sleepMaxDay.value ? ` · 最长 ${fmtDuration(sleepMaxDay.value[1])}（周${WEEKDAY[new Date(`${sleepMaxDay.value[0]}T00:00:00`).getDay()]}）` : ''}`;
 });
@@ -385,7 +386,7 @@ const neutralRatio = computed(() =>
 
 <template>
   <view class="page">
-    <view class="navbar" :style="{ paddingTop: `${capsuleTopGap}px` }">
+    <view class="navbar" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
       <text class="page-title text-main font-bold">统计</text>
     </view>
 
@@ -605,6 +606,11 @@ page {
 }
 
 .navbar {
+  // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走（小程序端胶囊避让由模板条件内联 paddingTop 提供）
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: $color-bg;
   padding: 32rpx 0 20rpx;
 }
 

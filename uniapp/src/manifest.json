@@ -90,6 +90,7 @@
     "enable": false
   },
   "vueVersion": "3",
+  "locale": "zh-Hans",
   "h5": {
     "darkmode": true,
     "themeLocation": "theme.json"
