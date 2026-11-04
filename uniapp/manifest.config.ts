@@ -74,6 +74,28 @@ export default defineManifestConfig({
           NSLocalNetworkUsageDescription: '用于连接同一局域网内的宝宝监护器设备进行数据采集',
         },
       },
+      /* 应用图标（路径相对 src/ 解析，图片在 src/design/appIcon/） */
+      icons: {
+        android: {
+          hdpi: 'design/appIcon/icon-72x72.png',
+          xhdpi: 'design/appIcon/icon-96x96.png',
+          xxhdpi: 'design/appIcon/icon-144x144.png',
+          xxxhdpi: 'design/appIcon/icon-192x192.png',
+        },
+        ios: {
+          appstore: 'design/appIcon/icon-1024x1024.png',
+          iphone: {
+            'app@2x': 'design/appIcon/icon-120x120.png',
+            'app@3x': 'design/appIcon/icon-180x180.png',
+            'spotlight@2x': 'design/appIcon/icon-80x80.png',
+            'spotlight@3x': 'design/appIcon/icon-120x120.png',
+            'settings@2x': 'design/appIcon/icon-58x58.png',
+            'settings@3x': 'design/appIcon/icon-87x87.png',
+            'notification@2x': 'design/appIcon/icon-40x40.png',
+            'notification@3x': 'design/appIcon/icon-60x60.png',
+          },
+        },
+      },
       /* SDK配置 */
       sdkConfigs: {},
     },
