@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { IconKey } from '@/utils/icons';
-import { onShow } from '@dcloudio/uni-app';
+import { onHide, onShow } from '@dcloudio/uni-app';
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
 import { CACHE_KEY } from '@/constants/cache';
 import { getIcon } from '@/utils/icons';
@@ -41,11 +41,17 @@ const current = computed(() => props.current ?? derived.value);
 const activeIndex = computed(() => Math.max(0, TABS.findIndex(t => t.key === current.value)));
 
 /* 高亮滑块：tab 切换是整页替换（uni.switchTab），组件会重建、无法跨页做 CSS 过渡。
- * 改为「FLIP」：切换前在 onTap 里把来源 tab 写入 storage，新页挂载时滑块先落在来源
- * 位置（关 transition），首帧绘制完成后再开 transition 滑到目标位置——视觉上高亮从旧 tab 移过来。
- * 推导（getCurrentPages）在挂载瞬间可能尚未就绪，故 activeIndex 就绪前后分两段处理。 */
+ * 改为「FLIP」：点击时把来源 tab 写入 storage，新页挂载/onShow 时滑块先落到来源
+ * 位置再滑向目标——视觉上高亮从旧 tab 平滑移过来。
+ * 真机 webview 显示早于 JS：onShow 触发时旧位置的滑块可能已先画出一帧（鬼畜闪烁），
+ * 故采用「隐藏 → 关过渡就位 → 双 rAF 后显示并开过渡滑动」三段式，替代裸定时器。 */
 const thumbIndex = ref(activeIndex.value);
 const thumbReady = ref(false);
+const thumbShown = ref(false);
+
+/* 每实例 400ms 去抖：App 端挂载后 onShow 可能附加触发一次，同页重复触发会重启动画；
+ * 各 tab 页是不同实例，互相之间不受影响 */
+let lastFlipAt = 0;
 
 /* 推导就绪/变化后，滑块目标位跟随 activeIndex（仅在开启动画后生效，避免抢在起点绘制前跳位） */
 watch(activeIndex, (idx) => {
@@ -53,23 +59,41 @@ watch(activeIndex, (idx) => {
     thumbIndex.value = idx;
 });
 
-/* 播放一次「起点→到位」动画；重复调用无害（settle 幂等，动画只会看起来更连贯） */
+/* 双 rAF：确保「起点位」先完成一帧绘制，再在同一回调里显示 + 开过渡滑向目标。
+ * rAF 在不可见/后台 webview 会被暂停，加 80ms 定时兜底，避免滑块卡死在隐藏态 */
+function nextFrame(cb: () => void) {
+  let fired = false;
+  const run = () => {
+    if (!fired) {
+      fired = true;
+      cb();
+    }
+  };
+  if (typeof requestAnimationFrame === 'function')
+    requestAnimationFrame(() => requestAnimationFrame(run));
+  setTimeout(run, 80);
+}
+
 function playFlip() {
+  const now = Date.now();
+  if (now - lastFlipAt < 400)
+    return;
+  lastFlipAt = now;
+
   const prevKey = uni.getStorageSync(CACHE_KEY.TABBAR_PREV) as string;
   const prevIndex = TABS.findIndex(t => t.key === prevKey);
-  if (prevIndex >= 0 && prevIndex !== activeIndex.value) {
-    // 关过渡先落到来源位，首帧绘制后再开启过渡滑到目标位
-    thumbReady.value = false;
-    thumbIndex.value = prevIndex;
-    setTimeout(() => {
-      thumbReady.value = true;
-      thumbIndex.value = activeIndex.value;
-    }, 30);
-  }
-  else {
+  const target = activeIndex.value;
+
+  // 隐藏 → 关过渡落到起点（有来源 tab 则来源位，否则直接目标位）
+  thumbShown.value = false;
+  thumbReady.value = false;
+  thumbIndex.value = prevIndex >= 0 && prevIndex !== target ? prevIndex : target;
+
+  nextFrame(() => {
     thumbReady.value = true;
-    thumbIndex.value = activeIndex.value;
-  }
+    thumbShown.value = true;
+    thumbIndex.value = target;
+  });
 }
 
 onMounted(() => {
@@ -95,11 +119,18 @@ onShow(() => {
     playFlip();
 });
 
+/* 离开页面即隐藏滑块：缓存页回显早于 JS 执行，先把旧位置藏住，
+ * 回显时由 playFlip 在隐藏状态下就位后再显示，杜绝残影 */
+onHide(() => {
+  thumbShown.value = false;
+});
+
 const thumbStyle = computed(() => ({
   transform: `translateX(${thumbIndex.value * 100}%)`,
   transition: thumbReady.value
-    ? 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)'
+    ? 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease'
     : 'none',
+  opacity: thumbShown.value ? 1 : 0,
 }));
 
 function onTap(key: string) {
