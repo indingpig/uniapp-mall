@@ -69,9 +69,14 @@ void stopListening();
 static bool     s_btnDown = false;
 static uint32_t s_btnDownAt = 0;
 static uint32_t s_windowUntil = 0;   // 窗口截止时刻 (0 = 关; 出厂态常开不看它)
-// GPIO0 防误触: 开机即低说明引脚被外部钳住 (USB 串口下载电路/按键卡死),
-// 观测到一次高电平前不启用按键判定 —— 否则开个串口监视器 10s 后就会误清 NVS
+// GPIO0 防误触 (CH343 的 DTR/RTS 会把 GPIO0 钳低, 之前踩过误清 NVS):
+//   1) 装填条件从「任一次高电平」改为「连续高电平 BTN_REARM_HIGH_MS」——
+//      单次采样不足以证明按键真的空闲, 上电瞬间的毛刺不会让判定永久生效;
+//   2) BLE 有客户端连接时一律不恢复出厂 (见 bootButtonLoop): 配网中手机还连着,
+//      清 NVS 会立刻断连并丢掉刚写入的凭据, 而钳低恰好最容易在这个窗口里撞上。
 static bool     s_btnArmed = false;
+static uint32_t s_btnHighSince = 0;            // 连续高电平起始时刻 (0 = 尚未观测到)
+static const uint32_t BTN_REARM_HIGH_MS = 2000;
 
 static bool isFactoryState() {
   return !wifiHasSavedCredentials();
@@ -93,7 +98,8 @@ static void openProvisionWindow() {
 }
 
 static void factoryReset() {
-  Serial.println("[FactoryReset] 清除 NVS 并重启");
+  Serial.printf("[FactoryReset] GPIO0=%d BLE=%d, 清除 NVS 并重启\n",
+                digitalRead(BOOT_BTN_PIN), bleProvisionIsConnected() ? 1 : 0);
   bleProvisionUpdateStatus(BLE_STATUS_FACTORY_RESET);
   delay(200);                        // 给 BLE notify 留发送时间
   nvs_flash_erase();
@@ -103,23 +109,40 @@ static void factoryReset() {
 
 static void bootButtonLoop() {
   bool pressed = digitalRead(BOOT_BTN_PIN) == LOW;
+  uint32_t now = millis();
 
+  // 装填: 必须连续高电平保持 BTN_REARM_HIGH_MS; 开机即低 (被钳住) 期间永不装填
   if (!s_btnArmed) {
-    if (!pressed) s_btnArmed = true;   // 观测到高电平 → 装填, 开始正常判定
-    return;                            // 开机即低期间一律不判定
+    if (pressed) {
+      s_btnHighSince = 0;
+      return;
+    }
+    if (s_btnHighSince == 0) {
+      s_btnHighSince = now;
+      return;
+    }
+    if (now - s_btnHighSince >= BTN_REARM_HIGH_MS) {
+      s_btnArmed = true;
+      Serial.println("[Btn] armed (GPIO0 idle high)");
+    }
+    return;
   }
 
   if (pressed && !s_btnDown) {
     s_btnDown = true;
-    s_btnDownAt = millis();
+    s_btnDownAt = now;
+    s_btnHighSince = 0;
+    Serial.println("[Btn] press");
     return;
   }
   if (!s_btnDown) return;
 
   if (!pressed) {
     // 松开: 按住 3s ~ 10s → 打开配网窗口
-    uint32_t held = millis() - s_btnDownAt;
+    uint32_t held = now - s_btnDownAt;
     s_btnDown = false;
+    s_btnHighSince = now;
+    Serial.printf("[Btn] release, held %lu ms\n", (unsigned long)held);
     if (held >= BOOT_HOLD_WINDOW_MS && held < BOOT_HOLD_RESET_MS) {
       openProvisionWindow();
     }
@@ -127,9 +150,27 @@ static void bootButtonLoop() {
   }
 
   // 持续按住达 10s: 立即恢复出厂 (不等松开, 即时反馈)
-  if (millis() - s_btnDownAt >= BOOT_HOLD_RESET_MS) {
-    factoryReset();
+  if (now - s_btnDownAt < BOOT_HOLD_RESET_MS) return;
+
+  // 配网过程中手机还连着: 拒绝恢复出厂。这条同时是串口钳低 GPIO0 的兜底 ——
+  // 误触发只可能发生在「有客户端连接」的窗口里, 直接不认;
+  // 之后必须重新观测到连续高电平才会再装填, 不会连续误判。
+  if (bleProvisionIsConnected()) {
+    Serial.println("[Btn] hold 10s ignored: BLE client connected");
+    s_btnDown = false;
+    s_btnArmed = false;
+    s_btnHighSince = 0;
+    return;
   }
+
+  // 出厂态没有可清的凭据: 清一遍只会白白重启, 把正在进行的手动配对打断
+  if (isFactoryState()) {
+    Serial.println("[Btn] hold 10s ignored: already factory state");
+    s_btnDown = false;
+    return;
+  }
+
+  factoryReset();
 }
 
 /* ================================================================== */
@@ -140,6 +181,7 @@ static void bootButtonLoop() {
 void onWifiStatus(const char* status) {
   bleProvisionUpdateStatus(status);
   if (strcmp(status, BLE_STATUS_WIFI_CONNECTED) == 0) {
+    led_off();   // 凭据已生效: 结束待配网/窗口闪烁, 之后由 server_connected 收尾
     if (!s_collectStarted) {
       s_collectStarted = true;
       collectServerStart();

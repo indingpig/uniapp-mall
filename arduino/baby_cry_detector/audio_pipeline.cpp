@@ -86,6 +86,10 @@ static void audioPipeTask(void* param) {
     .fixed_mclk = 0
   };
   i2s_pin_config_t pins = {
+    // mck_io_num 是结构体首字段, 省略会被零初始化为 0, 而 0 是合法引脚号 ——
+    // i2s_set_pin 会把 GPIO0 (BOOT 键) 配成 I2S MCLK 输出, 按键读数恒为低,
+    // 导致 bootButtonLoop 把它当成"一直按住", 10 秒后误清 NVS 恢复出厂。
+    .mck_io_num = I2S_PIN_NO_CHANGE,
     .bck_io_num = AUDIO_PIN_SCK,
     .ws_io_num = AUDIO_PIN_WS,
     .data_out_num = I2S_PIN_NO_CHANGE,

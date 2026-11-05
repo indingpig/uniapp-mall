@@ -82,6 +82,9 @@ void wifiLoop() {
     // 持久化凭据
     s_prefs.putString(NVS_KEY_WIFI_SSID, s_currentSSID);
     s_prefs.putString(NVS_KEY_WIFI_PASS, s_currentPass);
+    // 本次上电内立刻脱离出厂态: 否则 isFactoryState() 到重启前都为真,
+    // LED 一直慢闪, closeProvisionWindow() 也会被它的早退挡掉 (广播不停)
+    s_hasSaved = true;
 
     reportStatus(BLE_STATUS_WIFI_CONNECTED);
 
