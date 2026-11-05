@@ -10,7 +10,7 @@ import { fetchDevice } from '@/api/baby';
 import { CACHE_KEY } from '@/constants/cache';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
-import { ensureNotificationEnabled, isNotificationAuthorized } from '@/utils/notify';
+import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAuthorized } from '@/utils/notify';
 
 const { capsuleTopGap } = useCapsuleGap();
 
@@ -81,12 +81,15 @@ function persistSettings() {
 }
 
 /**
- * 推送通知开关：打开时确保通知可用——系统通知被关则确认框引导去系统设置页
- * （Android 13+ 且未授权时先弹运行时授权）；取消则回退开关。关闭时直接保存。
+ * 推送通知开关：
+ * - 打开：确保通知可用——系统通知被关则确认框引导去系统设置页
+ *   （Android 13+ 且未授权时先弹运行时授权）；取消则回退开关。
+ * - 关闭：保存偏好后，若系统通知仍开启则引导去系统设置一并关闭（主流 App 行为）。
  */
 async function onPushNotifyChange() {
   if (!settings.value.pushNotify) {
     persistSettings();
+    guideOffSystemNotification();
     return;
   }
   const ok = await ensureNotificationEnabled();

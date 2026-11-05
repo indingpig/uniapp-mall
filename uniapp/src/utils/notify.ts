@@ -101,6 +101,28 @@ function guideToSystemSettings(): Promise<boolean> {
 }
 
 /**
+ * 「推送通知」关闭时的系统侧收尾（与主流 App 行为一致）：
+ * App 内关闭只停业务推送，若系统通知仍开启，弹确认框引导用户去系统设置
+ * 一并关闭；取消则仅保留 App 内关闭。系统通知本来就关着时静默跳过。
+ */
+export function guideOffSystemNotification(): void {
+  // #ifdef APP-PLUS
+  if (!isNotificationAuthorized())
+    return;
+  uni.showModal({
+    title: '同时关闭系统通知？',
+    content: '仅关闭应用内推送会保留系统通知通道。若想彻底不再收到本应用任何提醒，需在系统设置中一并关闭。',
+    confirmText: '去设置',
+    cancelText: '仅关闭应用内',
+    success: ({ confirm }) => {
+      if (confirm)
+        uni.openAppAuthorizeSetting();
+    },
+  });
+  // #endif
+}
+
+/**
  * 「推送通知」打开时确保通知可用：
  * - authorized → 放行
  * - not determined（Android 13+ 首次开启场景）→ 弹运行时授权，拒绝再引导
