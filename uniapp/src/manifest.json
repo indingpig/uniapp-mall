@@ -21,6 +21,9 @@
       },
       "Push": {
         "description": "本地通知（哭声后台提醒）"
+      },
+      "Barcode": {
+        "description": "扫描 WiFi 二维码填入配网信息"
       }
     },
     "distribute": {
@@ -41,6 +44,7 @@
           "<uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\"/>",
           "<uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\"/>",
           "<uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\"/>",
+          "<uses-permission android:name=\"android.permission.CAMERA\"/>",
           "<uses-feature android:name=\"android.hardware.bluetooth_le\" android:required=\"true\"/>"
         ]
       },
@@ -54,6 +58,7 @@
           "NSMicrophoneUsageDescription": "用于监测宝宝哭声",
           "NSBluetoothAlwaysUsageDescription": "用于蓝牙扫描并连接宝宝监护器设备",
           "NSBluetoothPeripheralUsageDescription": "用于与宝宝监护器设备通信",
+          "NSCameraUsageDescription": "用于扫描 WiFi 二维码，自动填入配网信息",
           "NSLocalNetworkUsageDescription": "用于连接同一局域网内的宝宝监护器设备进行数据采集"
         }
       },

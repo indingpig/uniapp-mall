@@ -1,19 +1,23 @@
 <script setup lang="ts">
-import type { BLEDevice } from '@/hooks/useBLE';
+import type { BLEDevice, WifiAp } from '@/hooks/useBLE';
 import { onShow } from '@dcloudio/uni-app';
 import { computed, onBeforeUnmount, ref } from 'vue';
 import { useBLE } from '@/hooks/useBLE';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
+import { getConnectedSsid, scanWifiQr } from '@/utils/wifi';
 
 const {
   scanning,
   devices,
   connectedDevice,
   statusText,
+  wifiList,
+  wifiScanning,
   startScan,
   stopScan,
   connectDevice,
+  startWifiScan,
   pair,
 } = useBLE();
 
@@ -35,8 +39,58 @@ const currentStep = ref<'scan' | 'wifi' | 'pairing' | 'done'>('scan');
 const wifiSSID = ref('');
 const wifiPass = ref('');
 const showPassword = ref(false);
-const serverUrl = ref('ws://192.168.3.5:3001/ws?esp32');
+const serverUrl = ref('ws://192.168.21.92:3001/ws');
 const scanAttempted = ref(false);
+
+/* ---------- 周边 WiFi 列表（设备扫描，免手输 SSID） ---------- */
+
+const selectedApSsid = ref('');
+
+async function onFetchWifiList() {
+  selectedApSsid.value = '';
+  try {
+    await startWifiScan();
+  }
+  catch (e) {
+    uni.showToast({ title: (e as Error).message, icon: 'none' });
+  }
+}
+
+function onPickAp(ap: WifiAp) {
+  wifiSSID.value = ap.ssid;
+  selectedApSsid.value = ap.ssid;
+}
+
+/** 列表最多露 4 行，其余滚动 —— 10+ 个 AP 会把整屏撑满 */
+const WIFI_LIST_ROW_RPX = 72;
+const wifiListHeight = computed(() =>
+  `${Math.min(wifiList.value.length, 4) * WIFI_LIST_ROW_RPX}rpx`,
+);
+
+/** 预选手机当前连接的 WiFi：用户只需输密码，取不到就保持手输 */
+async function preselectCurrentWifi() {
+  const ssid = await getConnectedSsid();
+  if (!ssid || wifiSSID.value)
+    return;
+  wifiSSID.value = ssid;
+  selectedApSsid.value = ssid;
+}
+
+/** 扫码填入：先让用户在系统里「分享 WiFi」生成二维码，再扫进来 */
+async function onScanWifiQr() {
+  const res = await scanWifiQr();
+  if (res.status === 'cancel')
+    return;
+  if (res.status === 'invalid') {
+    uni.showToast({ title: '未识别到 WiFi 二维码', icon: 'none' });
+    return;
+  }
+  wifiSSID.value = res.data.ssid;
+  selectedApSsid.value = res.data.ssid;
+  if (res.data.password)
+    wifiPass.value = res.data.password;
+  uni.showToast({ title: '已填入 WiFi 信息', icon: 'none' });
+}
 
 /* ---------- 视觉验收用假设备（MOCK_STATE 非空时生效） ---------- */
 const MOCK_DEVICES: BLEDevice[] = [
@@ -150,6 +204,7 @@ async function onSelectDevice(device: BLEDevice) {
   try {
     await connectDevice(device);
     currentStep.value = 'wifi';
+    preselectCurrentWifi();
   }
   catch {
     // connectDevice 已设置 statusText
@@ -377,6 +432,41 @@ onBeforeUnmount(() => {
             <text class="form-hint text-secondary block">填写手机当前连接的 WiFi，用于给设备联网</text>
           </view>
 
+          <!-- 周边 WiFi 列表：设备扫描后 BLE 回传，点选免手输 SSID（旧固件不支持时回退手输） -->
+          <view class="ap-picker rounded-input">
+            <view class="ap-picker__head flex items-center justify-between">
+              <text class="ap-picker__label text-secondary">周边 WiFi</text>
+              <view class="flex items-center gap-2">
+                <view class="ap-picker__fetch" @tap="onScanWifiQr">
+                  <text class="ap-picker__fetch-text">扫码</text>
+                </view>
+                <view
+                  class="ap-picker__fetch"
+                  :class="{ 'ap-picker__fetch--loading': wifiScanning }"
+                  @tap="!wifiScanning && onFetchWifiList()"
+                >
+                  <text class="ap-picker__fetch-text">{{ wifiScanning ? '扫描中…' : '获取 WiFi 列表' }}</text>
+                </view>
+              </view>
+            </view>
+            <scroll-view v-if="wifiList.length" scroll-y class="ap-picker__list" :style="{ height: wifiListHeight }">
+              <view
+                v-for="ap in wifiList"
+                :key="ap.ssid"
+                class="ap-picker__item flex items-center justify-between"
+                :class="{ 'ap-picker__item--selected': selectedApSsid === ap.ssid }"
+                @tap="onPickAp(ap)"
+              >
+                <text class="ap-picker__ssid text-main">{{ ap.ssid }}</text>
+                <view class="flex items-center gap-2">
+                  <text v-if="ap.auth > 0" class="ap-picker__tag text-secondary">加密</text>
+                  <text class="ap-picker__rssi text-secondary">{{ ap.rssi }} dBm</text>
+                </view>
+              </view>
+            </scroll-view>
+            <text v-else-if="!wifiScanning" class="ap-picker__empty text-secondary block">点「获取 WiFi 列表」，设备会扫描周边网络</text>
+          </view>
+
           <view class="form flex flex-col gap-3">
             <view class="input-box rounded-input">
               <text class="input-box__label text-secondary">WiFi 名称 (SSID)</text>
@@ -399,6 +489,15 @@ onBeforeUnmount(() => {
                   @tap="showPassword = !showPassword"
                 />
               </view>
+            </view>
+            <view class="input-box rounded-input">
+              <text class="input-box__label text-secondary">服务器地址</text>
+              <input
+                v-model="serverUrl"
+                class="input-box__input"
+                placeholder="ws://IP:3001/ws"
+                placeholder-class="input-placeholder"
+              >
             </view>
           </view>
 
@@ -690,6 +789,76 @@ page {
 
   &--lit {
     background-color: $color-primary;
+  }
+}
+
+/* ---------- 周边 WiFi 列表 ---------- */
+.ap-picker {
+  padding: 16rpx 24rpx;
+
+  &__head {
+    min-height: 56rpx;
+  }
+
+  &__label {
+    font-size: 25rpx;
+  }
+
+  &__fetch {
+    padding: 8rpx 20rpx;
+    border: 1px solid $color-border;
+    border-radius: 999rpx;
+
+    &--loading {
+      opacity: 0.6;
+    }
+  }
+
+  &__fetch-text {
+    font-size: 24rpx;
+    color: $color-primary;
+  }
+
+  &__list {
+    margin-top: 8rpx;
+  }
+
+  &__item {
+    box-sizing: border-box;
+    height: 72rpx;          /* 与页面里的 WIFI_LIST_ROW_RPX 保持一致 */
+    padding: 0 8rpx;
+    border-bottom: 1px solid $color-border;
+
+    &:last-child {
+      border-bottom: none;
+    }
+
+    &--selected .ap-picker__ssid {
+      color: $color-primary;
+      font-weight: 600;
+    }
+  }
+
+  &__ssid {
+    font-size: 28rpx;
+  }
+
+  &__tag {
+    font-size: 22rpx;
+    padding: 2rpx 10rpx;
+    border: 1px solid $color-border;
+    border-radius: 999rpx;
+  }
+
+  &__rssi {
+    font-size: 22rpx;
+    min-width: 90rpx;
+    text-align: right;
+  }
+
+  &__empty {
+    padding: 12rpx 4rpx 4rpx;
+    font-size: 24rpx;
   }
 }
 

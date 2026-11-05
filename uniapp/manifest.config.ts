@@ -30,6 +30,10 @@ export default defineManifestConfig({
       Push: {
         description: '本地通知（哭声后台提醒）',
       },
+      // 扫码模块：扫描 WiFi 二维码，一次填入 SSID 与密码
+      Barcode: {
+        description: '扫描 WiFi 二维码填入配网信息',
+      },
     },
     /* 应用发布信息 */
     distribute: {
@@ -55,6 +59,8 @@ export default defineManifestConfig({
           '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>',
           // 通知运行时权限（Android 13+ 弹通知必需）
           '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
+          // 扫码填入 WiFi（uni.scanCode）
+          '<uses-permission android:name="android.permission.CAMERA"/>',
           // 声明使用 BLE 功能（Google Play 要求，普通 BLE 设备不需要硬件过滤）
           '<uses-feature android:name="android.hardware.bluetooth_le" android:required="true"/>',
         ],
@@ -76,6 +82,7 @@ export default defineManifestConfig({
           NSMicrophoneUsageDescription: '用于监测宝宝哭声',
           NSBluetoothAlwaysUsageDescription: '用于蓝牙扫描并连接宝宝监护器设备',
           NSBluetoothPeripheralUsageDescription: '用于与宝宝监护器设备通信',
+          NSCameraUsageDescription: '用于扫描 WiFi 二维码，自动填入配网信息',
           // 局域网直连开发板（采集页连 ws://babycry.local 或板子 IP）
           NSLocalNetworkUsageDescription: '用于连接同一局域网内的宝宝监护器设备进行数据采集',
         },

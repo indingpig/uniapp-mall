@@ -6,6 +6,7 @@ import {
   BLE_CHAR_DEVICE_INFO_UUID,
   BLE_CHAR_SERVER_URL_UUID,
   BLE_CHAR_STATUS_UUID,
+  BLE_CHAR_WIFI_LIST_UUID,
   BLE_CHAR_WIFI_PASS_UUID,
   BLE_CHAR_WIFI_SSID_UUID,
   BLE_SERVICE_UUID,
@@ -59,6 +60,12 @@ export interface BLEDevice {
   RSSI: number;
 }
 
+export interface WifiAp {
+  ssid: string;
+  rssi: number;
+  auth: number; // 0 = 开放网络, 其余需要密码
+}
+
 interface PairedResult {
   success: boolean;
   message: string;
@@ -71,6 +78,8 @@ export function useBLE() {
   const statusText = ref('点击扫描查找设备');
   const paired = ref(false);
   const deviceInfo = ref<Record<string, unknown>>({});
+  const wifiList = ref<WifiAp[]>([]);
+  const wifiScanning = ref(false);
 
   let scanner: ReturnType<typeof createScanner> | null = null;
   let peripheral: ReturnType<typeof createPeripheral> | null = null;
@@ -81,6 +90,7 @@ export function useBLE() {
     serverUrl: '',
     status: '',
     deviceInfo: '',
+    wifiList: '',
   };
 
   /* ===================== 工具 ===================== */
@@ -103,6 +113,50 @@ export function useBLE() {
       str += String.fromCharCode(Number.parseInt(hex.substring(i, i + 2), 16));
     }
     return str.replace(/\0/g, '');
+  }
+
+  /* WiFi 列表: notify 分片按 \n 分行重组, SSID 是 UTF-8 多字节, 手写解码 */
+  function hexToBytes(hex: string): number[] {
+    const bytes: number[] = [];
+    for (let i = 0; i + 1 < hex.length; i += 2) {
+      bytes.push(Number.parseInt(hex.substring(i, i + 2), 16));
+    }
+    return bytes;
+  }
+
+  function bytesToUtf8(bytes: number[]): string {
+    let out = '';
+    let i = 0;
+    while (i < bytes.length) {
+      const b = bytes[i];
+      let len = 1;
+      let cp = b;
+      if (b >= 0xC0 && b < 0xE0) {
+        len = 2;
+        cp = b & 0x1F;
+      }
+      else if (b >= 0xE0 && b < 0xF0) {
+        len = 3;
+        cp = b & 0x0F;
+      }
+      else if (b >= 0xF0 && b < 0xF8) {
+        len = 4;
+        cp = b & 0x07;
+      }
+      else if (b >= 0x80) {
+        out += '\uFFFD';
+        i++;
+        continue;
+      }
+      if (i + len > bytes.length) {
+        out += '\uFFFD';
+        break;
+      }
+      for (let k = 1; k < len; k++) cp = (cp << 6) | (bytes[i + k] & 0x3F);
+      out += String.fromCodePoint(cp);
+      i += len;
+    }
+    return out;
   }
 
   function matchUUID(platformUUIDs: string[], targetFull: string): string {
@@ -207,6 +261,8 @@ export function useBLE() {
     platformCharUuids.serverUrl = matchUUID(charUUIDs, BLE_CHAR_SERVER_URL_UUID);
     platformCharUuids.status = matchUUID(charUUIDs, BLE_CHAR_STATUS_UUID);
     platformCharUuids.deviceInfo = matchUUID(charUUIDs, BLE_CHAR_DEVICE_INFO_UUID);
+    // WiFi 列表特征值: 旧固件可能没有, 缺失时配对页回退手输 SSID
+    platformCharUuids.wifiList = matchUUID(charUUIDs, BLE_CHAR_WIFI_LIST_UUID);
 
     if (!platformCharUuids.status) {
       throw new Error('未找到状态特征值, 请确认固件已正确烧录');
@@ -250,6 +306,94 @@ export function useBLE() {
         console.warn('[BLE] Observe error:', err.errMsg);
       },
     });
+  }
+
+  /* ===================== WiFi 列表 (免手输 SSID) ===================== */
+
+  let wifiListBuf: number[] = [];
+  let wifiListTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function endWifiScan() {
+    wifiScanning.value = false;
+    if (wifiListTimer) {
+      clearTimeout(wifiListTimer);
+      wifiListTimer = null;
+    }
+  }
+
+  function handleWifiListChunk(hex: string) {
+    wifiListBuf.push(...hexToBytes(hex));
+    // 逐行提取以 \n 结尾的完整行 (分片重组)
+    let nl = wifiListBuf.indexOf(0x0A);
+    while (nl >= 0) {
+      const lineBytes = wifiListBuf.splice(0, nl + 1);
+      lineBytes.pop();
+      nl = wifiListBuf.indexOf(0x0A);
+      if (lineBytes.length === 0)
+        continue;
+      const line = bytesToUtf8(lineBytes).trim();
+      if (!line)
+        continue;
+      try {
+        const obj = JSON.parse(line) as { ssid?: string; rssi?: number; auth?: number; done?: boolean; error?: string };
+        if (obj.done) {
+          endWifiScan();
+          statusText.value = wifiList.value.length > 0
+            ? `已获取 ${wifiList.value.length} 个 WiFi`
+            : '未扫描到周边 WiFi, 请手输 WiFi 名称';
+          return;
+        }
+        if (obj.error) {
+          endWifiScan();
+          statusText.value = '设备扫描 WiFi 失败, 请手输 WiFi 名称';
+          return;
+        }
+        if (obj.ssid)
+          wifiList.value.push({ ssid: obj.ssid, rssi: obj.rssi ?? -100, auth: obj.auth ?? 1 });
+      }
+      catch { /* 不完整或非 JSON 行, 跳过 */ }
+    }
+  }
+
+  /**
+   * 触发设备扫描周边 WiFi, 结果经 WIFI_LIST 特征值 notify 回来 (见 handleWifiListChunk)。
+   * 旧固件无此特征值时抛错, 配对页回退手输 SSID。
+   */
+  async function startWifiScan(): Promise<void> {
+    if (!peripheral || !connectedDevice.value)
+      throw new Error('设备未连接');
+    if (!platformCharUuids.wifiList)
+      throw new Error('固件不含 WiFi 列表功能, 请手输 WiFi 名称');
+    if (wifiScanning.value)
+      return;
+
+    wifiList.value = [];
+    wifiListBuf = [];
+    wifiScanning.value = true;
+    statusText.value = '正在获取周边 WiFi 列表...';
+
+    // 兜底: 固件未实现/notify 丢失时 6s 收尾, 不永远转圈
+    wifiListTimer = setTimeout(() => {
+      if (!wifiScanning.value)
+        return;
+      endWifiScan();
+      statusText.value = wifiList.value.length > 0
+        ? `已获取 ${wifiList.value.length} 个 WiFi`
+        : '获取 WiFi 列表超时, 请手输 WiFi 名称';
+    }, 6000);
+
+    const listRef = characteristicOf(platformServiceUuid, platformCharUuids.wifiList);
+    peripheral.observe(listRef, {
+      onValue: (hex: string) => handleWifiListChunk(hex),
+      onError: (err) => {
+        console.warn('[BLE] WiFiList observe error:', err.errMsg);
+        endWifiScan();
+        statusText.value = '获取 WiFi 列表失败';
+      },
+    });
+    // observe 写 CCCD 是异步的, 稍候再触发扫描, 避免通知先于订阅到达
+    await sleep(150);
+    await writeChar('WiFiList', platformCharUuids.wifiList, '1');
   }
 
   /* ===================== 写入凭据 ===================== */
@@ -313,6 +457,7 @@ export function useBLE() {
   /* ===================== 清理 ===================== */
 
   function close(): void {
+    endWifiScan();
     if (peripheral) {
       peripheral.disconnect();
       peripheral = null;
@@ -335,9 +480,12 @@ export function useBLE() {
     statusText,
     paired,
     deviceInfo,
+    wifiList,
+    wifiScanning,
     startScan,
     stopScan,
     connectDevice,
+    startWifiScan,
     pair,
     close,
   };
