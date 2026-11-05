@@ -28,6 +28,7 @@
 /* ================================================================== */
 
 #define BLE_STATUS_IDLE             "idle"
+#define BLE_STATUS_SCANNING         "scanning"             // 正在扫描周边 WiFi (配网辅助)
 #define BLE_STATUS_CONNECTING_WIFI  "connecting_wifi"
 #define BLE_STATUS_WIFI_CONNECTED   "wifi_connected"
 #define BLE_STATUS_SERVER_CONNECTED "server_connected"

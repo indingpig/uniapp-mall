@@ -6,6 +6,9 @@
 #include <BLESecurity.h>
 #include <BLE2902.h>
 #include <Preferences.h>
+#include <WiFi.h>
+#include <vector>
+#include <algorithm>
 
 /* ================================================================== */
 /*  静态状态                                                            */
@@ -13,6 +16,7 @@
 
 static BLEServer*          s_server      = nullptr;
 static BLECharacteristic*  s_charStatus  = nullptr;
+static BLECharacteristic*  s_charWifiList = nullptr;
 
 static BleCredentialsCallback s_credsCb  = nullptr;
 static bool    s_bleConnected = false;
@@ -21,6 +25,21 @@ static bool    s_enabled = true;   // 配网窗口: 出厂态默认开, 主固�
 // 暂存 App 写入的凭据
 static String s_pendingSSID;
 static String s_pendingPass;
+static bool s_pendingPassReceived = false;  // 开放网络密码为空也视为已写入
+
+// WiFi 列表扫描: App 写 WIFI_LIST 只置位, 真正的 WiFi API 调用都在 bleProvisionLoop
+// (loop task) 里做 —— BLE 回调跑在 BT 任务, 跨任务调 WiFi 容易撞上栈未就绪的状态
+static bool     s_scanRequested = false;
+static bool     s_scanStarted   = false;
+static uint32_t s_scanRetryAt   = 0;
+static uint8_t  s_scanRetries   = 0;
+
+// 延迟发起加密: 链路刚建立时手机还没走完服务发现, 立刻发 Security Request
+// 会被对端直接断开 (表现为配对框闪一下, 重连后再弹一次)
+static bool          s_encryptPending = false;
+static esp_bd_addr_t s_encryptBda;
+static uint32_t      s_encryptAt = 0;
+static const uint32_t BLE_ENCRYPT_DELAY_MS = 500;
 
 /* ================================================================== */
 /*  前向声明                                                            */
@@ -74,6 +93,7 @@ class PassWriteCallback : public BLECharacteristicCallbacks {
     if (!writeAllowed("Password")) return;
     s_pendingPass = String(c->getValue().c_str());
     s_pendingPass.trim();
+    s_pendingPassReceived = true;   // 开放网络: 空密码也算已写入
     Serial.println("[BLE] Password received (hidden)");
   }
 };
@@ -104,19 +124,41 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
   }
 };
 
+class WifiListWriteCallback : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* c) override {
+    if (!writeAllowed("WiFiList")) return;
+    if (s_scanRequested) return;  // 已在扫描, 忽略重复触发
+    Serial.println("[BLE] WiFi scan requested");
+    s_scanRequested = true;
+    s_scanStarted = false;
+    s_scanRetries = 0;
+    s_scanRetryAt = 0;
+    updateStatus(BLE_STATUS_SCANNING);
+  }
+};
+
 /* ================================================================== */
 /*  连接回调                                                            */
 /* ================================================================== */
 
 class ServerConnectionCallback : public BLEServerCallbacks {
-  void onConnect(BLEServer* s) override {
+  // 连接即由服务端主动发起加密 (Just Works, 静默完成):
+  // 部分 Android ROM (如鸿蒙) 写加密特征值被拒时不会自动触发配对,
+  // 必须服务端先发 Security Request, 否则凭据写入报 GATT_INSUF_AUTHENTICATION
+  void onConnect(BLEServer* server, esp_ble_gatts_cb_param_t* param) override {
     s_bleConnected = true;
     updateStatus(BLE_STATUS_IDLE);
-    Serial.println("[BLE] App connected");
+    // 不在这里同步发起加密, 交给 bleProvisionLoop 延迟发送 (见 s_encryptPending 注释)
+    memcpy(s_encryptBda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
+    s_encryptPending = true;
+    s_encryptAt = millis() + BLE_ENCRYPT_DELAY_MS;
+    Serial.printf("[BLE] App connected, encryption in %lu ms\n",
+                  (unsigned long)BLE_ENCRYPT_DELAY_MS);
   }
 
   void onDisconnect(BLEServer* s) override {
     s_bleConnected = false;
+    s_encryptPending = false;
     if (s_enabled) {
       Serial.println("[BLE] App disconnected, restarting advertising");
       BLEDevice::startAdvertising();
@@ -144,6 +186,134 @@ void bleProvisionUpdateStatus(const char* status) {
 
 bool bleProvisionIsConnected() {
   return s_bleConnected;
+}
+
+/* ================================================================== */
+/*  WiFi 列表扫描 (App 写 WIFI_LIST 触发, loop 中回传结果)               */
+/*  notify 按 ≤20 字节分片, 行以 \n 结尾; App 端按行重组 + JSON 解析     */
+/* ================================================================== */
+
+static const size_t WIFI_LIST_CHUNK = 20;      // 兜底 MTU(23) 下最大可发载荷
+static const int    WIFI_LIST_NOTIFY_GAP_MS = 15;  // notify 间隔, 防洪泛丢包
+
+static String jsonEscape(const String& s) {
+  String out;
+  out.reserve(s.length() + 4);
+  for (size_t i = 0; i < s.length(); i++) {
+    char ch = s[i];
+    if (ch == '"' || ch == '\\') {
+      out += '\\';
+      out += ch;
+    }
+    else if ((uint8_t)ch < 0x20) {
+      out += ' ';  // 控制字符不可进 JSON, 降级为空格
+    }
+    else {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+static void notifyChunked(const String& payload) {
+  if (!s_charWifiList || !s_bleConnected) return;
+  size_t total = payload.length();
+  for (size_t i = 0; i < total; i += WIFI_LIST_CHUNK) {
+    size_t len = (total - i < WIFI_LIST_CHUNK) ? (total - i) : WIFI_LIST_CHUNK;
+    s_charWifiList->setValue((uint8_t*)(payload.c_str() + i), len);
+    s_charWifiList->notify();
+    delay(WIFI_LIST_NOTIFY_GAP_MS);
+  }
+}
+
+static void sendWifiListResults() {
+  int n = WiFi.scanComplete();
+  if (n < 0) {
+    Serial.printf("[BLE] WiFi scan failed (%d)\n", n);
+    notifyChunked("{\"error\":\"scan_failed\"}\n");
+    notifyChunked("{\"done\":true}\n");
+    return;
+  }
+
+  // 按信号强度降序的索引数组, 同名 SSID 去重 (保留最强)
+  std::vector<int> idx(n);
+  for (int i = 0; i < n; i++) idx[i] = i;
+  std::sort(idx.begin(), idx.end(), [&](int a, int b) {
+    return WiFi.RSSI(a) > WiFi.RSSI(b);
+  });
+
+  String seen;
+  int sent = 0;
+  for (int k = 0; k < n; k++) {
+    int i = idx[k];
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0) continue;               // 隐藏网络无法直接选择, 跳过
+    if (seen.indexOf('\x01' + ssid + '\x01') >= 0) continue;  // 同名去重
+    seen += '\x01' + ssid + '\x01';
+
+    String line = "{\"ssid\":\"" + jsonEscape(ssid) + "\","
+      + "\"rssi\":" + String(WiFi.RSSI(i)) + ","
+      + "\"auth\":" + String((int)WiFi.encryptionType(i)) + "}\n";
+    notifyChunked(line);
+    sent++;
+  }
+  notifyChunked("{\"done\":true,\"count\":" + String(sent) + "}\n");
+  WiFi.scanDelete();
+  Serial.printf("[BLE] WiFi scan sent %d APs (%d seen)\n", sent, n);
+}
+
+void bleProvisionLoop() {
+  // -- 延迟发起链路加密 (见 s_encryptPending 注释) --
+  if (s_encryptPending && (int32_t)(millis() - s_encryptAt) >= 0) {
+    s_encryptPending = false;
+    if (s_bleConnected) {
+      esp_err_t err = esp_ble_set_encryption(s_encryptBda, ESP_BLE_SEC_ENCRYPT);
+      Serial.printf("[BLE] set_encryption: %s\n", esp_err_to_name(err));
+    }
+  }
+
+  if (!s_scanRequested) return;
+
+  // -- 启动扫描: WiFi 栈刚切到 STA 时 esp_wifi_scan_start 会报 STATE 错误,
+  //    「首次点获取 WiFi 列表必定失败」就是这个原因。隔 150ms 重试, 别急着回错误 --
+  if (!s_scanStarted) {
+    if (s_scanRetryAt != 0 && (int32_t)(millis() - s_scanRetryAt) < 0) return;
+    WiFi.mode(WIFI_STA);
+    int16_t started = WiFi.scanNetworks(/* async */ true);
+    if (started == WIFI_SCAN_FAILED) {
+      if (++s_scanRetries > 20) {                   // 约 3 秒还起不来才认输
+        Serial.println("[BLE] WiFi scan start failed: WiFi not ready");
+        notifyChunked("{\"error\":\"scan_failed\"}\n");
+        notifyChunked("{\"done\":true}\n");
+        s_scanRequested = false;
+        s_scanRetries = 0;
+        s_scanRetryAt = 0;
+        return;
+      }
+      s_scanRetryAt = millis() + 150;
+      return;
+    }
+    s_scanStarted = true;
+    s_scanRetryAt = 0;
+    Serial.printf("[BLE] WiFi scan started (retries=%u)\n", s_scanRetries);
+    return;
+  }
+
+  int8_t state = WiFi.scanComplete();
+  if (state == WIFI_SCAN_RUNNING) return;           // 还在扫
+  if (state >= 0) {
+    sendWifiListResults();
+  }
+  else {
+    Serial.printf("[BLE] WiFi scan failed (%d)\n", state);
+    notifyChunked("{\"error\":\"scan_failed\"}\n");
+    notifyChunked("{\"done\":true}\n");
+    WiFi.scanDelete();
+  }
+  s_scanRequested = false;
+  s_scanStarted = false;
+  s_scanRetries = 0;
+  s_scanRetryAt = 0;
 }
 
 void bleProvisionSetCredentialsCallback(BleCredentialsCallback cb) {
@@ -177,7 +347,10 @@ void bleProvisionInit(const char* deviceName) {
   // Security Manager: Just Works 会话级加密, 凭据特征值要求加密链路后生效
   BLEDevice::setSecurityCallbacks(new SecurityCallbacks());
   BLESecurity* sec = new BLESecurity();
-  sec->setAuthenticationMode(ESP_LE_AUTH_NO_BOND);
+  // 持久化绑定: 密钥存 NVS。若用 NO_BOND, 设备每次重启后手机侧旧密钥全部作废,
+  // 鸿蒙/安卓会报「PIN 码或配对密钥错误」且反复弹配对框。恢复出厂 nvs_flash_erase
+  // 会连同绑定一并清除, 语义自洽
+  sec->setAuthenticationMode(ESP_LE_AUTH_BOND);
   sec->setCapability(ESP_IO_CAP_NONE);
   sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
   sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
@@ -211,6 +384,13 @@ void bleProvisionInit(const char* deviceName) {
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
   s_charStatus->addDescriptor(new BLE2902());
   s_charStatus->setValue(BLE_STATUS_IDLE);
+
+  // WiFi List (Write 触发扫描 + Notify 回列表, 免手输 SSID)
+  s_charWifiList = service->createCharacteristic(
+    BLE_CHAR_WIFI_LIST_UUID,
+    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+  s_charWifiList->addDescriptor(new BLE2902());
+  s_charWifiList->setCallbacks(new WifiListWriteCallback());
 
   // Device Info (Read)
   BLECharacteristic* cDevInfo = service->createCharacteristic(

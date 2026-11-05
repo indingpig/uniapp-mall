@@ -292,6 +292,9 @@ void loop() {
   // WiFi 连接状态机轮询
   wifiLoop();
 
+  // BLE 配网轮询 (WiFi 列表扫描结果回传)
+  bleProvisionLoop();
+
   // BOOT 键检测 + 配网窗口超时 + LED 指示
   bootButtonLoop();
   if (s_windowUntil != 0 && millis() >= s_windowUntil) {
