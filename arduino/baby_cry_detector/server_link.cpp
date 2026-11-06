@@ -182,15 +182,17 @@ static bool wsProcessIncoming() {
 /*  连接                                                                */
 /* ================================================================== */
 
-/* 解析 http://host[:port] (不支持 https); path 固定 /ws?device=esp32 */
+/* 解析 ws:// 或 http:// 前缀的 host[:port] (path 固定 /ws?device=esp32, 忽略传入路径);
+ * App 配网下发的是 ws:// 形式, 兼容 http:// (老流程) */
 static bool parseServerUrl(const String& url) {
   String u = url;
   u.trim();
-  if (u.startsWith("https://")) {
-    Serial.println("[ServerLink] ERR: 暂不支持 https, 请使用 http://");
+  if (u.startsWith("https://") || u.startsWith("wss://")) {
+    Serial.println("[ServerLink] ERR: 暂不支持加密连接, 请使用 ws://");
     return false;
   }
-  if (u.startsWith("http://")) u = u.substring(7);
+  if (u.startsWith("ws://")) u = u.substring(5);
+  else if (u.startsWith("http://")) u = u.substring(7);
   int slash = u.indexOf('/');
   if (slash >= 0) u = u.substring(0, slash);       // 忽略 URL 里的路径
   int colon = u.indexOf(':');
@@ -258,9 +260,15 @@ static bool tryConnect() {
     return false;
   }
   String expect = wsAcceptKey(key);
-  int accIdx = resp.indexOf("Sec-WebSocket-Accept:");
-  if (accIdx < 0 || !resp.substring(accIdx + 21).startsWith(expect)) {
-    Serial.println("[ServerLink] accept key mismatch");
+  // Node ws 库响应头为全小写, 查找用大写副本 (toUpperCase 不改变偏移),
+  // 值比较仍用原文 (base64 区分大小写)
+  String respUpper = resp;
+  respUpper.toUpperCase();
+  int accIdx = respUpper.indexOf("SEC-WEBSOCKET-ACCEPT:");
+  String accVal = (accIdx >= 0) ? resp.substring(accIdx + 21) : String();
+  accVal.trim();   // 冒号后有一个空格, 必须去掉再比较
+  if (accIdx < 0 || !accVal.startsWith(expect)) {
+    Serial.printf("[ServerLink] accept key mismatch (found=%d)\n", accIdx >= 0);
     return false;
   }
 
