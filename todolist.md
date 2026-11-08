@@ -34,3 +34,6 @@
 - 元素渲染成 `<!---->` 且零报错 → 查其用到的导入是否在平台条件编译块内(eslint 排序会穿越边界)
 - 入口页变成别的页面 → 看 `src/pages.json` 第一个 path;dev server 启动时 pages.json 必须存在
 - 全屏页底部贴边 / flex 卡片被撑破 → uni-h5 view 默认 content-box,容器加 `box-sizing: border-box` + `min-width: 0`
+
+## 其他bug
+- 设备重置后，app进入搜索页面进行搜索设备，第一次点击设备进行连接能成功进入配对页面，但是一会就会跳回搜索设备页面
