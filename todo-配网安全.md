@@ -1,72 +1,53 @@
 # 配网安全阶段一：待办
 
-> 2026-11-05 创建，2026-11-06 更新。
+> 2026-11-05 创建，2026-11-08 更新（RST 连击方案废弃，BOOT 双手势定稿）。
 
-## 已完成并验证（2026-11-06）
+## 已完成并验证（2026-11-08）
 
-- App 配对页完整流程（Just Works 加密）：扫描 → WiFi 列表点选 → 凭据 → `server_connected`
-- 配网成功 → LED 灭、BLE 停广播
-- BOOT 按住 3s 松手 → 打开 5 分钟配网窗口（LED 快闪）
+- **BOOT 双手势**（两轮实测通过，恢复出厂唯一入口）：
+  - 按住 3s 松手 → 开 5 分钟配网窗口（3s 处黄灯快闪提示「可松手」）
+  - 按住 10s（按住中触发）→ 擦 NVS → 红灯闪烁**等待松手**才重启
+    （直接重启会因 GPIO0 仍被按住而进 ROM 下载模式，看似死机）
+- **重新配网回归**：App 全流程（扫描 → WiFi 列表选网 → 凭据写入 → 设备连服务器）
+  → `server_connected` → LED 灭、BLE 停广播
+- **服务端链路**：设备经 `ws://192.168.1.24:3001/ws` 在线，detector 状态机用真实数据跑通；
+  服务端跑在 Windows 侧（`NO_SIMULATOR=true`，WSLENV 穿透环境变量）
 
-## 待验证：恢复出厂改为 RST 三连击
+## 已废弃：RST 三连击恢复出厂（2026-11-08 决策）
 
-固件改动（`arduino/baby_cry_detector/`）：
+- **原因**：RST 接 CHIP_PU 是纯硬件复位，软件读不到，只能跨重启查 NVS 计数推断。
+  实测死结：每按一次断一次 USB，计数落盘要 0.65s、窗口内还要再按 —— 3s/6s 窗口
+  多轮均失败；且 RST 与插 USB 上电同码（0x01）无法防误触。行业同款方案
+  （Shelly 断电计数）门槛为 5-6 次且只作兜底，三连击的可靠性/体验不成立。
+- **处置**：代码已整体移除（原实现见 git 历史 `4c5e584`）；恢复出厂统一走
+  BOOT 长按 10s。固件挂死场景用 BOOT+RST 进 ROM 下载模式重烧（开发场景足够）。
 
-- `baby_cry_detector.ino` — 新增 `rstSeqBootCheck()`，恢复出厂由「BOOT 长按 10s」改为「3s 内连按 3 次 RST」；BOOT 只保留配网窗口
-- `config.h` — 新增 `RST_SEQ_MAGIC` / `RST_SEQ_WINDOW_MS` / `RST_SEQ_TRIGGER_COUNT` / `NVS_KEY_RST_SEQ` / `NVS_KEY_LAST_RST`
-- `audio_pipeline.cpp` — 注释同步（GPIO0 被 MCLK 占用后的后果表述）
-- `server_link.cpp` — 支持 `ws://` 前缀；accept key 响应头名大小写不敏感 + value `trim()`
+## 待办
 
-### 1. 实测 RST 键复位码（阻塞后续）
-
-板子使用 ESP32-S3 原生 USB-Serial-JTAG：按 RST 会让 USB 重新枚举、串口断开，那一轮启动日志抓不到；而事后打开串口本身又会触发一次 `USB_UART_CHIP_RESET`，看到的永远是打开串口那次的码。
-
-固件已把本次复位码写入 NVS `last_rst`，下次启动打印上一次的值，用来补上抓不到的那条：
-
-```
-[Boot] reset ROM code: 0x??   ← 本次（通常是开串口触发的 0x15）
-[Boot] 上次复位码: 0x??        ← 上一次，按 RST 那一轮的码
-```
-
-操作：按一次 RST → 重新打开串口 → 读 `[Boot] 上次复位码`。
-
-| 读到的码 | 含义 | 处理 |
-|---|---|---|
-| `0x01` | 上电级复位 | 当前 `romCode != 0x01` 的过滤可直接用，进入第 2 步 |
-| `0x15` 或其他 | 与 USB 复位同码 / 非预期值 | `0x01` 判据失效，方案需重新设计 |
-
-若为 `0x15`：复位码无法区分「按 RST」与「开串口」，纯计数方案在该硬件上不成立，需改设计方向（例如改用 BOOT 键的其他组合手势、或引入可读的硬件信号）。
-
-### 2. 三击 RST → 恢复出厂
-
-预期链路：第 2 击黄灯快闪 → 第 3 击红灯快闪 1s → 清 NVS → 重启后 LED 慢闪（回到出厂态）。
-
-> ⚠️ 会清除已配网凭据，测完需重新配网。
-
-### 3. 负向用例
-
-- 双击 RST → 正常开机，不触发恢复出厂
-- 插拔 USB、打开串口 → 计数不累计
-- 运行中意外复位（panic / WDT）→ 计数清零，不累计
-
-### 4. 重新配网回归
-
-App 全流程再走一遍到 `server_connected`，确认清除凭据后能正常配网。
-
-## 待实现
-
-- [ ] **App 扫描按 Service UUID 过滤** — `uniapp/src/hooks/useBLE.ts:192` 的 `services: []` 改为传入 `BLE_SERVICE_UUID`（UTS 插件已支持该参数）
-- [ ] **Server URL 校验收敛** — 抽一个共用校验函数（`ws://` / `wss://` 前缀、长度、去空白），接入两处：
-  - BLE 写入：`ble_provision.cpp:101` 的 `ServerURLWriteCallback`
-  - HTTP 写入：`collect_server.cpp:223` 的 `handleSetServer`
-- [ ] **WiFi 掉线自动重连** — `wifi_connect.cpp` 增加掉线检测 + 指数退避（3s → 30s → 60s 封顶）
+- [ ] **BLE 首连加密竞态（上次「配网超时」根因，固件）** — 串口实测：首次连接
+  `配对/加密 FAIL` 后手机断连，重连才 `OK`。固件连接后 500ms 主动 startSecurity
+  与手机写加密特征值触发的自动配对撞车。方向：去掉固件主动加密、改 security
+  request、或失败重试；不修则 App 首连的 Status 订阅有丢失风险
+- [ ] **配对页按规范 5.4 重设计（App，v1.1.22-23）** — 紧凑布局（设备状态条 +
+  单卡 + 高级设置折叠 + 吸底 CTA）、成功弹框（联网信息卡三行）、失败提示分级
+  （就地错误/瞬时 toast/掉线灰态）；失败分级需要固件补充错误码区分
+  （`WL_WRONG_PASSWORD` → `error:wifi_password` 等）
+- [ ] **App 服务器地址烘焙问题** — `.env.production` 固化 IP（现为 192.168.3.5），
+  换网络即失效；方向：运行时可配置
+- [ ] **App 扫描按 Service UUID 过滤** — `useBLE.ts` `services: []` 传
+  `BLE_SERVICE_UUID`（UTS 插件已支持该参数）
+- [ ] **Server URL 校验收敛** — 校验函数（`ws://`/`wss://` 前缀、长度）接入两处：
+  `ble_provision.cpp` ServerURLWriteCallback、`collect_server.cpp` handleSetServer
+- [ ] **WiFi 掉线自动重连** — `wifi_connect.cpp` 掉线检测 + 指数退避（3s→30s→60s 封顶）
 
 ## 调试注意
 
-- 串口抓日志进程不要与 `pio run -t upload` / esptool 同时运行，双进程抢串口会互相干扰
-- 原生 USB 方案下，打开串口会复位芯片；观察启动日志时注意区分「串口打开」与「按键」造成的复位
+- 日志走板载原生 USB（`CDC_ON_BOOT=1`），**CH343 串口口看不到运行日志**
+- **打开串口本身会触发一次 USB 复位**（USB_UART_CHIP_RESET）——启动日志永远是
+  「开串口那一次」的；按 RST 后当轮日志抓不到属预期
+- pyserial 抓日志脚本在 USB 重枚举时会抛 SerialException 退出，属预期
 - 提交前跑 `cd uniapp && pnpm run lint && pnpm run type-check`
 
 ## 相关文档
 
-- 方案设计：`配网与设备管理改进方案.md`
+- 方案设计：`配网与设备管理改进方案.md`（服务端缺位实施策略：阶段一/二/三）
