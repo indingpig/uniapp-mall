@@ -14,6 +14,7 @@ static uint32_t s_attemptStart = 0;     // 本次尝试开始时间
 static uint32_t s_lastCheck = 0;        // 上次轮询时间
 static int     s_failCount = 0;         // 失败计数
 static bool    s_hasSaved = false;      // NVS 是否存有凭据 (出厂态判定)
+static volatile bool s_authFail = false; // 断连原因 = 密码错误 (4 次握手超时)
 
 static Preferences s_prefs;
 
@@ -48,11 +49,19 @@ void wifiConnectBegin(const String& ssid, const String& pass) {
   s_attemptStart = millis();
   s_failCount = 0;
   s_lastCheck = 0;
+  s_authFail = false;
 }
 
 void wifiConnectInit(WifiStatusCallback statusCb) {
   s_statusCb = statusCb;
   s_prefs.begin(NVS_NAMESPACE, false);
+
+  // 断连原因监听: 4 次握手超时 (reason 15) = 密码错误, 要尽早告知 App 就地提示
+  // (若等 30s×10 次重试跑完才报, App 的配对等待早超时了)
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
+    if (info.wifi_sta_disconnected.reason == 15)
+      s_authFail = true;
+  }, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
   // 读取已保存的凭据
   String savedSSID = s_prefs.getString(NVS_KEY_WIFI_SSID, "");
@@ -111,7 +120,12 @@ void wifiLoop() {
     }
   }
   else {
-    // 仍在连接中, 无操作
+    // 仍在连接中: 密码错误要尽早告知 (App 的配对等待只有 30s)
+    if (s_authFail) {
+      s_authFail = false;
+      Serial.println("[WiFi] 密码错误 (4-Way Handshake Timeout)");
+      reportStatus(BLE_STATUS_ERROR_WIFI_PASS);
+    }
   }
 }
 
