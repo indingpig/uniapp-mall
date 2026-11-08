@@ -14,8 +14,8 @@
 #define NVS_KEY_WIFI_SSID      "wifi_ssid"
 #define NVS_KEY_WIFI_PASS      "wifi_pass"
 #define NVS_KEY_SERVER_URL     "server_url"
-#define NVS_KEY_RST_SEQ        "rst_seq"   // RST 键连击计数 (高16位魔数 + 低16位次数)
-#define NVS_KEY_LAST_RST       "last_rst"  // 上一次启动的复位码 (实测用: RST 键复位时 USB 会断开, 日志抓不到)
+// 已废弃: NVS_KEY_RST_SEQ / NVS_KEY_LAST_RST (RST 连击方案, 2026-11-08 移除;
+// 残留键值留在 NVS 里无害, 恢复出厂时会一并擦除)
 
 /* ================================================================== */
 /*  WiFi 连接参数                                                       */
@@ -36,29 +36,20 @@
 #define BLE_STATUS_SERVER_CONNECTED "server_connected"
 #define BLE_STATUS_ERROR_WIFI       "error:wifi_failed"
 #define BLE_STATUS_ERROR_PROVISION  "error:provisioning_closed"  // 配网窗口未开, 写入被拒
-#define BLE_STATUS_FACTORY_RESET    "factory_reset"  // 预留: 恢复出厂已移到 RST 连击, App 下发复位可复用
+#define BLE_STATUS_FACTORY_RESET    "factory_reset"  // 恢复出厂 (BOOT 长按 10s) 触发时经 BLE 通知
 
 /* ================================================================== */
-/*  BOOT 键与配网窗口                                                    */
-/*  出厂态 (NVS 无凭据) 窗口常开; 已配网设备窗口常闭, BOOT 按住 3s 松手重开 */
+/*  BOOT 键: 配网窗口开关 + 长按恢复出厂 (双轨制主手势)                   */
+/*  出厂态 (NVS 无凭据) 窗口常开; 已配网设备窗口常闭                    */
+/*    按住 3s 松手 → 配网窗口; 按住 10s (按住中) → 恢复出厂              */
 /* ================================================================== */
 
 #define BOOT_BTN_PIN              0      // DevKitC 自带 BOOT 键 (GPIO0, 低电平按下)
 #define BOOT_HOLD_WINDOW_MS       3000   // 按住 3s → 打开配网窗口
+#define BOOT_HOLD_RESET_MS        10000  // 按住 10s → 恢复出厂 (按住中触发, 不等松手)
 #define PROVISION_WINDOW_MS       (5UL * 60UL * 1000UL)  // 窗口时长: 5 分钟
 #define PROV_LED_FAST_MS          100    // 窗口期 LED 快闪周期
 #define PROV_LED_SLOW_MS          500    // 出厂态待配网 LED 慢闪周期
-
-/* ================================================================== */
-/*  RST 键连击恢复出厂 (与 BOOT 键职责分开)                              */
-/*  RST 接 CHIP_PU 是纯硬件复位, 固件读不到电平; 每次重启后检查 NVS       */
-/*  计数标志, 只有上电级复位 (ROM 码 0x1: RST 键/插 USB) 才累计,          */
-/*  串口开关 (0x15)、esp_restart (0x3)、panic 等一律清零                  */
-/* ================================================================== */
-
-#define RST_SEQ_MAGIC             0x52535431UL  // "RST1", 防 NVS 残留误判
-#define RST_SEQ_WINDOW_MS         3000   // 两次复位间隔超过此时长 → 计数清零
-#define RST_SEQ_TRIGGER_COUNT     3      // 窗口内连按 N 次 RST → 恢复出厂
 
 /* ================================================================== */
 /*  音频链路 (audio_pipeline / baby_infer / collect_server / server_link) */

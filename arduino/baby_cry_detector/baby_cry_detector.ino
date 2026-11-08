@@ -44,7 +44,6 @@
 #include "led.h"
 #include <nvs_flash.h>
 #include <Preferences.h>
-#include "esp32s3/rom/rtc.h"   // rtc_get_reset_reason: ROM 级复位码 (区分 RST 键/串口/esp_restart)
 
 /* ================================================================== */
 /*  全局状态                                                            */
@@ -63,93 +62,42 @@ void startListening();
 void stopListening();
 
 /* ================================================================== */
-/*  RST 键连击恢复出厂 (与 BOOT 键职责分开)                              */
-/*  RST 接 CHIP_PU 是纯硬件复位, 固件读不到电平; 改为每次重启后查 NVS    */
-/*  计数: 只有上电级复位 (ROM 码 0x1, RST 键/插 USB 同码) 才累计 ——      */
-/*  串口开关 (0x15)、esp_restart (0x3)、panic 等一律清零, 插拔串口、    */
-/*  烧录不会误累计; 正常使用也不可能在 3s 内上电 3 次。标志持久化 NVS    */
-/*  (EN 复位是否保留 RTC 内存未验证, NVS 与上电方式无关, 更稳)。        */
+/*  恢复出厂                                                            */
+/*  RST 键连击方案已废弃 (2026-11-08): RST 接 CHIP_PU 是纯硬件复位,     */
+/*  软件读不到, 跨重启计数推断在「每按一次断一次 USB」的现实中节奏极难  */
+/*  命中 (3s/6s 窗口多轮实测均失败), 且与插 USB 上电同码无法区分。      */
+/*  恢复出厂统一走 BOOT 长按 10s (见下方 BOOT 键节)。                   */
 /* ================================================================== */
 
 static bool isFactoryState() {
   return !wifiHasSavedCredentials();
 }
 
-static uint32_t s_rstSeqClearAt = 0;   // 计数清零时刻 (0 = 无定时)
-
-// 擦 NVS 并重启。启动早期 (BLE 未初始化) 直接可调
+// 擦 NVS 并重启。由 BOOT 长按触发, 此时 GPIO0 仍被手指按住 —— 立即重启会因
+// strap 采到低电平进 ROM 下载模式, 看起来像死机, 故红灯闪烁等待松手再重启
 static void factoryResetNow() {
   Serial.println("[FactoryReset] 清除 NVS 并重启");
   nvs_flash_erase();
   nvs_flash_init();
+  while (digitalRead(BOOT_BTN_PIN) == LOW) {
+    neopixelWrite(RGB_BUILTIN, 64, 0, 0);
+    delay(120);
+    neopixelWrite(RGB_BUILTIN, 0, 0, 0);
+    delay(120);
+  }
   ESP.restart();
 }
 
-// setup() 最前面调用: 读上次计数 → 累计 / 触发恢复出厂 / 清零
-static void rstSeqBootCheck() {
-  uint32_t romCode = rtc_get_reset_reason(0);   // PRO_CPU
-  Serial.printf("[Boot] reset ROM code: 0x%02X (%s)\n", romCode,
-                romCode == 0x01 ? "上电级: RST 键/插 USB, 计入连击" : "不计入连击");
-
-  Preferences prefs;
-  prefs.begin(NVS_NAMESPACE, false);
-
-  // 原生 USB-Serial-JTAG 方案下, 按 RST 会让 USB 重新枚举, 那一轮的启动日志抓不到;
-  // 打开串口本身又会复位一次 (USB_UART_CHIP_RESET) —— 所以把本次复位码存 NVS,
-  // 下次启动打印上一次的值, 补上抓不到的那条
-  uint32_t prevCode = prefs.getUInt(NVS_KEY_LAST_RST, 0xFFFFFFFFUL);
-  if (prevCode != 0xFFFFFFFFUL) {
-    Serial.printf("[Boot] 上次复位码: 0x%02X\n", prevCode);
-  }
-  prefs.putUInt(NVS_KEY_LAST_RST, romCode);
-
-  uint32_t v = prefs.getUInt(NVS_KEY_RST_SEQ, 0);
-
-  if (romCode != 0x01) {
-    v = 0;
-  } else if ((v >> 16) == RST_SEQ_MAGIC && (v & 0xFFFF) + 1 >= RST_SEQ_TRIGGER_COUNT) {
-    // 达标: 先落盘清零, 避免重启后再次命中
-    prefs.putUInt(NVS_KEY_RST_SEQ, 0);
-    prefs.end();
-    if (isFactoryState()) {
-      Serial.println("[RstSeq] 出厂态无凭据可清, 跳过恢复出厂");
-      return;
-    }
-    for (int i = 0; i < 5; i++) {     // 红灯快闪 1s: 「确认要清了」的可见反馈
-      neopixelWrite(RGB_BUILTIN, 64, 0, 0);
-      delay(100);
-      neopixelWrite(RGB_BUILTIN, 0, 0, 0);
-      delay(100);
-    }
-    factoryResetNow();                // 不返回
-    return;
-  } else {
-    v = ((v >> 16) == RST_SEQ_MAGIC) ? (v & 0xFFFF) + 1 : 1;
-  }
-  prefs.putUInt(NVS_KEY_RST_SEQ, (RST_SEQ_MAGIC << 16) | v);
-  prefs.end();
-
-  s_rstSeqClearAt = millis() + RST_SEQ_WINDOW_MS;
-  Serial.printf("[RstSeq] 连击 %lu/%lu, %lus 内再按 RST 继续累计\n",
-                (unsigned long)v, (unsigned long)RST_SEQ_TRIGGER_COUNT,
-                (unsigned long)(RST_SEQ_WINDOW_MS / 1000UL));
-  if (v >= 2) {                       // 第 2 次起黄灯快闪提示, 第 1 次免打扰
-    for (int i = 0; i < 3; i++) {
-      neopixelWrite(RGB_BUILTIN, 48, 32, 0);
-      delay(120);
-      neopixelWrite(RGB_BUILTIN, 0, 0, 0);
-      delay(120);
-    }
-  }
-}
-
 /* ================================================================== */
-/*  BOOT 键: 配网窗口开关                                                */
+/*  BOOT 键: 配网窗口开关 + 长按恢复出厂                                  */
 /*  出厂态 (NVS 无凭据): 窗口常开, LED 慢闪待配网                        */
-/*  已配网: 窗口常闭 + 停广播, BOOT 按住 3s 松手开 5 分钟窗口 (LED 快闪) */
+/*  已配网: 窗口常闭 + 停广播                                           */
+/*    按住 3s 松手 → 开 5 分钟配网窗口 (LED 快闪)                        */
+/*    按住 10s (按住中) → 恢复出厂; 3s 处黄灯提示「可松手」, 10s 起红灯   */
 /* ================================================================== */
 
 static bool     s_btnDown = false;
+static bool     s_btnHint3s = false; // 本次按住是否已给过「到窗口阈值」提示
 static uint32_t s_btnDownAt = 0;
 static uint32_t s_windowUntil = 0;   // 窗口截止时刻 (0 = 关; 出厂态常开不看它)
 // GPIO0 防误触 (CH343 的 DTR/RTS 会把 GPIO0 钳低): 装填条件为「连续高电平
@@ -198,6 +146,7 @@ static void bootButtonLoop() {
   if (pressed && !s_btnDown) {
     s_btnDown = true;
     s_btnDownAt = now;
+    s_btnHint3s = false;
     s_btnHighSince = 0;
     Serial.println("[Btn] press");
     return;
@@ -205,7 +154,8 @@ static void bootButtonLoop() {
   if (!s_btnDown) return;
 
   if (!pressed) {
-    // 松开: 按住满 3s → 打开配网窗口 (恢复出厂已移到 RST 键, 无时长上限)
+    // 松开: 按住满 3s → 打开配网窗口
+    // (长按 10s 恢复出厂在按住中已触发并重启, 到不了这个分支)
     uint32_t held = now - s_btnDownAt;
     s_btnDown = false;
     s_btnHighSince = now;
@@ -214,6 +164,22 @@ static void bootButtonLoop() {
       openProvisionWindow();
     }
     return;
+  }
+
+  // 仍按住: 渐进反馈 + 长按恢复出厂
+  uint32_t held = now - s_btnDownAt;
+  if (!s_btnHint3s && held >= BOOT_HOLD_WINDOW_MS) {
+    s_btnHint3s = true;                // 黄灯快闪: 已到窗口阈值 ——
+    for (int i = 0; i < 3; i++) {      // 松手 = 开配网窗口, 继续按住到 10s = 恢复出厂
+      neopixelWrite(RGB_BUILTIN, 48, 32, 0);
+      delay(120);
+      neopixelWrite(RGB_BUILTIN, 0, 0, 0);
+      delay(120);
+    }
+  }
+  if (held >= BOOT_HOLD_RESET_MS) {
+    Serial.println("[Btn] held 10s -> factory reset");
+    factoryResetNow();                 // 擦 NVS → 红灯闪烁等松手 → 重启, 不返回
   }
 }
 
@@ -300,16 +266,12 @@ void setup() {
   delay(300);
   Serial.println("\n=== Baby Cry Monitor ESP32 (整合版) ===");
 
-  // LED (板载 WS2812) 与 BOOT 键 (GPIO0, 低电平按下) 先就绪:
-  // RST 连击的恢复出厂反馈要在这之后立刻可用
+  // LED (板载 WS2812) 与 BOOT 键 (GPIO0, 低电平按下)
   led_init();
   pinMode(BOOT_BTN_PIN, INPUT_PULLUP);
   Serial.printf("[Boot] BOOT(GPIO0) at boot: %s%s\n",
                 digitalRead(BOOT_BTN_PIN) == LOW ? "LOW" : "HIGH",
                 digitalRead(BOOT_BTN_PIN) == LOW ? " (被外部钳住? 按键检测暂不启用)" : "");
-
-  // RST 连击检测: 达标则在此擦 NVS 重启, 永不返回 (必须在读 NVS 凭据之前)
-  rstSeqBootCheck();
 
   // 生成设备名 (基于 MAC 后 4 位)
   String mac = WiFi.macAddress();
@@ -345,15 +307,6 @@ void loop() {
 
   // BOOT 键检测 + 配网窗口超时 + LED 指示
   bootButtonLoop();
-
-  // RST 连击计数窗口到期: 清零 (下次上电从 1 重新计)
-  if (s_rstSeqClearAt != 0 && millis() >= s_rstSeqClearAt) {
-    s_rstSeqClearAt = 0;
-    Preferences prefs;
-    prefs.begin(NVS_NAMESPACE, false);
-    prefs.putUInt(NVS_KEY_RST_SEQ, 0);
-    prefs.end();
-  }
 
   if (s_windowUntil != 0 && millis() >= s_windowUntil) {
     closeProvisionWindow();
