@@ -34,12 +34,14 @@ static bool     s_scanStarted   = false;
 static uint32_t s_scanRetryAt   = 0;
 static uint8_t  s_scanRetries   = 0;
 
-// 延迟发起加密: 链路刚建立时手机还没走完服务发现, 立刻发 Security Request
-// 会被对端直接断开 (表现为配对框闪一下, 重连后再弹一次)
+// 链路加密发起时机 (必须服务端主动: 部分 Android ROM 如鸿蒙写加密特征值被拒
+// 时不会自动配对, 见 onConnect 注释)。触发点 = App 写 WiFiList 请求 —— 该写入
+// 能到达就证明手机服务发现已完成, 之后到凭据写入之间隔着人的操作时间, 无竞态:
+// 固定时刻发起 (500ms / 5s 兜底) 都实测撞上发现服务 → 配对/加密 FAIL → 手机断连
+// (2026-11-08 串口日志, 即「配网偶发超时」的根因)
 static bool          s_encryptPending = false;
+static bool          s_encryptDone    = false;   // 本次连接只主动发起一次
 static esp_bd_addr_t s_encryptBda;
-static uint32_t      s_encryptAt = 0;
-static const uint32_t BLE_ENCRYPT_DELAY_MS = 500;
 
 /* ================================================================== */
 /*  前向声明                                                            */
@@ -72,6 +74,10 @@ class SecurityCallbacks : public BLESecurityCallbacks {
   bool onConfirmPIN(uint32_t) override { return true; }
   void onAuthenticationComplete(esp_ble_auth_cmpl_t authCmpl) override {
     Serial.printf("[BLE] 配对/加密 %s\n", authCmpl.success ? "OK" : "FAIL");
+    if (!authCmpl.success) {          // 失败后退避重试 (无 UI 手势, Just Works 静默)
+      s_encryptDone = false;
+      s_encryptPending = true;
+    }
   }
 };
 
@@ -127,6 +133,10 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
 class WifiListWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("WiFiList")) return;
+    // 连接后第一个应用层写入 = 手机服务发现已完成, 此刻发起加密不与 discovery 撞车
+    if (!s_encryptDone && !s_encryptPending && s_bleConnected) {
+      s_encryptPending = true;
+    }
     if (s_scanRequested) return;  // 已在扫描, 忽略重复触发
     Serial.println("[BLE] WiFi scan requested");
     s_scanRequested = true;
@@ -148,17 +158,18 @@ class ServerConnectionCallback : public BLEServerCallbacks {
   void onConnect(BLEServer* server, esp_ble_gatts_cb_param_t* param) override {
     s_bleConnected = true;
     updateStatus(BLE_STATUS_IDLE);
-    // 不在这里同步发起加密, 交给 bleProvisionLoop 延迟发送 (见 s_encryptPending 注释)
+    // 服务端主动发起加密的原因见 s_encryptPending 注释; 触发点不在连接时
+    // (手机还在发现服务, 会撞车), 而在 App 的 WiFiList 写入
     memcpy(s_encryptBda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
-    s_encryptPending = true;
-    s_encryptAt = millis() + BLE_ENCRYPT_DELAY_MS;
-    Serial.printf("[BLE] App connected, encryption in %lu ms\n",
-                  (unsigned long)BLE_ENCRYPT_DELAY_MS);
+    s_encryptPending = false;
+    s_encryptDone = false;
+    Serial.println("[BLE] App connected");
   }
 
   void onDisconnect(BLEServer* s) override {
     s_bleConnected = false;
     s_encryptPending = false;
+    s_encryptDone = false;
     if (s_enabled) {
       Serial.println("[BLE] App disconnected, restarting advertising");
       BLEDevice::startAdvertising();
@@ -263,13 +274,12 @@ static void sendWifiListResults() {
 }
 
 void bleProvisionLoop() {
-  // -- 延迟发起链路加密 (见 s_encryptPending 注释) --
-  if (s_encryptPending && (int32_t)(millis() - s_encryptAt) >= 0) {
+  // -- 发起链路加密: 由 App 的 WiFiList 写入触发 (见 s_encryptPending 注释) --
+  if (s_encryptPending && !s_encryptDone && s_bleConnected) {
     s_encryptPending = false;
-    if (s_bleConnected) {
-      esp_err_t err = esp_ble_set_encryption(s_encryptBda, ESP_BLE_SEC_ENCRYPT);
-      Serial.printf("[BLE] set_encryption: %s\n", esp_err_to_name(err));
-    }
+    s_encryptDone = true;   // 只主动发起一次; 若 FAIL 由 onAuthenticationComplete 退避重试
+    esp_err_t err = esp_ble_set_encryption(s_encryptBda, ESP_BLE_SEC_ENCRYPT);
+    Serial.printf("[BLE] set_encryption: %s\n", esp_err_to_name(err));
   }
 
   if (!s_scanRequested) return;
