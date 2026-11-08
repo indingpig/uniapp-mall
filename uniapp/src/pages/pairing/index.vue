@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { BLEDevice, WifiAp } from '@/hooks/useBLE';
 import { onShow } from '@dcloudio/uni-app';
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { CACHE_KEY } from '@/constants/cache';
 import { useBLE } from '@/hooks/useBLE';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
@@ -11,7 +12,6 @@ const {
   scanning,
   devices,
   connectedDevice,
-  statusText,
   wifiList,
   wifiScanning,
   startScan,
@@ -39,8 +39,42 @@ const currentStep = ref<'scan' | 'wifi' | 'pairing' | 'done'>('scan');
 const wifiSSID = ref('');
 const wifiPass = ref('');
 const showPassword = ref(false);
-const serverUrl = ref('ws://192.168.21.92:3001/ws');
+// 优先用上次配对成功的地址（规范 5.4：换网络忘改会把设备指到不可达地址）
+const serverUrl = ref(uni.getStorageSync(CACHE_KEY.PAIRED_SERVER_URL) || 'ws://192.168.21.92:3001/ws');
 const scanAttempted = ref(false);
+
+/* ---------- 规范 5.4：WiFi 配网页状态 ---------- */
+
+const showAdvanced = ref(false); // 高级设置（服务器地址）默认收起
+const showAllNetworks = ref(false); // 「其他网络」展开态
+const passwordError = ref(false); // 密码行内错误（就地提示，不用 toast）
+const modalDismissed = ref(false); // 成功弹框「稍后再说」
+const pairedAtText = ref('');
+const pageToast = ref(''); // 深色 toast（瞬时反馈，CTA 上方居中）
+let pageToastTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(wifiPass, () => {
+  if (passwordError.value)
+    passwordError.value = false; // 用户改密码即清除行内错误
+});
+
+/** 深色 toast：显示 2.5s 自动消失（规范 5.4 失败分级 ②） */
+function showToast(msg: string) {
+  pageToast.value = msg;
+  if (pageToastTimer)
+    clearTimeout(pageToastTimer);
+  pageToastTimer = setTimeout(() => {
+    pageToast.value = '';
+  }, 2500);
+}
+
+/** 服务器地址展示（弹框/高级设置行）：剥掉 ws:// 前缀，与设计稿一致 */
+const serverHost = computed(() => serverUrl.value.replace(/^wss?:\/\//, ''));
+
+/** 列表默认露 3 条，其余收进「其他网络」展开行（规范 5.4 板 1） */
+const visibleAps = computed(() =>
+  showAllNetworks.value ? wifiList.value : wifiList.value.slice(0, 3),
+);
 
 /* ---------- 周边 WiFi 列表（设备扫描，免手输 SSID） ---------- */
 
@@ -48,11 +82,12 @@ const selectedApSsid = ref('');
 
 async function onFetchWifiList() {
   selectedApSsid.value = '';
+  showAllNetworks.value = false;
   try {
     await startWifiScan();
   }
   catch (e) {
-    uni.showToast({ title: (e as Error).message, icon: 'none' });
+    showToast((e as Error).message);
   }
 }
 
@@ -60,12 +95,6 @@ function onPickAp(ap: WifiAp) {
   wifiSSID.value = ap.ssid;
   selectedApSsid.value = ap.ssid;
 }
-
-/** 列表最多露 4 行，其余滚动 —— 10+ 个 AP 会把整屏撑满 */
-const WIFI_LIST_ROW_RPX = 72;
-const wifiListHeight = computed(() =>
-  `${Math.min(wifiList.value.length, 4) * WIFI_LIST_ROW_RPX}rpx`,
-);
 
 /** 预选手机当前连接的 WiFi：用户只需输密码，取不到就保持手输 */
 async function preselectCurrentWifi() {
@@ -82,14 +111,14 @@ async function onScanWifiQr() {
   if (res.status === 'cancel')
     return;
   if (res.status === 'invalid') {
-    uni.showToast({ title: '未识别到 WiFi 二维码', icon: 'none' });
+    showToast('未识别到 WiFi 二维码');
     return;
   }
   wifiSSID.value = res.data.ssid;
   selectedApSsid.value = res.data.ssid;
   if (res.data.password)
     wifiPass.value = res.data.password;
-  uni.showToast({ title: '已填入 WiFi 信息', icon: 'none' });
+  showToast('已填入 WiFi 信息');
 }
 
 /* ---------- 视觉验收用假设备（MOCK_STATE 非空时生效） ---------- */
@@ -113,11 +142,13 @@ const phase = computed<PairingPhase>(() => {
     return MOCK_STATE;
   if (bleNotSupported.value)
     return 'unsupported';
+  // wifi/pairing/done 由 currentStep 决定且不回退：配网中设备掉线时
+  // connectedDevice 会被 useBLE 清空，若回退到扫描态会与「已连接」提示互斥（规范 5.4 问题②）
   if (currentStep.value === 'pairing')
     return 'pairing';
   if (currentStep.value === 'done')
     return 'done';
-  if (connectedDevice.value)
+  if (currentStep.value === 'wifi')
     return 'wifi';
   if (scanning.value)
     return 'scanning';
@@ -125,6 +156,9 @@ const phase = computed<PairingPhase>(() => {
     return 'timeout';
   return 'idle';
 });
+
+/** 配网流程中设备是否掉线（设备状态条切灰态，规范 5.4 失败分级 ③） */
+const deviceLost = computed(() => phase.value !== 'unsupported' && !connectedDevice.value && currentStep.value !== 'scan');
 
 /* ---------- 步骤条（1 开机检查 / 2 扫描设备 / 3 WiFi 配网） ---------- */
 type StepState = 'done' | 'active' | 'pending';
@@ -213,17 +247,31 @@ async function onSelectDevice(device: BLEDevice) {
 
 async function onStartPair() {
   if (!wifiSSID.value) {
-    uni.showToast({ title: '请输入 WiFi 名称', icon: 'none' });
+    showToast('请输入 WiFi 名称');
     return;
   }
+  passwordError.value = false;
+  modalDismissed.value = false;
   currentStep.value = 'pairing';
   const result = await pair(wifiSSID.value, wifiPass.value, serverUrl.value);
   if (result.success) {
+    const now = new Date();
+    pairedAtText.value = `今天 ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
     currentStep.value = 'done';
+  }
+  else if (result.message === 'wifi_password') {
+    // 规范 5.4 失败分级 ①: 就地错误 —— 密码行浅红底 + 行内提示, 不用 toast
+    passwordError.value = true;
+    currentStep.value = 'wifi';
   }
   else {
     currentStep.value = 'wifi';
+    showToast(result.message === 'timeout' ? '配对超时，请重试' : `配对失败：${result.message}`);
   }
+}
+
+function enterHome() {
+  uni.switchTab({ url: '/pages/home/index' });
 }
 
 function onHelp() {
@@ -250,6 +298,10 @@ onShow(() => {
 });
 
 onBeforeUnmount(() => {
+  if (pageToastTimer) {
+    clearTimeout(pageToastTimer);
+    pageToastTimer = null;
+  }
   // #ifdef MP-WEIXIN
   if (radarTimer) {
     clearTimeout(radarTimer);
@@ -419,106 +471,165 @@ onBeforeUnmount(() => {
           </view>
         </view>
 
-        <!-- WiFi 配网（连接设备后显示） -->
+        <!-- WiFi 配网（连接设备后显示，规范 5.4 板 1 紧凑重设计） -->
         <template v-if="phase === 'wifi' || phase === 'pairing' || phase === 'done'">
-          <view v-if="connectedDevice" class="connected-tip bg-card rounded-card flex items-center gap-2 px-4 py-3">
-            <view class="connected-tip__dot rounded-full bg-primary" />
-            <text class="text-main flex-1">已连接 {{ connectedDevice.name }}</text>
-            <text class="text-secondary">{{ statusText }}</text>
+          <!-- 设备状态紧凑条：绿=已连接，灰=配网中掉线（失败分级 ③；状态互斥修复，问题②） -->
+          <view class="dev-bar bg-card rounded-card" :class="{ 'dev-bar--lost': deviceLost }">
+            <view class="dev-bar__dot rounded-full" :class="deviceLost ? 'dev-bar__dot--gray' : 'bg-primary'" />
+            <text class="dev-bar__name text-main flex-1">{{ connectedDevice?.name ?? '设备已断开' }}</text>
+            <view class="dev-bar__badge" :class="{ 'dev-bar__badge--gray': deviceLost }">
+              <text class="dev-bar__badge-text" :class="{ 'dev-bar__badge-text--gray': deviceLost }">{{ deviceLost ? '已断开' : '已连接' }}</text>
+            </view>
           </view>
 
-          <view class="section">
-            <text class="section__title block">WiFi 配网</text>
-            <text class="form-hint text-secondary block">填写手机当前连接的 WiFi，用于给设备联网</text>
-          </view>
-
-          <!-- 周边 WiFi 列表：设备扫描后 BLE 回传，点选免手输 SSID（旧固件不支持时回退手输） -->
-          <view class="ap-picker rounded-input">
-            <view class="ap-picker__head flex items-center justify-between">
-              <text class="ap-picker__label text-secondary">周边 WiFi</text>
-              <view class="flex items-center gap-2">
-                <view class="ap-picker__fetch" @tap="onScanWifiQr">
-                  <text class="ap-picker__fetch-text">扫码</text>
-                </view>
-                <view
-                  class="ap-picker__fetch"
-                  :class="{ 'ap-picker__fetch--loading': wifiScanning }"
-                  @tap="!wifiScanning && onFetchWifiList()"
+          <!-- WiFi 选择单卡 -->
+          <view class="wifi-card bg-card rounded-card">
+            <!-- SSID 行 + 行尾扫码入口 -->
+            <view class="wifi-ssid flex items-center">
+              <view class="wifi-ssid__body flex-1">
+                <text class="wifi-ssid__label text-secondary block">WiFi 名称 (SSID)</text>
+                <input
+                  v-model="wifiSSID"
+                  class="wifi-ssid__input"
+                  placeholder="选择或输入 WiFi 名称"
+                  placeholder-class="input-placeholder"
                 >
-                  <text class="ap-picker__fetch-text">{{ wifiScanning ? '扫描中…' : '获取 WiFi 列表' }}</text>
-                </view>
+              </view>
+              <view class="wifi-scan-btn rounded-md" @tap="onScanWifiQr">
+                <image class="wifi-scan-btn__icon" :src="getIcon('scan', '#7BA05B')" mode="aspectFit" />
               </view>
             </view>
-            <scroll-view v-if="wifiList.length" scroll-y class="ap-picker__list" :style="{ height: wifiListHeight }">
+
+            <view class="wifi-card__divider" />
+
+            <!-- 周边列表头 -->
+            <view class="wifi-head flex items-center justify-between">
+              <text class="wifi-head__label text-secondary">周边 WiFi</text>
+              <text
+                class="wifi-head__refresh"
+                :class="{ 'wifi-head__refresh--disabled': wifiScanning }"
+                @tap="!wifiScanning && onFetchWifiList()"
+              >
+                {{ wifiScanning ? '刷新中…' : '刷新列表' }}
+              </text>
+            </view>
+
+            <!-- 列表：默认露 3 条，其余收进「其他网络」展开行；选中 = 绿字加粗（v1.1.23 不打勾） -->
+            <template v-if="wifiList.length">
               <view
-                v-for="ap in wifiList"
+                v-for="ap in visibleAps"
                 :key="ap.ssid"
-                class="ap-picker__item flex items-center justify-between"
-                :class="{ 'ap-picker__item--selected': selectedApSsid === ap.ssid }"
+                class="wifi-row flex items-center justify-between"
                 @tap="onPickAp(ap)"
               >
-                <text class="ap-picker__ssid text-main">{{ ap.ssid }}</text>
+                <text class="wifi-row__ssid" :class="{ 'wifi-row__ssid--selected': selectedApSsid === ap.ssid }">{{ ap.ssid }}</text>
                 <view class="flex items-center gap-2">
-                  <text v-if="ap.auth > 0" class="ap-picker__tag text-secondary">加密</text>
-                  <text class="ap-picker__rssi text-secondary">{{ ap.rssi }} dBm</text>
+                  <text v-if="ap.auth > 0" class="wifi-row__tag text-secondary">加密</text>
+                  <text class="wifi-row__rssi text-secondary">{{ ap.rssi }} dBm</text>
                 </view>
               </view>
-            </scroll-view>
-            <text v-else-if="!wifiScanning" class="ap-picker__empty text-secondary block">点「获取 WiFi 列表」，设备会扫描周边网络</text>
-          </view>
+              <view v-if="!showAllNetworks && wifiList.length > 3" class="wifi-more flex items-center justify-center gap-1" @tap="showAllNetworks = true">
+                <text class="wifi-more__text text-secondary">
+                  其他网络（{{ wifiList[3].ssid }} 等 {{ wifiList.length - 3 }} 个）
+                </text>
+                <image class="wifi-more__arrow" :src="getIcon('chevron-down', '#B3AB9D')" mode="aspectFit" />
+              </view>
+            </template>
+            <text v-else-if="!wifiScanning" class="wifi-empty text-secondary block">点「刷新列表」，设备会扫描周边网络</text>
 
-          <view class="form flex flex-col gap-3">
-            <view class="input-box rounded-input">
-              <text class="input-box__label text-secondary">WiFi 名称 (SSID)</text>
-              <input v-model="wifiSSID" class="input-box__input" placeholder="请输入 WiFi 名称" placeholder-class="input-placeholder">
-            </view>
-            <view class="input-box rounded-input">
-              <text class="input-box__label text-secondary">WiFi 密码</text>
+            <view class="wifi-card__divider" />
+
+            <!-- 密码行：错误态浅红底 + 红字 + 行内提示（失败分级 ①，不用 toast） -->
+            <view class="wifi-pass" :class="{ 'wifi-pass--error': passwordError }">
+              <text class="wifi-pass__label text-secondary block">WiFi 密码</text>
               <view class="flex items-center">
                 <input
                   v-model="wifiPass"
-                  class="input-box__input flex-1"
+                  class="wifi-pass__input flex-1"
+                  :class="{ 'wifi-pass__input--error': passwordError }"
                   :password="!showPassword"
                   placeholder="请输入 WiFi 密码"
                   placeholder-class="input-placeholder"
                 >
                 <image
-                  class="input-box__eye"
+                  class="wifi-pass__eye"
                   :src="getIcon('eye', showPassword ? '#7BA05B' : '#B3AB9D')"
                   mode="aspectFit"
                   @tap="showPassword = !showPassword"
                 />
               </view>
+              <view v-if="passwordError" class="wifi-pass__error flex items-center gap-1">
+                <image class="wifi-pass__error-icon" :src="getIcon('error', '#D96A5B')" mode="aspectFit" />
+                <text class="wifi-pass__error-text">WiFi 密码错误，请重新输入</text>
+              </view>
             </view>
-            <view class="input-box rounded-input">
-              <text class="input-box__label text-secondary">服务器地址</text>
+
+            <view class="wifi-card__divider" />
+
+            <!-- 高级设置折叠行（服务器地址，默认收起） -->
+            <view class="wifi-adv flex items-center justify-between" @tap="showAdvanced = !showAdvanced">
+              <text class="wifi-adv__label text-main">高级设置 · 服务器地址</text>
+              <view class="flex items-center gap-1">
+                <text class="wifi-adv__value text-secondary">{{ serverHost || '默认' }}</text>
+                <image class="wifi-adv__arrow" :class="{ 'wifi-adv__arrow--open': showAdvanced }" :src="getIcon('chevron-down', '#B3AB9D')" mode="aspectFit" />
+              </view>
+            </view>
+            <view v-if="showAdvanced" class="wifi-adv__body">
               <input
                 v-model="serverUrl"
-                class="input-box__input"
+                class="wifi-adv__input"
                 placeholder="ws://IP:3001/ws"
                 placeholder-class="input-placeholder"
               >
             </view>
           </view>
 
-          <view
-            v-if="phase !== 'done'"
-            class="btn-cta rounded-pill bg-primary flex items-center justify-center mt-6"
-            :class="{ 'btn-cta--disabled': phase === 'pairing' }"
-            @tap="phase === 'wifi' && onStartPair()"
-          >
-            <text class="btn-cta__text text-white">{{ phase === 'pairing' ? '正在配网…' : '下一步：配网' }}</text>
-          </view>
+          <!-- 给吸底 CTA 让位 -->
+          <view class="cta-spacer" />
         </template>
 
-        <!-- 配网中 / 完成 提示 -->
-        <view v-if="phase === 'pairing' || phase === 'done'" class="status-card bg-card rounded-card">
-          <view class="flex flex-col items-center py-6 gap-2">
-            <text class="status-card__title font-semibold" :class="phase === 'done' ? 'text-primary-deep' : 'text-main'">
-              {{ phase === 'done' ? '配对成功' : statusText }}
-            </text>
-            <text class="status-card__desc text-secondary">{{ phase === 'done' ? '设备已联网，开始使用吧' : '设备正在连接 WiFi 和服务器' }}</text>
-            <uni-load-more v-if="phase === 'pairing'" status="loading" :icon-size="20" :content-text="{ contentdown: '', contentrefresh: '', contentnomore: '' }" />
+        <!-- 深色 toast：瞬时反馈（刷新列表失败/扫码失败等），CTA 上方居中（失败分级 ②） -->
+        <view v-if="pageToast && phase !== 'idle' && phase !== 'scanning' && phase !== 'timeout'" class="page-toast">
+          <text class="page-toast__text">{{ pageToast }}</text>
+        </view>
+
+        <!-- 吸底主 CTA -->
+        <view v-if="phase === 'wifi' || phase === 'pairing'" class="cta-bar">
+          <view
+            class="cta-bar__btn rounded-full flex items-center justify-center"
+            :class="{ 'cta-bar__btn--disabled': phase === 'pairing' }"
+            @tap="phase === 'wifi' && onStartPair()"
+          >
+            <text class="cta-bar__text">{{ phase === 'pairing' ? '正在配网…' : '连接设备，完成配对' }}</text>
+          </view>
+        </view>
+
+        <!-- 配对成功弹框（规范 5.4 板 2：遮罩 + 居中白卡，不做独立成功页） -->
+        <view v-if="phase === 'done' && !modalDismissed" class="success-mask" @tap="modalDismissed = true">
+          <view class="success-modal" @tap.stop>
+            <view class="success-modal__check rounded-full flex items-center justify-center">
+              <image class="success-modal__check-icon" :src="getIcon('check', '#7BA05B')" mode="aspectFit" />
+            </view>
+            <text class="success-modal__title">配对成功</text>
+            <text class="success-modal__desc text-secondary">设备已联网，开始使用吧</text>
+            <view class="success-modal__info rounded-md">
+              <view class="success-modal__row">
+                <text class="success-modal__row-label">网络</text>
+                <text class="success-modal__row-value">{{ wifiSSID }}</text>
+              </view>
+              <view class="success-modal__row">
+                <text class="success-modal__row-label">服务器</text>
+                <text class="success-modal__row-value">{{ serverHost }}</text>
+              </view>
+              <view class="success-modal__row">
+                <text class="success-modal__row-label">配对时间</text>
+                <text class="success-modal__row-value">{{ pairedAtText }}</text>
+              </view>
+            </view>
+            <view class="success-modal__cta rounded-full" @tap="enterHome">
+              <text class="success-modal__cta-text">进入首页</text>
+            </view>
+            <text class="success-modal__later" @tap="modalDismissed = true">稍后再说，留在当前页</text>
           </view>
         </view>
       </template>
@@ -792,55 +903,118 @@ page {
   }
 }
 
-/* ---------- 周边 WiFi 列表 ---------- */
-.ap-picker {
-  padding: 16rpx 24rpx;
+/* ---------- 设备状态紧凑条（规范 5.4） ---------- */
+.dev-bar {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  padding: 20rpx 24rpx;
+  border: 1px solid $color-border;
 
-  &__head {
-    min-height: 56rpx;
+  &__dot {
+    width: 12rpx;
+    height: 12rpx;
+
+    &--gray {
+      background-color: $color-text-muted;
+    }
   }
+
+  &__name {
+    font-size: 27rpx; // body 14px
+    font-weight: 500;
+  }
+
+  &__badge {
+    padding: 4rpx 20rpx;
+    border-radius: 999rpx;
+    background-color: $color-primary-soft;
+
+    &--gray {
+      background-color: $color-card-soft;
+    }
+  }
+
+  &__badge-text {
+    font-size: 22rpx;
+    font-weight: 500;
+    color: $color-primary-deep;
+
+    &--gray {
+      color: $color-text-secondary;
+    }
+  }
+}
+
+/* ---------- WiFi 选择单卡（规范 5.4 板 1） ---------- */
+.wifi-card {
+  &__divider {
+    height: 1px;
+    margin: 0 24rpx;
+    background-color: $color-divider;
+  }
+}
+
+.wifi-ssid {
+  gap: 16rpx;
+  padding: 24rpx;
+
+  &__label {
+    font-size: 21rpx; // 浮动标签 11px
+  }
+
+  &__input {
+    margin-top: 6rpx;
+    height: 48rpx;
+    font-size: 29rpx; // value 15px
+    color: $color-text-primary;
+  }
+}
+
+.wifi-scan-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 70rpx; // 36px
+  height: 70rpx;
+  background-color: $color-primary-soft;
+  flex-shrink: 0;
+
+  &__icon {
+    width: 36rpx;
+    height: 36rpx;
+  }
+}
+
+.wifi-head {
+  padding: 20rpx 24rpx 8rpx;
 
   &__label {
     font-size: 25rpx;
   }
 
-  &__fetch {
-    padding: 8rpx 20rpx;
-    border: 1px solid $color-border;
-    border-radius: 999rpx;
+  &__refresh {
+    font-size: 25rpx;
+    color: $color-primary;
 
-    &--loading {
+    &--disabled {
       opacity: 0.6;
     }
   }
+}
 
-  &__fetch-text {
-    font-size: 24rpx;
-    color: $color-primary;
-  }
-
-  &__list {
-    margin-top: 8rpx;
-  }
-
-  &__item {
-    box-sizing: border-box;
-    height: 72rpx;          /* 与页面里的 WIFI_LIST_ROW_RPX 保持一致 */
-    padding: 0 8rpx;
-    border-bottom: 1px solid $color-border;
-
-    &:last-child {
-      border-bottom: none;
-    }
-
-    &--selected .ap-picker__ssid {
-      color: $color-primary;
-      font-weight: 600;
-    }
-  }
+.wifi-row {
+  padding: 0 24rpx;
+  height: 72rpx;
 
   &__ssid {
     font-size: 28rpx;
+    color: $color-text-primary;
+
+    &--selected {
+      color: $color-primary-deep; // 规范 v1.1.23: 选中绿字加粗, 不打勾
+      font-weight: 600;
+    }
   }
 
   &__tag {
@@ -855,47 +1029,161 @@ page {
     min-width: 90rpx;
     text-align: right;
   }
+}
 
-  &__empty {
-    padding: 12rpx 4rpx 4rpx;
-    font-size: 24rpx;
+.wifi-more {
+  padding: 16rpx 0;
+
+  &__text {
+    font-size: 25rpx;
+  }
+
+  &__arrow {
+    width: 28rpx;
+    height: 28rpx;
   }
 }
 
-/* ---------- WiFi 表单 ---------- */
-.section .form-hint {
-  margin-top: 10rpx;
-  padding-left: 4rpx;
-  font-size: 25rpx;
+.wifi-empty {
+  padding: 12rpx 24rpx 20rpx;
+  font-size: 24rpx;
 }
 
-.form {
-  margin-top: 4rpx;
-}
+.wifi-pass {
+  padding: 24rpx;
 
-.input-box {
-  padding: 16rpx 24rpx;
-  border: 1px solid $color-border;
+  &--error {
+    background-color: #fdf3f1; // 规范: 错误行浅红底
+  }
 
   &__label {
-    font-size: 21rpx; // 浮动标签 11px
+    font-size: 21rpx;
   }
 
   &__input {
     margin-top: 6rpx;
-    font-size: 29rpx; // 值 15px
-    color: $color-text-primary;
     height: 48rpx;
+    font-size: 29rpx;
+    color: $color-text-primary;
+
+    &--error {
+      color: $color-danger; // 密码值红字
+    }
   }
 
   &__eye {
-    width: 36rpx; // 18px
+    width: 36rpx;
     height: 36rpx;
+  }
+
+  &__error {
+    margin-top: 8rpx;
+
+    &-icon {
+      width: 30rpx;
+      height: 30rpx;
+    }
+
+    &-text {
+      font-size: 24rpx;
+      color: $color-danger;
+    }
+  }
+}
+
+.wifi-adv {
+  padding: 24rpx;
+
+  &__label {
+    font-size: 27rpx;
+    font-weight: 500;
+  }
+
+  &__value {
+    display: block;
+    max-width: 320rpx;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 24rpx;
+  }
+
+  &__arrow {
+    width: 28rpx;
+    height: 28rpx;
+    transition: transform 150ms;
+
+    &--open {
+      transform: rotate(180deg);
+    }
+  }
+
+  &__body {
+    padding: 0 24rpx 24rpx;
+  }
+
+  &__input {
+    box-sizing: border-box;
+    width: 100%;
+    height: 72rpx;
+    padding: 0 20rpx;
+    font-size: 25rpx;
+    color: $color-text-primary;
+    border: 1px solid $color-border;
+    border-radius: 12rpx; // r12
   }
 }
 
 :deep(.input-placeholder) {
   color: $color-text-muted;
+}
+
+/* ---------- 深色 toast（失败分级 ②，CTA 上方居中） ---------- */
+.page-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 220rpx;
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 16rpx 36rpx;
+  border-radius: 999rpx;
+  background-color: rgba(59, 54, 46, 0.92); // #3B362E 92%
+
+  &__text {
+    font-size: 25rpx;
+    color: #ffffff;
+  }
+}
+
+/* ---------- 吸底主 CTA ---------- */
+.cta-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  padding: 20rpx 40rpx calc(20rpx + env(safe-area-inset-bottom)); // 容器 padding 20/21
+  background-color: $color-bg;
+
+  &__btn {
+    height: 96rpx; // h50
+    background-color: $color-primary;
+
+    &--disabled {
+      opacity: 0.6;
+    }
+  }
+
+  &__text {
+    font-size: 29rpx; // value 15px
+    font-weight: 500;
+    color: #ffffff;
+  }
+}
+
+.cta-spacer {
+  height: 180rpx; // 吸底 CTA 高度 + 间距
 }
 
 /* ---------- 引导态 ---------- */
@@ -1017,23 +1305,104 @@ page {
   58.3%, 100% { opacity: 1; }
 }
 
-/* ---------- 状态卡（配网中/完成） ---------- */
-.status-card {
+/* ---------- 配对成功弹框（规范 5.4 板 2） ---------- */
+.success-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.35); // #00000059
+}
+
+.success-modal {
+  box-sizing: border-box;
+  width: 590rpx;
+  padding: 48rpx 40rpx 32rpx;
+  border-radius: 32rpx;
+  background-color: $color-card;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  &__check {
+    width: 124rpx; // 64px
+    height: 124rpx;
+    background-color: $color-primary-soft;
+  }
+
+  &__check-icon {
+    width: 60rpx;
+    height: 60rpx;
+  }
+
   &__title {
-    font-size: 33rpx;
+    margin-top: 24rpx;
+    font-size: 46rpx; // 24px
+    font-weight: 700;
+    color: $color-primary-deep;
   }
 
   &__desc {
+    margin-top: 8rpx;
     font-size: 25rpx;
   }
-}
 
-.connected-tip {
-  border: 1px solid $color-border;
+  &__info {
+    width: 100%;
+    margin-top: 32rpx;
+    padding: 8rpx 24rpx;
+    background-color: $color-bg;
+  }
 
-  &__dot {
-    width: 12rpx;
-    height: 12rpx;
+  &__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 72rpx;
+
+    & + & {
+      border-top: 1px solid $color-divider;
+    }
+  }
+
+  &__row-label {
+    font-size: 25rpx;
+    color: $color-text-secondary;
+  }
+
+  &__row-value {
+    display: block;
+    max-width: 380rpx;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 25rpx;
+    font-weight: 500;
+    color: $color-text-primary;
+  }
+
+  &__cta {
+    width: 100%;
+    height: 96rpx;
+    margin-top: 40rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: $color-primary;
+  }
+
+  &__cta-text {
+    font-size: 29rpx;
+    font-weight: 500;
+    color: #ffffff;
+  }
+
+  &__later {
+    margin-top: 20rpx;
+    font-size: 24rpx;
+    color: $color-text-muted;
   }
 }
 </style>

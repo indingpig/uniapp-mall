@@ -77,6 +77,8 @@ export function useBLE() {
   const connectedDevice = ref<BLEDevice | null>(null);
   const statusText = ref('点击扫描查找设备');
   const paired = ref(false);
+  /** 设备上报的错误码（error: 后缀，如 wifi_password），配对等待期用于提前失败并分级提示 */
+  const provisionError = ref('');
   const deviceInfo = ref<Record<string, unknown>>({});
   const wifiList = ref<WifiAp[]>([]);
   const wifiScanning = ref(false);
@@ -296,6 +298,7 @@ export function useBLE() {
           uni.setStorageSync(CACHE_KEY.PAIRED_DEVICE, { name: connectedDevice.value?.name ?? '' });
         }
         else if (raw.startsWith('error:')) {
+          provisionError.value = raw.slice('error:'.length);
           statusText.value = `配对失败: ${raw.replace('error:', '')}`;
         }
         else {
@@ -410,6 +413,7 @@ export function useBLE() {
   async function pair(ssid: string, password: string, serverUrl: string): Promise<PairedResult> {
     if (!connectedDevice.value)
       return { success: false, message: '未连接设备' };
+    provisionError.value = '';
     statusText.value = '正在配网...';
 
     try {
@@ -425,10 +429,15 @@ export function useBLE() {
         statusText.value = '配对成功！设备已联网';
         paired.value = true;
         uni.setStorageSync(CACHE_KEY.PAIRED_DEVICE, { name: connectedDevice.value?.name ?? '' });
+        uni.setStorageSync(CACHE_KEY.PAIRED_SERVER_URL, serverUrl);
         return { success: true, message: '配对成功' };
       }
-      statusText.value = '配对超时, 请检查 WiFi 密码是否正确';
-      return { success: false, message: '配对超时' };
+      if (provisionError.value === 'wifi_password') {
+        statusText.value = 'WiFi 密码错误';
+        return { success: false, message: 'wifi_password' };
+      }
+      statusText.value = '配对超时, 请重试';
+      return { success: false, message: 'timeout' };
     }
     catch (e) {
       statusText.value = `写入失败: ${(e as Error).message}`;
@@ -442,6 +451,10 @@ export function useBLE() {
       const check = () => {
         if (paired.value) {
           resolve(true);
+          return;
+        }
+        if (provisionError.value) {
+          resolve(false); // 设备明确报错（如 wifi_password），不必等满 30s
           return;
         }
         if (Date.now() - start > timeout) {

@@ -20,19 +20,27 @@ export type IconKey
     | 'bell'
     | 'bluetooth-off'
     | 'bluetooth'
+    | 'check'
+    | 'chevron-down'
     | 'chevron-left'
     | 'chevron-right'
     | 'clock-empty'
     | 'clock'
     | 'download'
     | 'droplet'
+    | 'error'
     | 'eye'
     | 'gear'
     | 'home'
     | 'mic'
     | 'moon'
     | 'plus'
+    | 'radar-f1'
+    | 'radar-f3'
+    | 'radar-off'
     | 'radar'
+    | 'refresh'
+    | 'scan'
     | 'search'
     | 'signal-bars'
     | 'signal-off'
@@ -64,6 +72,12 @@ const ICONS: Record<IconKey, string> = {
   'bluetooth':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M7 7l10 10-5 5V2l5 5L7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 
+  'check':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+
+  'chevron-down':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6 9l6 6 6-6" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+
   'chevron-left':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M15 18l-6-6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 
@@ -81,6 +95,9 @@ const ICONS: Record<IconKey, string> = {
 
   'droplet':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>',
+
+  'error':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" fill="#D96A5B"/><line x1="12" y1="7" x2="12" y2="13" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/><circle cx="12" cy="17" r="1.2" fill="#FFFFFF"/></svg>',
 
   'eye':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/></svg>',
@@ -100,8 +117,23 @@ const ICONS: Record<IconKey, string> = {
   'plus':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
 
+  'radar-f1':
+    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="3" fill="#D99A3D"/></svg>',
+
+  'radar-f3':
+    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="3" fill="#D99A3D"/><path d="M8.8 8.8a7.4 7.4 0 0 0 0 10.4" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><path d="M19.2 8.8a7.4 7.4 0 0 1 0 10.4" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><path d="M5.4 5.4a12 12 0 0 0 0 17.2" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><path d="M22.6 5.4a12 12 0 0 1 0 17.2" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/></svg>',
+
+  'radar-off':
+    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="3" fill="#D99A3D"/><path d="M8.8 8.8a7.4 7.4 0 0 0 0 10.4" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><path d="M19.2 8.8a7.4 7.4 0 0 1 0 10.4" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><line x1="3" y1="25" x2="25" y2="3" stroke="#D96A5B" stroke-width="2.4" stroke-linecap="round"/></svg>',
+
   'radar':
-    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="3" fill="currentColor"/><path d="M8.8 8.8a7.4 7.4 0 0 0 0 10.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19.2 8.8a7.4 7.4 0 0 1 0 10.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5.4 5.4a12 12 0 0 0 0 17.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.5"/><path d="M22.6 5.4a12 12 0 0 1 0 17.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.5"/></svg>',
+    '<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="14" cy="14" r="3" fill="#D99A3D"/><path d="M8.8 8.8a7.4 7.4 0 0 0 0 10.4" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><path d="M19.2 8.8a7.4 7.4 0 0 1 0 10.4" stroke="#D99A3D" stroke-width="2" stroke-linecap="round"/><path d="M5.4 5.4a12 12 0 0 0 0 17.2" stroke="#D99A3D" stroke-width="2" stroke-linecap="round" opacity="0.5"/><path d="M22.6 5.4a12 12 0 0 1 0 17.2" stroke="#D99A3D" stroke-width="2" stroke-linecap="round" opacity="0.5"/></svg>',
+
+  'refresh':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12a9 9 0 1 1-3-6.7L21 8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+
+  'scan':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="3" y1="12" x2="21" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 
   'search':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M16.5 16.5L21 21" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',

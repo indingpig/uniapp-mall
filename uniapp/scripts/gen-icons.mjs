@@ -2,7 +2,7 @@
  * 从设计稿图标库生成 src/utils/icons.ts
  *
  * 图标库是设计交付的唯一图标来源（设计规范 v1.1 第 9 节「勿再找图标」），
- * 本脚本把 28 个单色 ic-*.svg 原样内联进 icons.ts（currentColor 可换色），
+ * 本脚本把 36 个单色 ic-*.svg 原样内联进 icons.ts（currentColor 可换色），
  * 保证代码内矢量与交付库逐字节一致。
  *
  * 用法：在 uniapp/ 下执行 `node scripts/gen-icons.mjs`
@@ -22,8 +22,8 @@ const svgs = readdirSync(LIB_DIR)
   .filter(f => f.startsWith('ic-') && f.endsWith('.svg') && f !== 'ic-monitor-wave.svg')
   .sort();
 
-if (svgs.length !== 28) {
-  console.error(`预期 28 个单色图标（ic-*.svg），实际 ${svgs.length} 个，请核对图标库`);
+if (svgs.length !== 36) {
+  console.error(`预期 36 个单色图标（ic-*.svg），实际 ${svgs.length} 个，请核对图标库`);
   process.exit(1);
 }
 
