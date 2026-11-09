@@ -46,7 +46,7 @@ const scanAttempted = ref(false);
 /* ---------- 规范 5.4：WiFi 配网页状态 ---------- */
 
 const showAdvanced = ref(false); // 高级设置（服务器地址）默认收起
-const showAllNetworks = ref(false); // 「其他网络」展开态
+const showAllNetworks = ref(false); // 「其他网络」弹框开关
 const passwordError = ref(false); // 密码行内错误（就地提示，不用 toast）
 const modalDismissed = ref(false); // 成功弹框「稍后再说」
 const pairedAtText = ref('');
@@ -71,10 +71,8 @@ function showToast(msg: string) {
 /** 服务器地址展示（弹框/高级设置行）：剥掉 ws:// 前缀，与设计稿一致 */
 const serverHost = computed(() => serverUrl.value.replace(/^wss?:\/\//, ''));
 
-/** 列表默认露 3 条，其余收进「其他网络」展开行（规范 5.4 板 1） */
-const visibleAps = computed(() =>
-  showAllNetworks.value ? wifiList.value : wifiList.value.slice(0, 3),
-);
+/** 列表默认露 3 条，完整列表进「其他网络」弹框（规范 5.4 板 1 不在卡内放长列表） */
+const visibleAps = computed(() => wifiList.value.slice(0, 3));
 
 /* ---------- 周边 WiFi 列表（设备扫描，免手输 SSID） ---------- */
 
@@ -98,6 +96,12 @@ function onPickAp(ap: WifiAp) {
   }
   wifiSSID.value = ap.ssid;
   selectedApSsid.value = ap.ssid;
+}
+
+/** 弹框内点选：无论成败都收起弹框（开放网络被拒时 toast 留在页面层可见） */
+function onPickApInModal(ap: WifiAp) {
+  onPickAp(ap);
+  showAllNetworks.value = false;
 }
 
 /** 预选手机当前连接的 WiFi：用户只需输密码，取不到就保持手输 */
@@ -180,7 +184,18 @@ const stepStates = computed<StepState[]>(() => {
     return phase.value === 'timeout' ? ['done', 'done', 'pending'] : ['active', 'pending', 'pending'];
   if (phase.value === 'scanning')
     return ['done', 'active', 'pending'];
-  return ['done', 'done', 'active']; // wifi / pairing / done
+  if (phase.value === 'done')
+    return ['done', 'done', 'done']; // 配对闭环：三步全亮
+  return ['done', 'done', 'pending']; // wifi/pairing：进行中——圆点/文字保持中性，横杠由 stepLines 点亮
+});
+
+/** 连接线独立于圆点点亮：进入第 3 步（含进行中）2-3 横杠即亮，timeout 只亮 1-2 */
+const stepLines = computed<boolean[]>(() => {
+  if (phase.value === 'wifi' || phase.value === 'pairing' || phase.value === 'done')
+    return [true, true, true];
+  if (phase.value === 'timeout')
+    return [false, true, false];
+  return [false, false, false];
 });
 
 /* ---------- 信号条（规范 13.2：RSSI → 0-4 格） ---------- */
@@ -243,7 +258,12 @@ function stopScanFlow() {
   stopScan();
 }
 
+const connectingId = ref(''); // 正在连接的设备（connect 内部含 1s 稳定等待 + 服务发现，需即时反馈防「点了没反应」）
+
 async function onSelectDevice(device: BLEDevice) {
+  if (connectingId.value)
+    return; // 连接进行中，忽略重复点击
+  connectingId.value = device.deviceId;
   try {
     await connectDevice(device);
     currentStep.value = 'wifi';
@@ -251,6 +271,9 @@ async function onSelectDevice(device: BLEDevice) {
   }
   catch {
     // connectDevice 已设置 statusText
+  }
+  finally {
+    connectingId.value = '';
   }
 }
 
@@ -280,7 +303,15 @@ async function onStartPair() {
   }
   else {
     currentStep.value = 'wifi';
-    showToast(result.message === 'timeout' ? '配对超时，请重试' : `配对失败：${result.message}`);
+    if (result.message === 'server_unreachable') {
+      showToast('WiFi 已连通，但服务器不可达：请启动后台服务或检查服务器地址');
+    }
+    else if (result.message === 'wifi_failed') {
+      showToast('WiFi 连接失败，请检查密码和信号');
+    }
+    else {
+      showToast(result.message === 'timeout' ? '配对超时，请重试' : `配对失败：${result.message}`);
+    }
   }
 }
 
@@ -338,7 +369,7 @@ onBeforeUnmount(() => {
     <!-- ========= 三步条（引导态隐藏） ========= -->
     <view v-if="phase !== 'unsupported'" class="steps flex items-center">
       <template v-for="(label, i) in STEP_LABELS" :key="label">
-        <view v-if="i > 0" class="steps__line" :class="{ 'steps__line--done': stepStates[i] === 'done' }" />
+        <view v-if="i > 0" class="steps__line" :class="{ 'steps__line--done': stepLines[i] }" />
         <view class="steps__dot rounded-full flex items-center justify-center" :class="`steps__dot--${stepStates[i]}`">
           <text class="steps__num">{{ i + 1 }}</text>
         </view>
@@ -471,7 +502,7 @@ onBeforeUnmount(() => {
                 />
               </view>
               <view class="pill-connect rounded-pill flex items-center justify-center" @tap.stop="onSelectDevice(dev)">
-                <text class="pill-connect__text">连接</text>
+                <text class="pill-connect__text">{{ connectingId === dev.deviceId ? '连接中…' : '连接' }}</text>
               </view>
             </view>
             <view v-if="phase === 'scanning'" class="searching-row">
@@ -640,6 +671,29 @@ onBeforeUnmount(() => {
               进入首页
             </AppButton>
             <text class="success-modal__later" @tap="modalDismissed = true">稍后再说，留在当前页</text>
+          </view>
+        </view>
+
+        <!-- 「其他网络」弹框：完整 WiFi 列表选择器（卡内只露 3 条，规范 5.4 板 1） -->
+        <view v-if="showAllNetworks" class="net-mask" @tap="showAllNetworks = false">
+          <view class="net-modal" @tap.stop>
+            <text class="net-modal__title text-main font-semibold">其他网络</text>
+            <text class="net-modal__sub text-secondary block">共 {{ wifiList.length }} 个网络 · 点选自动填入</text>
+            <scroll-view class="net-modal__list" scroll-y>
+              <view
+                v-for="ap in wifiList"
+                :key="ap.ssid"
+                class="net-modal__row flex items-center justify-between"
+                @tap="onPickApInModal(ap)"
+              >
+                <text class="net-modal__ssid" :class="{ 'net-modal__ssid--selected': selectedApSsid === ap.ssid }">{{ ap.ssid }}</text>
+                <view class="flex items-center gap-2">
+                  <text v-if="ap.auth > 0" class="net-modal__tag rounded-pill text-secondary">加密</text>
+                  <text class="net-modal__rssi text-secondary">{{ ap.rssi }} dBm</text>
+                </view>
+              </view>
+            </scroll-view>
+            <text class="net-modal__close text-secondary" @tap="showAllNetworks = false">收起</text>
           </view>
         </view>
       </template>
@@ -1274,7 +1328,7 @@ page {
 .success-mask {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  z-index: 200; // 高于吸顶顶栏(.sticky-top z-100)：遮罩必须连顶栏一起压暗，否则顶栏「浮」在弹框上
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1356,6 +1410,86 @@ page {
     margin-top: 20rpx;
     font-size: 24rpx;
     color: $color-text-muted;
+  }
+}
+
+/* ---------- 「其他网络」弹框（完整列表选择器，遮罩/白卡与成功弹框同款） ---------- */
+.net-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 200; // 与成功弹框一致，高于吸顶顶栏
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.35); // #00000059
+}
+
+.net-modal {
+  box-sizing: border-box;
+  width: 590rpx; // 与成功弹框同宽
+  padding: 40rpx 32rpx 20rpx;
+  border-radius: 32rpx;
+  background-color: $color-card;
+  display: flex;
+  flex-direction: column;
+
+  &__title {
+    font-size: 33rpx; // nav-title 级
+  }
+
+  &__sub {
+    margin-top: 6rpx;
+    font-size: 22rpx;
+  }
+
+  // scroll-view 需要受限高度才能滚：max-height 在 H5/App 正常，小程序端启用时再适配
+  &__list {
+    max-height: 56vh;
+    margin-top: 20rpx;
+  }
+
+  &__row {
+    height: 80rpx;
+    padding: 0 8rpx;
+
+    & + & {
+      border-top: 1px solid $color-divider;
+    }
+  }
+
+  &__ssid {
+    display: block;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 28rpx;
+    color: $color-text-primary;
+
+    &--selected {
+      color: $color-primary-deep;
+      font-weight: 600;
+    }
+  }
+
+  &__tag {
+    font-size: 22rpx;
+    padding: 2rpx 10rpx;
+    border: 1px solid $color-border;
+  }
+
+  &__rssi {
+    font-size: 22rpx;
+    min-width: 90rpx;
+    text-align: right;
+  }
+
+  &__close {
+    margin-top: 16rpx;
+    padding: 16rpx 0 8rpx;
+    text-align: center;
+    font-size: 24rpx;
   }
 }
 </style>

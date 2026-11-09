@@ -79,6 +79,8 @@ export function useBLE() {
   const paired = ref(false);
   /** 设备上报的错误码（error: 后缀，如 wifi_password），配对等待期用于提前失败并分级提示 */
   const provisionError = ref('');
+  /** 最近一次设备状态通知（connecting_wifi/wifi_connected/…），配网超时时用于区分卡点 */
+  const lastStatus = ref('');
   const deviceInfo = ref<Record<string, unknown>>({});
   const wifiList = ref<WifiAp[]>([]);
   const wifiScanning = ref(false);
@@ -302,6 +304,7 @@ export function useBLE() {
           statusText.value = `配对失败: ${raw.replace('error:', '')}`;
         }
         else {
+          lastStatus.value = raw;
           statusText.value = `设备状态: ${raw}`;
         }
       },
@@ -414,6 +417,7 @@ export function useBLE() {
     if (!connectedDevice.value)
       return { success: false, message: '未连接设备' };
     provisionError.value = '';
+    lastStatus.value = '';
     statusText.value = '正在配网...';
 
     try {
@@ -435,6 +439,15 @@ export function useBLE() {
       if (provisionError.value === 'wifi_password') {
         statusText.value = 'WiFi 密码错误';
         return { success: false, message: 'wifi_password' };
+      }
+      // 分层超时：按设备最后一次上报的状态区分卡点（server 没起 ≠ WiFi 连不上，提示语不同）
+      if (lastStatus.value === 'wifi_connected') {
+        statusText.value = 'WiFi 已连通, 服务器不可达';
+        return { success: false, message: 'server_unreachable' };
+      }
+      if (lastStatus.value === 'connecting_wifi') {
+        statusText.value = 'WiFi 连接失败, 请检查密码与信号';
+        return { success: false, message: 'wifi_failed' };
       }
       statusText.value = '配对超时, 请重试';
       return { success: false, message: 'timeout' };
