@@ -196,10 +196,12 @@ void onWifiStatus(const char* status) {
       s_collectStarted = true;
       collectServerStart();
     }
-    if (!s_serverStarted) {
-      s_serverStarted = true;
-      serverLinkStart(onServerCmd, onServerLinkState);
-    }
+    // 无条件 (重)启动: serverLinkStart 每次都重读 NVS 里的服务器地址 ——
+    // 「已有凭据的设备重新配网」时, App 新写的 URL 只落了盘, 运行中的
+    // ServerLink 还带着开机时的旧地址在拨, WiFi 每次连上都必须重载
+    // (2026-11-09 真机实测: 先连旧网触发过 wifi_connected, 重新配网后一直拨旧 IP)
+    s_serverStarted = true;
+    serverLinkStart(onServerCmd, onServerLinkState);
   }
 }
 
