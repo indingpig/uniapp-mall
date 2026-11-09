@@ -17,7 +17,7 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: {
-        additionalData: `@use "@/styles/uni.scss" as *;\n@use "@/styles/page-layout.scss" as *;\n@use "@/styles/state.scss" as *;\n@use "@/styles/button.scss" as *;\n@use "@/styles/list-item.scss" as *;\n@use "@/styles/section.scss" as *;\n`,
+        additionalData: `@use "@/styles/uni.scss" as *;\n@use "@/styles/page-layout.scss" as *;\n@use "@/styles/state.scss" as *;\n@use "@/styles/list-item.scss" as *;\n@use "@/styles/section.scss" as *;\n`,
       },
     },
   },

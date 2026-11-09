@@ -280,10 +280,10 @@ onBeforeUnmount(() => {
     <!-- ============== 主体内容 ============== -->
     <view class="main gap-3" :class="{ 'main--listening': listening }">
       <!-- 头部：问候语 + 通知铃铛（吸顶；胶囊避让必须留在本元素上，吸顶后才不钻到胶囊底下） -->
-      <view class="header flex items-center justify-between" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
+      <view class="header sticky-top flex items-center justify-between" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
         <text class="header__greeting text-main font-bold">{{ greeting }}，{{ userName }}</text>
         <view class="bell relative" @tap="onBellTap">
-          <image class="bell__icon" :src="getIcon('bell', '#3B362E')" mode="aspectFit" />
+          <image class="bell__icon" :src="getIcon('bell', 'ink')" mode="aspectFit" />
           <view v-if="hasPairedDevice" class="bell__dot rounded-full bg-coral absolute" />
         </view>
       </view>
@@ -298,29 +298,29 @@ onBeforeUnmount(() => {
           <text class="empty-hero__desc text-secondary">连接宝宝监护器后，即可实时查看宝宝状态</text>
         </view>
 
-        <view class="btn-cta rounded-pill bg-primary flex items-center justify-center gap-2" @tap="goPairing">
-          <image class="btn-cta__icon" :src="getIcon('bluetooth', '#ffffff')" mode="aspectFit" />
-          <text class="btn-cta__text text-white">去配对设备</text>
-        </view>
+        <AppButton size="cta" @tap="goPairing">
+          <image class="btn-cta__icon" :src="getIcon('bluetooth', 'white')" mode="aspectFit" />
+          去配对设备
+        </AppButton>
         <text class="help-link text-secondary block text-center" @tap="onHelpTap">如何配对？查看教程</text>
 
         <view class="card rights-card bg-card rounded-lg mt-6">
           <text class="card__title text-main font-bold">连接后你将获得</text>
           <view class="rights-row flex items-center gap-3 mt-4">
             <view class="event-chip rounded-full bg-primary-soft flex items-center justify-center shrink-0">
-              <image class="event-chip__icon" :src="getIcon('mic', '#7BA05B')" mode="aspectFit" />
+              <image class="event-chip__icon" :src="getIcon('mic', 'primary')" mode="aspectFit" />
             </view>
             <text class="rights-row__text text-main">实时音量监测与三段告警</text>
           </view>
           <view class="rights-row flex items-center gap-3 mt-3">
             <view class="event-chip rounded-full bg-danger-soft flex items-center justify-center shrink-0">
-              <image class="event-chip__icon" :src="getIcon('droplet', '#D96A5B')" mode="aspectFit" />
+              <image class="event-chip__icon" :src="getIcon('droplet', 'danger')" mode="aspectFit" />
             </view>
             <text class="rights-row__text text-main">哭声识别，立即推送到手机</text>
           </view>
           <view class="rights-row flex items-center gap-3 mt-3">
             <view class="event-chip rounded-full bg-amber-soft flex items-center justify-center shrink-0">
-              <image class="event-chip__icon" :src="getIcon('moon', '#D99A3D')" mode="aspectFit" />
+              <image class="event-chip__icon" :src="getIcon('moon', 'amber')" mode="aspectFit" />
             </view>
             <text class="rights-row__text text-main">睡眠记录与每日回顾</text>
           </view>
@@ -331,9 +331,9 @@ onBeforeUnmount(() => {
       <template v-else>
         <!-- 离线提示条（规范 12.1）：问候行下方 -->
         <view v-if="isDeviceOffline" class="offline-banner rounded-lg flex items-center">
-          <image class="offline-banner__icon" :src="getIcon('wifi-off', '#B07A28')" mode="aspectFit" />
+          <image class="offline-banner__icon" :src="getIcon('wifi-off', 'amberInk')" mode="aspectFit" />
           <text class="offline-banner__text">{{ offlineBannerText }}</text>
-          <image class="offline-banner__spinner" :src="getIcon('spinner', '#B07A28')" mode="aspectFit" />
+          <image class="offline-banner__spinner" :src="getIcon('spinner', 'amberInk')" mode="aspectFit" />
         </view>
 
         <!-- 当前状态卡片 -->
@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
         <view class="card bg-card rounded-lg flex items-center" @tap="goSettings">
           <image
             class="device-card__signal"
-            :src="getIcon(isDeviceOffline ? 'wifi-off' : 'wifi-signal', isDeviceOffline ? '#D5CFC2' : '#7BA05B')"
+            :src="getIcon(isDeviceOffline ? 'wifi-off' : 'wifi-signal', isDeviceOffline ? 'empty' : 'primary')"
             mode="aspectFit"
           />
           <view class="flex-1 ml-3">
@@ -371,7 +371,7 @@ onBeforeUnmount(() => {
           <view v-if="isDeviceOffline" class="reconnect-btn rounded-pill flex items-center justify-center" @tap.stop="manualReconnect">
             <text class="reconnect-btn__text">重新连接</text>
           </view>
-          <image v-else class="device-card__arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+          <image v-else class="device-card__arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
         </view>
 
         <!-- 实时音量卡片 -->
@@ -421,12 +421,12 @@ onBeforeUnmount(() => {
             <text v-if="isDeviceOffline" class="events-sync text-muted">重连后同步</text>
             <view v-else class="flex items-center gap-1" @tap="goHistory">
               <text class="events-more text-secondary">查看全部</text>
-              <image class="events-more__arrow" :src="getIcon('chevron-right', '#8C8578')" mode="aspectFit" />
+              <image class="events-more__arrow" :src="getIcon('chevron-right', 'secondary')" mode="aspectFit" />
             </view>
           </view>
           <!-- 离线禁用变体（规范 12.1）：单行空态 -->
           <view v-if="isDeviceOffline" class="events-offline flex items-center">
-            <image class="events-offline__icon" :src="getIcon('clock', '#D5CFC2')" mode="aspectFit" />
+            <image class="events-offline__icon" :src="getIcon('clock', 'empty')" mode="aspectFit" />
             <text class="events-offline__text text-muted">离线期间暂无实时数据，重连后自动恢复</text>
           </view>
           <view v-else-if="events.length > 0" class="flex flex-col gap-3 mt-4">
@@ -451,7 +451,7 @@ onBeforeUnmount(() => {
             :class="{ 'action-btn--disabled': isDeviceOffline }"
             @tap="toggleListen"
           >
-            <image v-if="!listening" class="action-btn__icon" :src="getIcon('mic', isDeviceOffline ? '#A39B8C' : '#ffffff')" mode="aspectFit" />
+            <image v-if="!listening" class="action-btn__icon" :src="getIcon('mic', isDeviceOffline ? 'disabled' : 'white')" mode="aspectFit" />
             <!-- 白色方形停止符 12×12（规范 12.3） -->
             <view v-else class="action-btn__stop" />
             <text class="action-btn__text text-white">{{ listening ? '停止监听' : '监听' }}</text>
@@ -463,7 +463,7 @@ onBeforeUnmount(() => {
           >
             <image
               class="action-btn__icon"
-              :src="getIcon('bell-off', muted ? '#D96A5B' : (isDeviceOffline ? '#A39B8C' : '#3B362E'))"
+              :src="getIcon('bell-off', muted ? 'danger' : (isDeviceOffline ? 'disabled' : 'ink'))"
               mode="aspectFit"
             />
             <text class="action-btn__text" :class="muted ? 'text-coral' : 'text-main'">静音提醒</text>
@@ -509,13 +509,9 @@ page {
 /*  头部                                                                */
 /* ------------------------------------------------------------------ */
 .header {
-  // 吸顶：页面在 .page 内滚动，问候语头部固定不随内容滚走。
-  // 状态栏避让放进自身 padding：sticky top:0 吸到的是屏幕最上沿，吸顶后不透明背景盖住状态栏区域，
-  // 内容始终在系统状态栏下方（小程序端胶囊避让仍由模板内联 paddingTop 覆盖本值）
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background-color: $color-bg;
+  // 吸顶（.sticky-top 原子类）：页面在 .page 内滚动，问候语头部固定不随内容滚走。
+  // 状态栏避让放进自身 padding，吸顶后不透明背景盖住状态栏区域（小程序端胶囊避让
+  // 仍由模板内联 paddingTop 覆盖本值）
   padding: calc(var(--status-bar-height) + 22rpx) 0 8rpx;
 
   &__greeting {
@@ -853,18 +849,10 @@ page {
   }
 }
 
-.btn-cta {
-  height: 96rpx; // h50
-
-  &__icon {
-    width: 36rpx; // 18px
-    height: 36rpx;
-  }
-
-  &__text {
-    font-size: 29rpx;
-    font-weight: 500;
-  }
+/* CTA 图标（按钮本体为共享组件 AppButton） */
+.btn-cta__icon {
+  width: 36rpx; // 18px
+  height: 36rpx;
 }
 
 .help-link {

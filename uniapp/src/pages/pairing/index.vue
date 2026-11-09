@@ -328,9 +328,9 @@ onBeforeUnmount(() => {
 <template>
   <view class="page">
     <!-- ========= 导航栏 ========= -->
-    <view class="navbar flex items-center">
+    <view class="navbar sticky-top flex items-center">
       <view class="navbar__back flex items-center justify-center" @tap="goBack">
-        <image class="navbar__back-icon" :src="getIcon('chevron-left', '#3B362E')" mode="aspectFit" />
+        <image class="navbar__back-icon" :src="getIcon('chevron-left', 'ink')" mode="aspectFit" />
       </view>
       <text class="navbar__title text-main font-semibold">设备配对</text>
     </view>
@@ -351,7 +351,7 @@ onBeforeUnmount(() => {
       <template v-if="phase === 'unsupported'">
         <view class="guide-hero flex flex-col items-center">
           <view class="guide-hero__circle rounded-full bg-amber-soft flex items-center justify-center">
-            <image class="guide-hero__icon" :src="getIcon('bluetooth-off', '#D99A3D')" mode="aspectFit" />
+            <image class="guide-hero__icon" :src="getIcon('bluetooth-off', 'amber')" mode="aspectFit" />
           </view>
           <text class="guide-hero__title text-main font-bold">当前设备不支持蓝牙</text>
           <text class="guide-hero__desc text-secondary">请在手机 App 或微信小程序中完成配对</text>
@@ -360,23 +360,23 @@ onBeforeUnmount(() => {
         <view class="group bg-card rounded-card mt-4">
           <view class="row" @tap="onWeChatGuide">
             <view class="row-chip rounded-full bg-primary-soft flex items-center justify-center shrink-0">
-              <image class="row-chip__icon" :src="getIcon('bluetooth', '#7BA05B')" mode="aspectFit" />
+              <image class="row-chip__icon" :src="getIcon('bluetooth', 'primary')" mode="aspectFit" />
             </view>
             <view class="row-body flex-1">
               <text class="row-title text-main block">使用微信小程序配对</text>
               <text class="row-desc text-secondary block">扫码即可，无需下载</text>
             </view>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row" @tap="onAppGuide">
             <view class="row-chip rounded-full bg-amber-soft flex items-center justify-center shrink-0">
-              <image class="row-chip__icon" :src="getIcon('download', '#B07A28')" mode="aspectFit" />
+              <image class="row-chip__icon" :src="getIcon('download', 'amberInk')" mode="aspectFit" />
             </view>
             <view class="row-body flex-1">
               <text class="row-title text-main block">下载 Android / iOS App</text>
               <text class="row-desc text-secondary block">应用商店搜索「宝宝守护」</text>
             </view>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
         </view>
 
@@ -396,7 +396,7 @@ onBeforeUnmount(() => {
         <view v-if="phase === 'idle'" class="card bg-card rounded-card">
           <view class="scan-card flex flex-col items-center">
             <view class="scan-card__icon rounded-full bg-primary-soft flex items-center justify-center">
-              <image class="scan-card__icon-img" :src="getIcon('search', '#7BA05B')" mode="aspectFit" />
+              <image class="scan-card__icon-img" :src="getIcon('search', 'primary')" mode="aspectFit" />
             </view>
             <text class="scan-card__title text-main font-semibold">扫描查找设备</text>
             <text class="scan-card__desc text-secondary">确保设备已通电并靠近手机</text>
@@ -431,7 +431,7 @@ onBeforeUnmount(() => {
         <view v-if="phase === 'timeout'" class="card bg-card rounded-card">
           <view class="scan-card flex flex-col items-center">
             <view class="scan-card__icon scan-card__icon--lg rounded-full bg-amber-soft flex items-center justify-center relative">
-              <image class="scan-card__icon-img" :src="getIcon('radar', '#D99A3D')" mode="aspectFit" />
+              <image class="scan-card__icon-img" :src="getIcon('radar', 'amber')" mode="aspectFit" />
               <view class="timeout-slash" />
             </view>
             <text class="scan-card__title text-main font-bold">未找到附近设备</text>
@@ -441,13 +441,13 @@ onBeforeUnmount(() => {
 
         <!-- 超时态操作区 -->
         <template v-if="phase === 'timeout'">
-          <view class="btn-cta rounded-pill bg-primary flex items-center justify-center gap-2" @tap="startScanFlow">
-            <image class="btn-cta__icon" :src="getIcon('spinner', '#ffffff')" mode="aspectFit" />
-            <text class="btn-cta__text text-white">重新扫描</text>
-          </view>
-          <view class="btn-ghost-h48 bg-card rounded-pill flex items-center justify-center mt-3" @tap="onHelp">
-            <text class="btn-ghost-text text-main font-medium">配对失败？查看帮助</text>
-          </view>
+          <AppButton size="cta" @tap="startScanFlow">
+            <image class="btn-cta__icon" :src="getIcon('spinner', 'white')" mode="aspectFit" />
+            重新扫描
+          </AppButton>
+          <AppButton size="quick" variant="secondary" class="mt-3" @tap="onHelp">
+            配对失败？查看帮助
+          </AppButton>
           <text class="footnote text-muted block text-center">提示：设备首次使用需长按电源键 3 秒进入配对模式</text>
         </template>
 
@@ -459,7 +459,7 @@ onBeforeUnmount(() => {
           </view>
           <view v-if="shownDevices.length > 0" class="group bg-card rounded-card">
             <view v-for="dev in shownDevices" :key="dev.deviceId" class="dev-row" @tap="onSelectDevice(dev)">
-              <image class="dev-row__logo" :src="getIcon('bluetooth', '#3B362E')" mode="aspectFit" />
+              <image class="dev-row__logo" :src="getIcon('bluetooth', 'ink')" mode="aspectFit" />
               <text class="dev-row__name text-main flex-1">{{ dev.name }}</text>
               <view class="signal-bars flex items-end gap-0.5">
                 <view
@@ -491,7 +491,7 @@ onBeforeUnmount(() => {
           <view class="dev-bar bg-card rounded-card" :class="{ 'dev-bar--lost': deviceLost }">
             <view class="dev-bar__dot rounded-full" :class="deviceLost ? 'dev-bar__dot--gray' : 'bg-primary'" />
             <text class="dev-bar__name text-main flex-1">{{ connectedDevice?.name ?? '设备已断开' }}</text>
-            <view class="dev-bar__badge" :class="{ 'dev-bar__badge--gray': deviceLost }">
+            <view class="dev-bar__badge rounded-pill" :class="{ 'dev-bar__badge--gray': deviceLost }">
               <text class="dev-bar__badge-text" :class="{ 'dev-bar__badge-text--gray': deviceLost }">{{ deviceLost ? '已断开' : '已连接' }}</text>
             </view>
           </view>
@@ -510,7 +510,7 @@ onBeforeUnmount(() => {
                 >
               </view>
               <view class="wifi-scan-btn rounded-md" @tap="onScanWifiQr">
-                <image class="wifi-scan-btn__icon" :src="getIcon('scan', '#7BA05B')" mode="aspectFit" />
+                <image class="wifi-scan-btn__icon" :src="getIcon('scan', 'primary')" mode="aspectFit" />
               </view>
             </view>
 
@@ -538,7 +538,7 @@ onBeforeUnmount(() => {
               >
                 <text class="wifi-row__ssid" :class="{ 'wifi-row__ssid--selected': selectedApSsid === ap.ssid }">{{ ap.ssid }}</text>
                 <view class="flex items-center gap-2">
-                  <text v-if="ap.auth > 0" class="wifi-row__tag text-secondary">加密</text>
+                  <text v-if="ap.auth > 0" class="wifi-row__tag rounded-pill text-secondary">加密</text>
                   <text class="wifi-row__rssi text-secondary">{{ ap.rssi }} dBm</text>
                 </view>
               </view>
@@ -546,7 +546,7 @@ onBeforeUnmount(() => {
                 <text class="wifi-more__text text-secondary">
                   其他网络（{{ wifiList[3].ssid }} 等 {{ wifiList.length - 3 }} 个）
                 </text>
-                <image class="wifi-more__arrow" :src="getIcon('chevron-down', '#B3AB9D')" mode="aspectFit" />
+                <image class="wifi-more__arrow" :src="getIcon('chevron-down', 'muted')" mode="aspectFit" />
               </view>
             </template>
             <text v-else-if="!wifiScanning" class="wifi-empty text-secondary block">点「刷新列表」，设备会扫描周边网络</text>
@@ -567,13 +567,13 @@ onBeforeUnmount(() => {
                 >
                 <image
                   class="wifi-pass__eye"
-                  :src="getIcon('eye', showPassword ? '#7BA05B' : '#B3AB9D')"
+                  :src="getIcon('eye', showPassword ? 'primary' : 'muted')"
                   mode="aspectFit"
                   @tap="showPassword = !showPassword"
                 />
               </view>
               <view v-if="passwordError" class="wifi-pass__error flex items-center gap-1">
-                <image class="wifi-pass__error-icon" :src="getIcon('error', '#D96A5B')" mode="aspectFit" />
+                <image class="wifi-pass__error-icon" :src="getIcon('error', 'danger')" mode="aspectFit" />
                 <text class="wifi-pass__error-text">WiFi 密码错误，请重新输入</text>
               </view>
             </view>
@@ -585,7 +585,7 @@ onBeforeUnmount(() => {
               <text class="wifi-adv__label text-main">高级设置 · 服务器地址</text>
               <view class="flex items-center gap-1">
                 <text class="wifi-adv__value text-secondary">{{ serverHost || '默认' }}</text>
-                <image class="wifi-adv__arrow" :class="{ 'wifi-adv__arrow--open': showAdvanced }" :src="getIcon('chevron-down', '#B3AB9D')" mode="aspectFit" />
+                <image class="wifi-adv__arrow" :class="{ 'wifi-adv__arrow--open': showAdvanced }" :src="getIcon('chevron-down', 'muted')" mode="aspectFit" />
               </view>
             </view>
             <view v-if="showAdvanced" class="wifi-adv__body">
@@ -603,26 +603,22 @@ onBeforeUnmount(() => {
         </template>
 
         <!-- 深色 toast：瞬时反馈（刷新列表失败/扫码失败等），CTA 上方居中（失败分级 ②） -->
-        <view v-if="pageToast && phase !== 'idle' && phase !== 'scanning' && phase !== 'timeout'" class="page-toast">
+        <view v-if="pageToast && phase !== 'idle' && phase !== 'scanning' && phase !== 'timeout'" class="page-toast rounded-pill">
           <text class="page-toast__text">{{ pageToast }}</text>
         </view>
 
-        <!-- 吸底主 CTA -->
+        <!-- 吸底主 CTA（配网中 = 规范禁用灰态，防重复提交） -->
         <view v-if="phase === 'wifi' || phase === 'pairing'" class="cta-bar">
-          <view
-            class="cta-bar__btn rounded-full flex items-center justify-center"
-            :class="{ 'cta-bar__btn--disabled': phase === 'pairing' }"
-            @tap="phase === 'wifi' && onStartPair()"
-          >
-            <text class="cta-bar__text">{{ phase === 'pairing' ? '正在配网…' : '连接设备，完成配对' }}</text>
-          </view>
+          <AppButton size="cta" :disabled="phase === 'pairing'" @tap="phase === 'wifi' && onStartPair()">
+            {{ phase === 'pairing' ? '正在配网…' : '连接设备，完成配对' }}
+          </AppButton>
         </view>
 
         <!-- 配对成功弹框（规范 5.4 板 2：遮罩 + 居中白卡，不做独立成功页） -->
         <view v-if="phase === 'done' && !modalDismissed" class="success-mask" @tap="modalDismissed = true">
           <view class="success-modal" @tap.stop>
             <view class="success-modal__check rounded-full flex items-center justify-center">
-              <image class="success-modal__check-icon" :src="getIcon('check', '#7BA05B')" mode="aspectFit" />
+              <image class="success-modal__check-icon" :src="getIcon('check', 'primary')" mode="aspectFit" />
             </view>
             <text class="success-modal__title">配对成功</text>
             <text class="success-modal__desc text-secondary">设备已联网，开始使用吧</text>
@@ -640,9 +636,9 @@ onBeforeUnmount(() => {
                 <text class="success-modal__row-value">{{ pairedAtText }}</text>
               </view>
             </view>
-            <view class="success-modal__cta rounded-full" @tap="enterHome">
-              <text class="success-modal__cta-text">进入首页</text>
-            </view>
+            <AppButton size="cta" class="success-modal__cta" @tap="enterHome">
+              进入首页
+            </AppButton>
             <text class="success-modal__later" @tap="modalDismissed = true">稍后再说，留在当前页</text>
           </view>
         </view>
@@ -671,13 +667,9 @@ page {
 /* ------------------------------------------------------------------ */
 .navbar {
   gap: 20rpx;
-  // 吸顶：返回键行固定不随内容滚走。状态栏避让放进自身 padding —— sticky top:0 吸到的是
-  // 屏幕最上沿，静止时视觉与原来一致（状态栏高度 + 32rpx），吸顶后不透明背景盖住状态栏区域，
-  // 标题始终在系统状态栏下方
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background-color: $color-bg;
+  // 吸顶（.sticky-top 原子类：sticky/top/z/不透明背景），返回键行固定不随内容滚走。
+  // 状态栏避让放进自身 padding —— sticky top:0 吸到的是屏幕最上沿，吸顶后背景盖住
+  // 状态栏区域，标题始终在系统状态栏下方
   // 顶部 32rpx = H5 端顶栏呼吸间距（避让变量为 0 时仍离屏幕顶一指宽）；App 端叠加在状态栏避让之上。
   // 用 padding 而非 margin：margin 在盒外会把 min-height 100vh 的页面顶出滚动条
   padding: calc(var(--status-bar-height) + 32rpx) 0 20rpx;
@@ -826,32 +818,10 @@ page {
   transform: rotate(45deg);
 }
 
-/* ---------- CTA / 次按钮 ---------- */
-.btn-cta {
-  height: 96rpx; // h50
-
-  &__icon {
-    width: 32rpx;
-    height: 32rpx;
-  }
-
-  &__text {
-    font-size: 29rpx; // value 15px
-    font-weight: 500;
-  }
-
-  &--disabled {
-    opacity: 0.6;
-  }
-}
-
-.btn-ghost-h48 {
-  height: 92rpx; // h48
-}
-
-.btn-ghost-text {
-  font-size: 29rpx;
-  font-weight: 500;
+/* ---------- CTA 图标（按钮本体为共享组件 AppButton，样式由组件提供） ---------- */
+.btn-cta__icon {
+  width: 32rpx;
+  height: 32rpx;
 }
 
 .footnote {
@@ -875,16 +845,8 @@ page {
 }
 
 .dev-row {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-  // 盒参数与设置页 .row 保持一致（单行 cell 高度统一）
-  min-height: 1.1rem;
-  padding: 20rpx 32rpx;
-
-  & + .dev-row {
-    border-top: 1px solid $color-divider;
-  }
+  // 分组列表行统一自 list-item.scss 的 list-row（单行 cell 高度与设置页一致）
+  @include list-row($gap: 16rpx);
 }
 
 .dev-row__logo {
@@ -948,7 +910,6 @@ page {
 
   &__badge {
     padding: 4rpx 20rpx;
-    border-radius: 999rpx;
     background-color: $color-primary-soft;
 
     &--gray {
@@ -1042,7 +1003,6 @@ page {
     font-size: 22rpx;
     padding: 2rpx 10rpx;
     border: 1px solid $color-border;
-    border-radius: 999rpx;
   }
 
   &__rssi {
@@ -1167,7 +1127,6 @@ page {
   transform: translateX(-50%);
   z-index: 30;
   padding: 16rpx 36rpx;
-  border-radius: 999rpx;
   background-color: rgba(59, 54, 46, 0.92); // #3B362E 92%
 
   &__text {
@@ -1186,21 +1145,6 @@ page {
   box-sizing: border-box;
   padding: 20rpx 40rpx calc(20rpx + env(safe-area-inset-bottom)); // 容器 padding 20/21
   background-color: $color-bg;
-
-  &__btn {
-    height: 96rpx; // h50
-    background-color: $color-primary;
-
-    &--disabled {
-      opacity: 0.6;
-    }
-  }
-
-  &__text {
-    font-size: 29rpx; // value 15px
-    font-weight: 500;
-    color: #ffffff;
-  }
 }
 
 .cta-spacer {
@@ -1405,19 +1349,7 @@ page {
   }
 
   &__cta {
-    width: 100%;
-    height: 96rpx;
-    margin-top: 40rpx;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: $color-primary;
-  }
-
-  &__cta-text {
-    font-size: 29rpx;
-    font-weight: 500;
-    color: #ffffff;
+    margin-top: 40rpx; // 按钮本体为 AppButton（宽度/胶囊/主色/禁用态由组件提供）
   }
 
   &__later {
