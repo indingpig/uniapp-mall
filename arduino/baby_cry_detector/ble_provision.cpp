@@ -25,7 +25,6 @@ static bool    s_enabled = true;   // 配网窗口: 出厂态默认开, 主固�
 // 暂存 App 写入的凭据
 static String s_pendingSSID;
 static String s_pendingPass;
-static bool s_pendingPassReceived = false;  // 开放网络密码为空也视为已写入
 
 // WiFi 列表扫描: App 写 WIFI_LIST 只置位, 真正的 WiFi API 调用都在 bleProvisionLoop
 // (loop task) 里做 —— BLE 回调跑在 BT 任务, 跨任务调 WiFi 容易撞上栈未就绪的状态
@@ -99,7 +98,6 @@ class PassWriteCallback : public BLECharacteristicCallbacks {
     if (!writeAllowed("Password")) return;
     s_pendingPass = String(c->getValue().c_str());
     s_pendingPass.trim();
-    s_pendingPassReceived = true;   // 开放网络: 空密码也算已写入
     Serial.println("[BLE] Password received (hidden)");
   }
 };
@@ -118,6 +116,8 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
     prefs.end();
 
     // 服务器地址是最后一个特征值 -> 凭据齐全
+    // 密码为空 = 开放网络：产品上不支持（无 WiFi 场景走手机热点/随身 WiFi，自带密码），
+    // App 端已在提交前拦截；这里按凭据不完整处理，双保险
     if (s_pendingSSID.length() > 0 && s_pendingPass.length() > 0) {
       Serial.println("[BLE] All credentials received!");
       if (s_credsCb) {
@@ -125,7 +125,7 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
       }
     }
     else {
-      Serial.println("[BLE] Warning: SSID/密码不完整");
+      Serial.println("[BLE] Warning: SSID/密码不完整 (开放网络不支持空密码)");
     }
   }
 };
