@@ -22,8 +22,8 @@
 
 - [ ] 删除商城模板残留:`pages/cart`、`pages/category`、`pages/mine` 三个死页面
 - [ ] 加 `.gitattributes` 统一行尾符 — 根治 `manifest.json`/`components.d.ts` 幻影改动与 CRLF warning
-- [ ] 清 type-check 的 11 个历史错误 — uts 模块类型声明、App.vue shims、`scope.bluetooth` 权限键
-- [x] 推送远端 — 已同步（2026-10-02）
+- [ ] 清 type-check 的 9 个历史错误(2026-11-09 复核) — uts 模块类型声明 4、ble-test 页类型用法 3、App.vue shim 1、`scope.bluetooth` 权限键 1
+- [ ] 推送远端 — 2026-10-02 曾同步;2026-11-09 又累计 **8 个本地提交**未推送(上午配网/吸顶修复 4 + 下午样式收敛 4),另工作区还有未提交的文档改动
 - [ ] `<route>` 块废弃警告 → 迁移到 `definePage()`(uni-pages 下个版本移除,不急)
 - [ ] 首页快捷操作按钮(监听/静音提醒)收编 `AppButton` — 含 muted/禁用变体逐态迁移,2026-11-09 样式收编时刻意跳过(状态多,风险大)
 - [ ] `colors.ts` 的 `zone1-3` 与 `babyStatus.ts` `VOLUME_ZONES` 双源合一 — 现两处注释互指,改动需两边同步
@@ -32,13 +32,14 @@
 
 灵敏度阈值二级页(3 段滑杆)、消息中心、夜间模式、隐私说明页、多设备 vs 单设备决策、小程序端启用。
 
-## 排障口诀(近期踩坑速查)
-
-- 元素渲染成 `<!---->` 且零报错 → 查其用到的导入是否在平台条件编译块内(eslint 排序会穿越边界)
-- 入口页变成别的页面 → 看 `src/pages.json` 第一个 path;dev server 启动时 pages.json 必须存在
-- 全屏页底部贴边 / flex 卡片被撑破 → uni-h5 view 默认 content-box,容器加 `box-sizing: border-box` + `min-width: 0`
-- 页面顶栏钻进系统时间栏 → Android webview `env(safe-area-inset-top)` 恒为 0,状态栏避让用 `var(--status-bar-height)` 写在吸顶元素自身(约定详见 AGENTS.md 样式节)
-- 设备连不上 server → 先核对设备 IP 与 server 主机是否**同网段**(本机多网卡/WiFi 漫游会换 IP),再查服务端与防火墙
+- [ ] **真实设备身份与注册表(三端,衔接「多设备 vs 单设备」决策)** — 2026-11-09 确认的现状:
+  App 显示的「设备」是 server `routes/baby.js /device` 的**写死假数据**(name/battery/signal 全硬编码,
+  仅 isOnline 真实),server `ws/handler.js` 单槽位(`esp32Client`),身份=URL 含 'esp32',无设备列表——
+  所以「重置+重新配对」后列表永远不变,配对产物只有设备 NVS 凭据 + 手机本地 `PAIRED_DEVICE`(仅名字)
+  - 设备:WS 握手时上报真实身份(BLE Device Info 已有 name,或 URL 带 &name=)
+  - server:维护注册表({name, lastSeen, online}),`/api/device(s)` 返回真数据
+  - App:首页/设置渲染真名;`PAIRED_DEVICE` 可在重装后从 server 自动恢复
+  - 方案背景见 `配网与设备管理改进方案.md` 阶段二
 
 ## 已修复留档
 
