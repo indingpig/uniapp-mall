@@ -12,21 +12,6 @@ import {
 // 注意:getIcon 导入必须放在平台条件块之外 —— eslint 导入排序曾把它挪进上方
 // 平台块内,H5 编译剥掉该块后 getIcon 未定义,返回按钮会渲染成注释节点
 import { getIcon } from '@/utils/icons';
-// #ifdef H5
-interface H5ScannerLike { startScan: (o: never) => void; stopScan: () => void }
-interface H5PeripheralLike {
-  connect: () => Promise<void>;
-  disconnect: () => void;
-  onStateChange: (cb: (s: number) => void) => void;
-  discoverServices: (cb: (s: string, c: string, p: number) => void) => Promise<void>;
-  observe: (r: never, h: { onValue: (v: string) => void; onError: (e: { errMsg: string }) => void }) => void;
-  write: (r: never, v: string, t: number) => Promise<void>;
-}
-declare function createScanner(): H5ScannerLike;
-declare function createPeripheral(id: string): H5PeripheralLike;
-declare function characteristicOf(s: string, c: string): never;
-declare function openAdapter(): Promise<boolean>;
-// #endif
 
 const SERVICE_UUID = '4fafc201-1fb5-459e-8fcc-c5c9c331914b';
 const CHAR_TX_UUID = 'beb5483e-36e1-4688-b7f5-000000000001';

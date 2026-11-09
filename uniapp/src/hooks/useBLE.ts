@@ -26,32 +26,6 @@ import {
 // H5 无原生蓝牙：引入模拟器（运行时把 openAdapter 等实现挂到全局），让配对流程可在浏览器完整走通
 import '@/mock/ble-adapter';
 
-type H5Advertisement = Record<string, string | number>;
-interface H5ScannerLike {
-  startScan: (options: {
-    services: string[];
-    namePrefix: string;
-    onAdvertisement: (adv: H5Advertisement) => void;
-    onError: (err: { errMsg: string }) => void;
-    timeout: number;
-    allowDuplicates: boolean;
-    onEnd: () => void;
-  }) => void;
-  stopScan: () => void;
-}
-declare function createScanner(): H5ScannerLike;
-interface H5PeripheralLike {
-  connect: () => Promise<void>;
-  disconnect: () => void;
-  onStateChange: (cb: (state: number) => void) => void;
-  discoverServices: (cb: (svc: string, char: string, props: number) => Promise<void>) => Promise<void>;
-  observe: (ref: { serviceUuid: string; characterUuid: string }, handlers: { onValue: (v: string) => void; onError: (e: { errMsg: string }) => void }) => void;
-  write: (ref: { serviceUuid: string; characterUuid: string }, value: string, type: number) => Promise<void>;
-}
-declare function createPeripheral(deviceId: string): H5PeripheralLike;
-declare function characteristicOf(service: string, char: string): { serviceUuid: string; characterUuid: string };
-declare function openAdapter(): Promise<boolean>;
-declare function closeAdapter(): void;
 // #endif
 
 export interface BLEDevice {
