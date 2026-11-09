@@ -501,7 +501,11 @@ onBeforeUnmount(() => {
                   :style="{ height: `${4 + b * 3}px` }"
                 />
               </view>
-              <view class="pill-connect rounded-pill flex items-center justify-center" @tap.stop="onSelectDevice(dev)">
+              <view
+                class="pill-connect rounded-pill flex items-center justify-center"
+                :class="{ 'pill-connect--busy': connectingId === dev.deviceId }"
+                @tap.stop="onSelectDevice(dev)"
+              >
                 <text class="pill-connect__text">{{ connectingId === dev.deviceId ? '连接中…' : '连接' }}</text>
               </view>
             </view>
@@ -914,14 +918,21 @@ page {
 }
 
 .pill-connect {
-  width: 100rpx; // 52px
-  height: 54rpx; // 28px
+  // 不能写死 width: 「连接中…」比「连接」宽，固定宽度会挤到换行、被 54rpx 高度裁掉
+  min-width: 100rpx; // 52px
+  height: 54rpx;     // 28px
+  padding: 0 16rpx;
   background-color: $color-primary-soft;
+
+  &--busy {
+    opacity: 0.6;   // 连接中整体减淡，兼作禁用态反馈
+  }
 
   &__text {
     font-size: 25rpx;
     font-weight: 500;
     color: $color-primary-deep;
+    white-space: nowrap;
   }
 }
 
