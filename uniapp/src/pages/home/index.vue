@@ -491,7 +491,7 @@ page {
   @include page-layout;
   box-sizing: border-box;
   padding: 1.25rem; // 基础页边距（设计稿屏幕左右边距 20px）
-  padding-top: var(--status-bar-height); // 重新声明：简写会覆盖 mixin 的状态栏避让
+  padding-top: 0; // 状态栏避让移入吸顶 .header 自身（滚动吸顶后由它的不透明背景盖住状态栏区域）
 }
 
 .main {
@@ -509,12 +509,14 @@ page {
 /*  头部                                                                */
 /* ------------------------------------------------------------------ */
 .header {
-  // 吸顶：页面在 .page 内滚动，问候语头部固定不随内容滚走
+  // 吸顶：页面在 .page 内滚动，问候语头部固定不随内容滚走。
+  // 状态栏避让放进自身 padding：sticky top:0 吸到的是屏幕最上沿，吸顶后不透明背景盖住状态栏区域，
+  // 内容始终在系统状态栏下方（小程序端胶囊避让仍由模板内联 paddingTop 覆盖本值）
   position: sticky;
   top: 0;
   z-index: 100;
   background-color: $color-bg;
-  padding: 22rpx 0 8rpx;
+  padding: calc(var(--status-bar-height) + 22rpx) 0 8rpx;
 
   &__greeting {
     font-size: 52rpx;

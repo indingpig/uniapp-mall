@@ -599,7 +599,7 @@ page {
 .page {
   box-sizing: border-box;
   padding: 1.25rem;
-  padding-top: var(--status-bar-height);
+  padding-top: 0; // 状态栏避让移入吸顶 navbar 自身（滚动吸顶后由它的不透明背景盖住状态栏区域）
   min-height: 100vh;
   background-color: $color-bg;
   padding-bottom: 160rpx;
@@ -607,12 +607,13 @@ page {
 
 .navbar {
   // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走（小程序端胶囊避让由模板条件内联 paddingTop 提供）
-  // 与设置页对齐：容器上避让 12rpx（对应设置页 .main 的 padding-top）+ 标题自带 16rpx，标题到内容统一 32rpx
+  // 状态栏避让放进自身 padding：sticky top:0 吸到的是屏幕最上沿，吸顶后不透明背景盖住状态栏区域，
+  // 标题始终在系统状态栏下方；标题到内容统一 32rpx（12rpx + 标题自带 16rpx，与设置页对齐）
   position: sticky;
   top: 0;
   z-index: 100;
   background-color: $color-bg;
-  padding: 12rpx 0 32rpx;
+  padding: calc(var(--status-bar-height) + 12rpx) 0 32rpx;
 }
 
 .page-title {

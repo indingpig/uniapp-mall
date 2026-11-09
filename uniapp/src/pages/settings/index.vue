@@ -320,7 +320,7 @@ page {
   @include page-layout;
   box-sizing: border-box;
   padding: 1.25rem; // 基础页边距（设计稿屏幕左右边距 20px）
-  padding-top: var(--status-bar-height); // 重新声明：简写会覆盖 mixin 的状态栏避让
+  padding-top: 0; // 状态栏避让移入吸顶 .page-header 自身（滚动吸顶后由它的不透明背景盖住状态栏区域）
 }
 
 .main {
@@ -330,11 +330,14 @@ page {
 }
 
 .page-header {
-  // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走
+  // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走。
+  // 状态栏避让放进自身 padding：sticky top:0 吸到的是屏幕最上沿，吸顶后不透明背景盖住状态栏区域，
+  // 标题始终在系统状态栏下方（原 .page 的避让 + .main 的 12rpx 间距，数值不变只挪位置）
   position: sticky;
   top: 0;
   z-index: 100;
   background-color: $color-bg;
+  padding-top: var(--status-bar-height);
 }
 
 .page-title {
