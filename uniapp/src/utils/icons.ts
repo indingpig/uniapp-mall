@@ -12,6 +12,8 @@
  *   - base64 编码只是把整段 SVG 包装成合法的 data URI 语法，
  *     不会改变 SVG 内部内容，浏览器 / 小程序解码后仍能正确解析。
  */
+import { colors } from '@/constants/colors';
+
 export type IconKey
   = | 'activity'
     | 'bar-chart'
@@ -195,10 +197,12 @@ function utf8ToBase64(s: string): string {
 
 /**
  * 获取图标的 base64 data URI
- * @param name   图标名
- * @param color  可选：替换 SVG 中的 currentColor（配合 BaseIcon 的 color prop）
+ * @param name  图标名
+ * @param color 可选：替换 SVG 中的 currentColor —— 传 constants/colors.ts 的语义名
+ *              （'primary'/'ink'/'muted'…）或任意 hex，语义名优先查表
  */
 export function getIcon(name: IconKey, color?: string): string {
-  const raw = color ? ICONS[name].replace(/currentColor/g, color) : ICONS[name];
+  const hex = color ? (colors as Record<string, string>)[color] ?? color : undefined;
+  const raw = hex ? ICONS[name].replace(/currentColor/g, hex) : ICONS[name];
   return `data:image/svg+xml;base64,${utf8ToBase64(raw)}`;
 }
