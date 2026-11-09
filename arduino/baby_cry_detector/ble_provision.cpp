@@ -40,7 +40,10 @@ static uint8_t  s_scanRetries   = 0;
 // (2026-11-08 串口日志, 即「配网偶发超时」的根因)
 static bool          s_encryptPending = false;
 static bool          s_encryptDone    = false;   // 本次连接只主动发起一次
+static bool          s_encrypted      = false;   // 链路已加密 (onAuthenticationComplete 回填)
 static esp_bd_addr_t s_encryptBda;
+static uint32_t      s_scanWaitAt      = 0;      // 等待配对完成的起点
+static const uint32_t BLE_PAIR_WAIT_MS = 20000;  // 配对等待上限, 超时给 App 明确错误
 
 /* ================================================================== */
 /*  前向声明                                                            */
@@ -73,6 +76,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
   bool onConfirmPIN(uint32_t) override { return true; }
   void onAuthenticationComplete(esp_ble_auth_cmpl_t authCmpl) override {
     Serial.printf("[BLE] 配对/加密 %s\n", authCmpl.success ? "OK" : "FAIL");
+    s_encrypted = authCmpl.success;
     if (!authCmpl.success) {          // 失败后退避重试 (无 UI 手势, Just Works 静默)
       s_encryptDone = false;
       s_encryptPending = true;
@@ -143,6 +147,7 @@ class WifiListWriteCallback : public BLECharacteristicCallbacks {
     s_scanStarted = false;
     s_scanRetries = 0;
     s_scanRetryAt = 0;
+    s_scanWaitAt = millis();
     updateStatus(BLE_STATUS_SCANNING);
   }
 };
@@ -163,6 +168,7 @@ class ServerConnectionCallback : public BLEServerCallbacks {
     memcpy(s_encryptBda, param->connect.remote_bda, sizeof(esp_bd_addr_t));
     s_encryptPending = false;
     s_encryptDone = false;
+    s_encrypted = false;
     Serial.println("[BLE] App connected");
   }
 
@@ -170,6 +176,7 @@ class ServerConnectionCallback : public BLEServerCallbacks {
     s_bleConnected = false;
     s_encryptPending = false;
     s_encryptDone = false;
+    s_encrypted = false;
     if (s_enabled) {
       Serial.println("[BLE] App disconnected, restarting advertising");
       BLEDevice::startAdvertising();
@@ -283,6 +290,24 @@ void bleProvisionLoop() {
   }
 
   if (!s_scanRequested) return;
+
+  // -- 扫描必须建立在加密链路上: 未加密就先发起配对并等待, 手机确认后自动继续。
+  //    没有在 ATT 层用 ESP_GATT_PERM_WRITE_ENCRYPTED 卡住 WiFiList 写入 ——
+  //    那样写入到不了回调, 服务端就不会发 Security Request,
+  //    鸿蒙这类不自动配对的 ROM 会直接卡死 --
+  if (!s_encrypted) {
+    if (!s_encryptDone && !s_encryptPending) s_encryptPending = true;
+    if ((uint32_t)(millis() - s_scanWaitAt) > BLE_PAIR_WAIT_MS) {
+      Serial.println("[BLE] WiFi scan aborted: pairing not completed");
+      notifyChunked("{\"error\":\"pairing_timeout\"}\n");
+      notifyChunked("{\"done\":true}\n");
+      s_scanRequested = false;
+      s_scanStarted = false;
+      s_scanRetries = 0;
+      s_scanRetryAt = 0;
+    }
+    return;
+  }
 
   // -- 启动扫描: WiFi 栈刚切到 STA 时 esp_wifi_scan_start 会报 STATE 错误,
   //    「首次点获取 WiFi 列表必定失败」就是这个原因。隔 150ms 重试, 别急着回错误 --
