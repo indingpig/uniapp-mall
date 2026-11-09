@@ -99,7 +99,7 @@ static void factoryResetNow() {
 static bool     s_btnDown = false;
 static bool     s_btnHint3s = false; // 本次按住是否已给过「到窗口阈值」提示
 static uint32_t s_btnDownAt = 0;
-static uint32_t s_windowUntil = 0;   // 窗口截止时刻 (0 = 关; 出厂态常开不看它)
+static uint32_t s_windowUntil = 0;   // 配网窗口截止时刻 (0 = 关)
 // GPIO0 防误触 (CH343 的 DTR/RTS 会把 GPIO0 钳低): 装填条件为「连续高电平
 // BTN_REARM_HIGH_MS」—— 单次采样不足以证明按键真的空闲, 上电瞬间的毛刺
 // 不会让判定永久生效; 被钳住期间永不装填, 解除钳制后须连续空闲 2s 才恢复。
@@ -108,14 +108,12 @@ static uint32_t s_btnHighSince = 0;            // 连续高电平起始时刻 (0
 static const uint32_t BTN_REARM_HIGH_MS = 2000;
 
 static void closeProvisionWindow() {
-  if (isFactoryState()) return;      // 出厂态不关
   s_windowUntil = 0;
-  bleProvisionSetEnabled(false);
+  bleProvisionSetEnabled(false);   // 内部已打 "[BLE] 配网窗口关闭, 停止广播"
   led_off();
 }
 
 static void openProvisionWindow() {
-  if (isFactoryState()) return;      // 出厂态本来就开
   s_windowUntil = millis() + PROVISION_WINDOW_MS;
   bleProvisionSetEnabled(true);
   Serial.printf("[Provision] 配网窗口开启 %lu 分钟\n",
@@ -290,8 +288,9 @@ void setup() {
   bleProvisionInit(deviceName);
   bleProvisionSetCredentialsCallback(onCredentialsReceived);
 
-  // 配网窗口: 出厂态常开; 已配网设备默认关闭 + 停广播 (BOOT 短按重开)
-  bleProvisionSetEnabled(!wifiHasSavedCredentials());
+  // 配网窗口: 出厂态同样限时 —— 上电开一个 PROVISION_WINDOW_MS 窗口,
+  // 超时停广播 (省电 + 收敛攻击面), 需要时 BOOT 短按 3s 重开
+  if (isFactoryState()) openProvisionWindow();
 
   // 音频采集链 (Core 0): I2S + 高通滤波, 常开
   audioPipelineStart();
@@ -313,10 +312,10 @@ void loop() {
   if (s_windowUntil != 0 && millis() >= s_windowUntil) {
     closeProvisionWindow();
   }
-  if (isFactoryState()) {
-    led_blink(PROV_LED_SLOW_MS);        // 出厂态: 慢闪待配网
-  } else if (s_windowUntil != 0) {
-    led_blink(PROV_LED_FAST_MS);        // 窗口期: 快闪
+  if (s_windowUntil != 0) {
+    led_blink(PROV_LED_FAST_MS);        // 窗口期 (含出厂态首个窗口): 快闪 = 可配网
+  } else if (isFactoryState()) {
+    led_blink(PROV_LED_SLOW_MS);        // 出厂态但窗口已关: 慢闪提示还需要配网
   }
 
   // 采集服务端 (HTTP /rms, /setserver + WS 采集推流)
