@@ -92,6 +92,10 @@ async function onFetchWifiList() {
 }
 
 function onPickAp(ap: WifiAp) {
+  if (ap.auth === 0) {
+    showToast('该 WiFi 未加密，暂不支持开放网络');
+    return;
+  }
   wifiSSID.value = ap.ssid;
   selectedApSsid.value = ap.ssid;
 }
@@ -112,6 +116,11 @@ async function onScanWifiQr() {
     return;
   if (res.status === 'invalid') {
     showToast('未识别到 WiFi 二维码');
+    return;
+  }
+  if (!res.data.password) {
+    // 扫到的是开放网络的分享码：产品上不支持无密码 WiFi，直接拒绝
+    showToast('该 WiFi 未设置密码，暂不支持开放网络');
     return;
   }
   wifiSSID.value = res.data.ssid;
@@ -248,6 +257,11 @@ async function onSelectDevice(device: BLEDevice) {
 async function onStartPair() {
   if (!wifiSSID.value) {
     showToast('请输入 WiFi 名称');
+    return;
+  }
+  if (!wifiPass.value) {
+    // 手输 SSID 没填密码也会走到这里：开放网络产品上不支持（热点/随身 WiFi 自带密码）
+    showToast('请输入 WiFi 密码（暂不支持开放网络）');
     return;
   }
   passwordError.value = false;
@@ -647,7 +661,7 @@ page {
 .page {
   box-sizing: border-box;
   padding: 1.25rem; // 基础页边距（设计稿屏幕左右边距 20px）
-  padding-top: var(--status-bar-height); // 刘海/灵动岛/状态栏避让（App 端为真实高度）
+  padding-top: 0; // 状态栏避让移入吸顶 navbar 自身（滚动吸顶后由它的不透明背景盖住状态栏区域）
   min-height: 100vh;
   background-color: $color-bg;
 }
@@ -657,9 +671,16 @@ page {
 /* ------------------------------------------------------------------ */
 .navbar {
   gap: 20rpx;
+  // 吸顶：返回键行固定不随内容滚走。状态栏避让放进自身 padding —— sticky top:0 吸到的是
+  // 屏幕最上沿，静止时视觉与原来一致（状态栏高度 + 32rpx），吸顶后不透明背景盖住状态栏区域，
+  // 标题始终在系统状态栏下方
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: $color-bg;
   // 顶部 32rpx = H5 端顶栏呼吸间距（避让变量为 0 时仍离屏幕顶一指宽）；App 端叠加在状态栏避让之上。
   // 用 padding 而非 margin：margin 在盒外会把 min-height 100vh 的页面顶出滚动条
-  padding: 32rpx 0 20rpx;
+  padding: calc(var(--status-bar-height) + 32rpx) 0 20rpx;
 
   &__back {
     width: 56rpx;
