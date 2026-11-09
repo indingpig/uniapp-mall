@@ -1316,18 +1316,18 @@ page {
 }
 
 .radar-frame--f1 {
-  animation: radar-kf-f1 480ms linear infinite;
+  animation: radar-kf-f1 720ms linear infinite;
 }
 
 .radar-frame--f2 {
-  animation: radar-kf-f2 480ms linear infinite;
+  animation: radar-kf-f2 720ms linear infinite;
 }
 
 .radar-frame--f3 {
-  animation: radar-kf-f3 480ms linear infinite;
+  animation: radar-kf-f3 720ms linear infinite;
 }
 
-/* 三帧窗口：f1 0-120ms（25%）、f2 120-280ms（25%~58.3%）、f3 280-480ms（58.3%~100%） */
+/* 三帧窗口：f1 0-180ms（25%）、f2 180-420ms（25%~58.3%）、f3 420-720ms（58.3%~100%） */
 @keyframes radar-kf-f1 {
   0%, 24.9% { opacity: 1; }
   25%, 100% { opacity: 0; }
