@@ -197,7 +197,7 @@ onBeforeUnmount(doDisconnect);
     <!-- 顶部导航行:全局 navigationStyle=custom,自绘返回按钮 -->
     <view class="nav-row flex items-center">
       <view class="nav-row__back rounded-full flex items-center justify-center" @tap="goBack">
-        <image class="nav-row__icon" :src="getIcon('chevron-left', '#3B362E')" mode="aspectFit" />
+        <image class="nav-row__icon" :src="getIcon('chevron-left', 'ink')" mode="aspectFit" />
       </view>
       <text class="nav-row__title font-bold text-main">BLE 串口测试</text>
     </view>
@@ -264,7 +264,9 @@ onBeforeUnmount(doDisconnect);
 .nav-row {
   gap: 16rpx;
   // 全局 navigationStyle=custom,顶部让出状态栏
-  padding-top: calc(env(safe-area-inset-top) + 8rpx);
+  // 状态栏避让：Android webview 的 env(safe-area-inset-top) 恒为 0（iOS 刘海才有值），
+  // 必须用 uni-app 内置变量 --status-bar-height（App=真实高度，H5=0，微信小程序=25px）
+  padding-top: calc(var(--status-bar-height) + 8rpx);
 
   &__back {
     width: 64rpx;
