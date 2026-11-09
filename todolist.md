@@ -16,14 +16,10 @@
 ## 中优先级:跨端链路
 
 - [ ] **WiFi 弧线分档** — 与信号条不同,需三端:固件加 WiFi RSSI 上报字段 → server 透传 → App 分档渲染(现为写死满格绿)
-- [ ] **电池字段处置** — 充电宝供电决策落地:设置页「电量 X%」改「充电宝供电」,废弃 `DeviceData.batteryPercent`(server `routes/baby.js` 里现为硬编码 85)
 
 ## 低优先级:工程卫生(碎片时间)
 
-- [ ] 删除商城模板残留:`pages/cart`、`pages/category`、`pages/mine` 三个死页面
-- [ ] 加 `.gitattributes` 统一行尾符 — 根治 `manifest.json`/`components.d.ts` 幻影改动与 CRLF warning
-- [ ] 清 type-check 的 9 个历史错误(2026-11-09 复核) — uts 模块类型声明 4、ble-test 页类型用法 3、App.vue shim 1、`scope.bluetooth` 权限键 1
-- [ ] 推送远端 — 2026-10-02 曾同步;2026-11-09 又累计 **8 个本地提交**未推送(上午配网/吸顶修复 4 + 下午样式收敛 4),另工作区还有未提交的文档改动
+- [ ] 推送远端 — 2026-11-09 晚新增 **5 个本地提交**未推送（死页面清理/AppID/电池字段/type-check 修复/.gitattributes）
 - [ ] `<route>` 块废弃警告 → 迁移到 `definePage()`(uni-pages 下个版本移除,不急)
 - [ ] 首页快捷操作按钮(监听/静音提醒)收编 `AppButton` — 含 muted/禁用变体逐态迁移,2026-11-09 样式收编时刻意跳过(状态多,风险大)
 - [ ] `colors.ts` 的 `zone1-3` 与 `babyStatus.ts` `VOLUME_ZONES` 双源合一 — 现两处注释互指,改动需两边同步
@@ -42,6 +38,11 @@
   - 方案背景见 `配网与设备管理改进方案.md` 阶段二
 
 ## 已修复留档
+
+- [x] 商城模板残留死页面 cart/category/mine — 删除（`d946b54`）；pages.json 里三条 `#ifdef APP || H5` 手动条目一并清掉（uni-pages 会合并保留旧条目，删源文件不够）
+- [x] type-check 9 个历史错误 — 清零（`b83b59e`）：新增 `src/types/bin-bluetooth.d.ts`（以 interface.uts 为真值源）与 `src/shime-uni.d.ts`；useBLE/ble-test 删 H5 本地 declare 占位块（vue-tsc 不处理条件编译，两分支声明同时可见会冲突），H5 运行时仍走 mock 全局兜底；`scope.bluetooth` 权限键用 Record 断言绕过插件类型缺口
+- [x] 电池字段处置 — 落地（`3bb5622`）：设置页「电量 X%」→「充电宝供电」，DeviceData.batteryPercent 废弃，server 去硬编码 85
+- [x] `.gitattributes` 统一行尾符（`39c2618`，* text=auto eol=lf，bat/ps1/cmd 保持 CRLF，图片字体证书 binary）
 
 - [x] 设备重置后首连成功进配对页但跳回扫描页 — 修复(2026-11-09 重设计 `30dd3a9`):phase 状态机 wifi/pairing/done 不回退扫描态(状态互斥),掉线切 `deviceLost` 灰态条;同日真机全程配网未复现
 - [x] 重新配网后 ServerLink 一直拨旧服务器地址(App 配网超时) — 修复(`132f848`):wifi_connected 每次触发无条件 `serverLinkStart()` 重读 NVS;真机端到端验证通过
