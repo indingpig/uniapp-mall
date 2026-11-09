@@ -1,37 +1,27 @@
 @use '@/styles/uni.scss' as *;
 
 /**
- * 空状态占位样式
+ * 空态占位（历史/统计页的「连接设备后…」首次空态门控）
  *
- * 用于历史/统计/无数据等占位场景。
+ * 形状取两页现行实现（padding 80/0 + 图 160 + 文案间距 16），零视觉变化。
  *
  * @example
- *   <view class="empty">
- *     <text class="empty__title">暂无记录</text>
- *     <text class="empty__desc">宝宝的活动数据会显示在这里</text>
+ *   <view class="empty text-center">
+ *     <image class="empty__img" src="/static/icons/ic-monitor-wave.svg" />
+ *     <text class="empty__text block text-secondary">连接设备后，这里会…</text>
  *   </view>
  */
 
 @mixin empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 80rpx;
-  gap: 16rpx;
+  padding: 80rpx 0;
 }
 
-@mixin empty-title {
-  font-size: $font-size-lg;
-  font-weight: 600;
-  color: $color-text-primary;
-  text-align: center;
+@mixin empty-img {
+  width: 160rpx;
+  height: 160rpx;
 }
 
-@mixin empty-desc {
-  font-size: $font-size-base;
-  color: $color-text-secondary;
-  text-align: center;
-  line-height: 1.6;
+@mixin empty-text {
+  margin-top: 16rpx;
+  font-size: 25rpx;
 }

@@ -201,7 +201,7 @@ onShow(() => {
   <view class="page h-full">
     <view class="main gap-4">
       <!-- 页面标题（吸顶；胶囊避让必须留在本元素上，吸顶后才不钻到胶囊底下） -->
-      <view class="page-header" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
+      <view class="page-header sticky-top" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
         <text class="page-title text-main font-bold">设置</text>
       </view>
 
@@ -210,7 +210,7 @@ onShow(() => {
         <text class="section__title block mb-2">设备管理</text>
         <view class="group bg-card rounded-lg">
           <view class="row" @tap="onDeviceTap">
-            <image class="row-icon" :src="getIcon('signal-bars', '#7BA05B')" mode="aspectFit" />
+            <image class="row-icon" :src="getIcon('signal-bars', 'primary')" mode="aspectFit" />
             <view class="row-body flex-1">
               <text class="row-title text-main">{{ device.name }}</text>
               <text class="row-desc text-secondary block">电量 {{ device.batteryPercent }}% · {{ device.connectionText }}</text>
@@ -218,17 +218,17 @@ onShow(() => {
             <view class="online-badge rounded-pill" :class="device.isOnline ? 'online-badge--on' : 'online-badge--off'">
               {{ device.isOnline ? '在线' : '离线' }}
             </view>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row" @tap="goPairing">
             <view class="plus-chip rounded-full flex items-center justify-center shrink-0">
-              <image class="plus-chip__icon" :src="getIcon('plus', '#8C8578')" mode="aspectFit" />
+              <image class="plus-chip__icon" :src="getIcon('plus', 'secondary')" mode="aspectFit" />
             </view>
             <view class="row-body flex-1 ml-3">
               <text class="row-title text-main">添加新设备</text>
               <text class="row-desc text-secondary block">通过蓝牙连接新设备</text>
             </view>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
         </view>
       </view>
@@ -246,13 +246,13 @@ onShow(() => {
             <text class="row-title text-main">灵敏度阈值</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">{{ settings.sensitivity }}</text>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row" @tap="pickAlertVolume">
             <text class="row-title text-main">提醒音量</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">{{ settings.alertVolume }}</text>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row">
             <text class="row-title text-main">推送通知</text>
@@ -270,13 +270,13 @@ onShow(() => {
             <text class="row-title text-main">账号管理</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">Sheldon</text>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row" @tap="onAboutTap">
             <text class="row-title text-main">关于与帮助</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">v1.2.0</text>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row row--center" @tap="onLogout">
             <text class="logout-text">退出登录</text>
@@ -293,13 +293,13 @@ onShow(() => {
             <text class="row-title text-main">BLE 串口测试</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">蓝牙收发调试</text>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
           <view class="row" @tap="goCollect">
             <text class="row-title text-main">哭声数据采集</text>
             <view class="flex-1" />
             <text class="row-value text-secondary">Edge Impulse 训练数据</text>
-            <image class="row-arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
         </view>
       </view>
@@ -330,13 +330,9 @@ page {
 }
 
 .page-header {
-  // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走。
-  // 状态栏避让放进自身 padding：sticky top:0 吸到的是屏幕最上沿，吸顶后不透明背景盖住状态栏区域，
-  // 标题始终在系统状态栏下方（原 .page 的避让 + .main 的 12rpx 间距，数值不变只挪位置）
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background-color: $color-bg;
+  // 吸顶（.sticky-top 原子类）：页面在 .page 内滚动，大标题固定不随内容滚走。
+  // 状态栏避让放进自身 padding（原 .page 的避让 + .main 的 12rpx 间距，数值不变只挪位置），
+  // 吸顶后不透明背景盖住状态栏区域
   padding-top: var(--status-bar-height);
 }
 
@@ -358,14 +354,8 @@ page {
 }
 
 .row {
-  display: flex;
-  align-items: center;
-  min-height: 1.1rem;
-  padding: 20rpx 32rpx;
-
-  & + .row {
-    border-top: 1rpx solid #f2ecdf;
-  }
+  // 分组列表行统一自 list-item.scss 的 list-row（含行间分割线，分割线色为 $color-divider）
+  @include list-row;
 
   &--center {
     justify-content: center;

@@ -24,6 +24,19 @@ pnpm run lint:fix     # ESLint 自动修复
 pnpm run type-check   # vue-tsc 类型检查
 ```
 
+#### 真机调试（HBuilderX CLI，Mac）
+
+```bash
+# 运行到 Android 真机：本地编译 → adb 覆盖安装自定义基座 → 推送程序文件 → 启动，
+# 真机 console 日志实时回流到终端
+/Applications/HBuilderX.app/Contents/MacOS/cli launch app-android \
+  --project <uniapp 绝对路径> --playground custom --customType local --deviceId <id>
+```
+
+- `deviceId` 用 `adb devices` 查询；HBuilderX 未启动时先执行 `cli open`
+- 自定义基座一次性构建好即可复用，只在原生插件/权限变动时重做
+- CLI 卡住不退出时：`pkill -f "cli launch app-android"` 后重跑（HBuilderX 主进程不用动）；调用时**不要接管道**（`| tail` 等会缓冲到进程结束才输出，看起来像卡死）
+
 ### server（在 `server/` 下执行）
 
 ```bash
@@ -61,7 +74,11 @@ pio device monitor           # 串口监视器（115200）
   - 页面由 vite-plugin-uni-pages 按 `src/pages/<name>/index.vue` 文件系统自动扫描注册，无需在 config 里逐个添加
 - 组件自动导入（vite-plugin-uni-components + UniUIResolver）：uni-ui 组件直接用，无需 import；`components.d.ts` 为生成文件
 - 路径别名 `@` → `src/`
-- 全局 SCSS 已通过 vite `additionalData` 注入（`styles/uni.scss`、`page-layout.scss`、`state.scss`、`button.scss`、`list-item.scss`、`section.scss`），页面里直接使用其中的变量/类，不要重复 @use
+- 全局 SCSS 已通过 vite `additionalData` 注入（`styles/uni.scss`、`page-layout.scss`、`state.scss`、`list-item.scss`、`section.scss`），页面里直接使用其中的变量/类，不要重复 @use；按钮一律用共享组件 `components/AppButton.vue`（vite-plugin-components 已自动注册），不要在页面里手搓按钮样式
+- **吸顶与状态栏避让**：顶栏吸顶直接用原子类 `.sticky-top`（sticky/top-0/z-100/不透明底）；状态栏避让 padding 必须写在**吸顶元素自身**（`padding-top: calc(var(--status-bar-height) + 呼吸间距)`），不要写在 `.page` 上——吸顶后 `.page` 的避让不跟着走，顶栏会钻进系统状态栏
+- **状态栏高度一律用 `var(--status-bar-height)`**（uni-app 内置：App=真实高度、H5=0、微信小程序=25px）；**禁止用 `env(safe-area-inset-top)`** 做 Android 状态栏避让（App webview 里恒为 0，仅 iOS 刘海部分场景有值）；底部安全区仍用 `env(safe-area-inset-bottom)`
+- **颜色单一真值源**：SCSS 用 `styles/uni.scss` 的 `$color-*` token；TS/模板侧（`getIcon` 第二参、行内 `:style`、图表配色）用 `constants/colors.ts` 的语义名（`colors.primary`、`getIcon('bell', 'primary')`），**禁止硬编码 hex**。`src/utils/icons.ts` 是生成文件——改 `getIcon` 逻辑要改 `scripts/gen-icons.mjs` 后重跑，不要直接手改生成产物
+- **新增样式前先查现有抽象**：列表行 `@include list-row($gap)`（list-item.scss，含相邻行自动分割线）、空态 `@include empty-state` 系列（state.scss）、按钮 `AppButton`、原子类 utilities.scss——避免再造「定义了没人用」的死抽象
 - `styles/utilities.scss` 由 `App.vue` 全局引入，提供 Tailwind 风格原子类（布局/flex/间距/文字/颜色/圆角/定位等）：间距 1 单位 = 8rpx（`p-4` = 32rpx），颜色类直接映射 `uni.scss` 主题 token（`text-primary`、`bg-card`…）。写页面布局时优先用这套原子类，组件特有的复杂样式再走 scoped SCSS；新刻度加在文件内的 `$space-scale` 里。`.line-clamp-N` 会覆盖同元素上的 `display`，不要与 `.flex` 叠在同一节点。注意 scoped 样式（带 `[data-v]`，特异度更高）会压过同属性的全局原子类：同一属性不要既写在 scoped 又指望原子类生效；动态状态切换（如 `--active`）的颜色覆盖留在 scoped。`<text>` 在 H5 端渲染为 inline，垂直 margin 原子类（`mb-*`/`mt-*`）要同时加 `block` 才生效（flex 容器的子元素会被块化，无需加）。**禁止**在 flex 容器的子元素上加垂直 margin 类：items-center 按 margin-box 居中会造成错位，间距一律用容器 gap 或容器自身的 margin/padding
 - 代码风格：`<script setup lang="ts">` + Composition API；ESLint 使用 @uni-helper/eslint-config，**强制分号**（`semi: true`），`console` 仅 warn
 - **包管理器统一用 pnpm**（两台开发机都是）：锁文件只有 `pnpm-lock.yaml`（package-lock.json 已删除），两个子项目的 `preinstall` 有 `only-allow pnpm` 守卫，误用 `npm install` 会直接报错；家里 Windows 机装 pnpm：`npm install -g pnpm`（或 `iwr https://get.pnpm.io/install.ps1 -useb | iex`）。uniapp 的 pnpm 配置在 `pnpm-workspace.yaml`（allowBuilds 放行 esbuild/ttf2woff2/vue-demi 的安装脚本，trustPolicy 误报豁免见文件内注释）

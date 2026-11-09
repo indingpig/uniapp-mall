@@ -9,6 +9,7 @@ import { onShow } from '@dcloudio/uni-app';
 import { computed, ref } from 'vue';
 import { fetchDailyStats, fetchHistoryRange, fetchStatsSummary } from '@/api/baby';
 import { CACHE_KEY } from '@/constants/cache';
+import { colors } from '@/constants/colors';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { deriveTimeline, fmtDateKey, fmtDuration } from '@/utils/babyEvents';
 import { getIcon } from '@/utils/icons';
@@ -54,10 +55,10 @@ const prevDayCry = ref(0);
 const WEEKDAY = '日一二三四五六';
 
 const DIST_META: Record<string, { label: string; color: string }> = {
-  sleeping: { label: '安睡', color: '#7BA05B' },
-  awake: { label: '清醒', color: '#F2C14E' },
-  playing: { label: '清醒活跃', color: '#E8825A' },
-  crying: { label: '哭闹', color: '#D96A5B' },
+  sleeping: { label: '安睡', color: colors.primary },
+  awake: { label: '清醒', color: colors.gold },
+  playing: { label: '清醒活跃', color: colors.orange },
+  crying: { label: '哭闹', color: colors.danger },
 };
 
 function setPeriod(key: Period) {
@@ -386,7 +387,7 @@ const neutralRatio = computed(() =>
 
 <template>
   <view class="page">
-    <view class="navbar" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
+    <view class="navbar sticky-top" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
       <text class="page-title text-main font-bold">统计</text>
     </view>
 
@@ -432,7 +433,7 @@ const neutralRatio = computed(() =>
           <text class="stat-value text-main font-bold block flex-1">{{ sleepValue }}</text>
           <template v-if="selectedDay">
             <text class="drill-hint text-secondary">查看当天</text>
-            <image class="drill-hint__arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="drill-hint__arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </template>
         </view>
         <text class="stat-sub text-secondary block">{{ sleepSub }}</text>
@@ -440,17 +441,17 @@ const neutralRatio = computed(() =>
         <!-- 今日：夜间/小睡分解条 + 两行图例（规范 5.3，数据粒度决定图表形态） -->
         <template v-if="period === 'today' && todaySleepMs > 0">
           <view class="sleep-split flex overflow-hidden rounded-pill mt-4" role="img" :aria-label="`夜间 ${fmtDuration(sleepSplit.nightMs)} 占 ${Math.round(sleepSplit.nightMs / todaySleepMs * 100)}%，小睡 ${fmtDuration(sleepSplit.napMs)} 占 ${Math.round(sleepSplit.napMs / todaySleepMs * 100)}%`">
-            <view class="sleep-split__seg" :style="{ flexGrow: sleepSplit.nightMs, backgroundColor: '#7BA05B' }" />
-            <view v-if="sleepSplit.napMs > 0" class="sleep-split__seg" :style="{ flexGrow: sleepSplit.napMs, backgroundColor: '#DDE9D3' }" />
+            <view class="sleep-split__seg" :style="{ flexGrow: sleepSplit.nightMs, backgroundColor: colors.primary }" />
+            <view v-if="sleepSplit.napMs > 0" class="sleep-split__seg" :style="{ flexGrow: sleepSplit.napMs, backgroundColor: colors.zone1 }" />
           </view>
           <view class="mt-2">
             <view class="dist-row flex items-center gap-2 mt-2">
-              <view class="dist-row__dot rounded-full" :style="{ backgroundColor: '#7BA05B' }" />
+              <view class="dist-row__dot rounded-full" :style="{ backgroundColor: colors.primary }" />
               <text class="dist-row__label text-main flex-1">夜间睡眠</text>
               <text class="dist-row__value text-secondary">{{ fmtDuration(sleepSplit.nightMs) }} · {{ Math.round(sleepSplit.nightMs / todaySleepMs * 100) }}%</text>
             </view>
             <view class="dist-row flex items-center gap-2 mt-2">
-              <view class="dist-row__dot rounded-full" :style="{ backgroundColor: '#DDE9D3' }" />
+              <view class="dist-row__dot rounded-full" :style="{ backgroundColor: colors.zone1 }" />
               <text class="dist-row__label text-main flex-1">小睡</text>
               <text class="dist-row__value text-secondary">{{ fmtDuration(sleepSplit.napMs) }} · {{ Math.round(sleepSplit.napMs / todaySleepMs * 100) }}%</text>
             </view>
@@ -472,7 +473,7 @@ const neutralRatio = computed(() =>
                 class="bars__bar rounded-sm w-full"
                 :style="{
                   height: barHeight(b.sample, sampleMax),
-                  backgroundColor: selectedDayIndex === i ? '#55823F' : (b.isToday ? '#7BA05B' : '#DDE9D3'),
+                  backgroundColor: selectedDayIndex === i ? colors.primaryDeep : (b.isToday ? colors.primary : colors.zone1),
                 }"
               />
             </view>
@@ -501,7 +502,7 @@ const neutralRatio = computed(() =>
           <text class="stat-value text-main font-bold block flex-1">{{ cryValue }}</text>
           <template v-if="selectedDay">
             <text class="drill-hint text-secondary">查看当天</text>
-            <image class="drill-hint__arrow" :src="getIcon('chevron-right', '#B3AB9D')" mode="aspectFit" />
+            <image class="drill-hint__arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </template>
         </view>
         <text class="stat-sub text-secondary block">{{ crySub }}</text>
@@ -535,7 +536,7 @@ const neutralRatio = computed(() =>
                 class="bars__bar rounded-sm w-full"
                 :style="{
                   height: barHeight(b.cry, cryMax),
-                  backgroundColor: selectedDayIndex === i ? '#B84A3C' : (b.isToday && b.cry > 0 ? '#D96A5B' : '#F5D9D3'),
+                  backgroundColor: selectedDayIndex === i ? colors.dangerInk : (b.isToday && b.cry > 0 ? colors.danger : colors.zone3),
                 }"
               />
             </view>
@@ -606,13 +607,9 @@ page {
 }
 
 .navbar {
-  // 吸顶：页面在 .page 内滚动，大标题固定不随内容滚走（小程序端胶囊避让由模板条件内联 paddingTop 提供）
-  // 状态栏避让放进自身 padding：sticky top:0 吸到的是屏幕最上沿，吸顶后不透明背景盖住状态栏区域，
-  // 标题始终在系统状态栏下方；标题到内容统一 32rpx（12rpx + 标题自带 16rpx，与设置页对齐）
-  position: sticky;
-  top: 0;
-  z-index: 100;
-  background-color: $color-bg;
+  // 吸顶（.sticky-top 原子类）：页面在 .page 内滚动，大标题固定不随内容滚走（小程序端
+  // 胶囊避让由模板条件内联 paddingTop 提供）。状态栏避让放进自身 padding：吸顶后不透明
+  // 背景盖住状态栏区域；标题到内容统一 32rpx（12rpx + 标题自带 16rpx，与设置页对齐）
   padding: calc(var(--status-bar-height) + 12rpx) 0 32rpx;
 }
 
@@ -811,16 +808,15 @@ page {
 
 /* ---------- 首次空态 ---------- */
 .empty {
-  padding: 80rpx 0;
+  // 空态统一自 state.scss（与历史页同形状）
+  @include empty-state;
 
   &__img {
-    width: 160rpx;
-    height: 160rpx;
+    @include empty-img;
   }
 
   &__text {
-    margin-top: 16rpx;
-    font-size: 25rpx;
+    @include empty-text;
   }
 }
 </style>

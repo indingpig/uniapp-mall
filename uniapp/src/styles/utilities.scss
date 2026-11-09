@@ -246,6 +246,17 @@ $space-scale: (
 .z-10 { z-index: 10; }
 .z-20 { z-index: 20; }
 .z-50 { z-index: 50; }
+.z-100 { z-index: 100; }
+
+/* 吸顶头部（页面顶栏通用）：状态栏避让 padding 留给各页 scoped
+   （padding-top: calc(var(--status-bar-height) + 各页呼吸间距)），滚动吸顶后
+   本类的不透明背景正好盖住状态栏区域。原理见 settings 页 .page-header 注释 */
+.sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background-color: $color-bg;
+}
 
 /* ========== 溢出 ========== */
 .overflow-hidden { overflow: hidden; }

@@ -152,14 +152,14 @@ const sleepText = computed(() => fmtDuration(sleepMs.value));
       <!-- ========= 日期选择条 ========= -->
       <view class="date-bar bg-card rounded-card flex items-center">
         <view class="date-bar__arrow flex items-center justify-center" @tap="shiftDay(1)">
-          <image class="date-bar__arrow-icon" :src="getIcon('chevron-left', dayOffset >= 6 ? '#B3AB9D' : '#3B362E')" mode="aspectFit" />
+          <image class="date-bar__arrow-icon" :src="getIcon('chevron-left', dayOffset >= 6 ? 'muted' : 'ink')" mode="aspectFit" />
         </view>
         <view class="flex-1 text-center">
           <text class="date-bar__date text-main block">{{ dateText }}</text>
           <text class="date-bar__sub text-secondary block">{{ subText }}<text v-if="isToday"> · 周{{ '日一二三四五六'[new Date().getDay()] }}</text></text>
         </view>
         <view class="date-bar__arrow flex items-center justify-center" :class="{ 'date-bar__arrow--disabled': isToday }" @tap="!isToday && shiftDay(-1)">
-          <image class="date-bar__arrow-icon" :src="getIcon('chevron-right', isToday ? '#B3AB9D' : '#3B362E')" mode="aspectFit" />
+          <image class="date-bar__arrow-icon" :src="getIcon('chevron-right', isToday ? 'muted' : 'ink')" mode="aspectFit" />
         </view>
       </view>
 
@@ -202,7 +202,7 @@ const sleepText = computed(() => fmtDuration(sleepMs.value));
           </view>
         </scroll-view>
         <view v-else class="timeline__empty flex flex-col items-center py-8 gap-2">
-          <image class="timeline__empty-icon" :src="getIcon('clock-empty', '#D5CFC2')" mode="aspectFit" />
+          <image class="timeline__empty-icon" :src="getIcon('clock-empty', 'empty')" mode="aspectFit" />
           <text class="text-secondary">当天暂无事件记录</text>
         </view>
         <text class="timeline__foot text-muted block text-center pb-4">事件记录保留 7 天 · 更早记录见统计页</text>
@@ -377,16 +377,15 @@ page {
 
 /* ---------- 首次空态 ---------- */
 .empty {
-  padding: 80rpx 0;
+  // 空态统一自 state.scss（与历史页同形状）
+  @include empty-state;
 
   &__img {
-    width: 160rpx;
-    height: 160rpx;
+    @include empty-img;
   }
 
   &__text {
-    margin-top: 16rpx;
-    font-size: 25rpx;
+    @include empty-text;
   }
 }
 </style>
