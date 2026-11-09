@@ -74,7 +74,7 @@ button{width:100%;background:#5b9fe0;border:0;border-radius:12px;color:#fff;padd
 #msg{margin-top:12px;font-size:14px}
 </style></head><body>
 <h2>配置家庭 WiFi</h2>
-<p style="color:#8a94a8;font-size:14px">保存后开发板重启并连接该 WiFi（无信标，录音更干净）。手机切回家里 WiFi 后，访问 http://babycry.local 或串口打印的 IP。</p>
+<p style="color:#8a94a8;font-size:14px">保存后开发板重启并连接该 WiFi（无信标，录音更干净）。手机连回同一 WiFi 后，访问 http://babycry.local 或串口打印的 IP。</p>
 <input id="ssid" placeholder="WiFi 名称 (SSID)">
 <input id="pass" type="password" placeholder="WiFi 密码">
 <button onclick="save()">保存并连接</button>

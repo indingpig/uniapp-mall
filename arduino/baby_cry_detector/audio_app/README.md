@@ -17,10 +17,10 @@
 | 已保存家庭 WiFi | STA 模式，mDNS 地址 `http://babycry.local`（推荐，无信标杂音） |
 | 无保存 / 连接失败(15s) | AP 热点 `BabyMonitor-Audio`，`http://192.168.4.1` |
 
-**配网**：连热点后浏览器打开 `http://192.168.4.1/config`，输入家里 WiFi 名和密码，
-保存后开发板重启并连入家庭网络（手机切回家里 WiFi，用 `babycry.local` 或串口打印的 IP 访问）。
+**配网**：连热点后浏览器打开 `http://192.168.4.1/config`，输入 WiFi 名和密码，
+保存后开发板重启并连入该网络（手机连同一个 WiFi，用 `babycry.local` 或串口打印的 IP 访问）。
 
-> 开发板连家里 WiFi 时 IP 由路由器动态分配、会变，所以推荐用 `babycry.local`。
+> 开发板连 WiFi 时 IP 由路由器动态分配、会变，所以推荐用 `babycry.local`。
 > 部分 Android / iOS 对 mDNS 支持不一，连不上时改用串口打印的实际 IP
 > （`[STA] IP: x.x.x.x`）。
 
