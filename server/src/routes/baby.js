@@ -50,7 +50,6 @@ export function createBabyRoutes(detector, dataStore) {
       data: {
         name: 'ESP32 婴儿监护器',
         connectionText: isOnline ? '已连接 · 正常' : '未连接',
-        batteryPercent: 85,
         signalStrength: 4,
         isOnline,
       },

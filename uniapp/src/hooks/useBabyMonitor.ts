@@ -38,7 +38,6 @@ export function useBabyMonitor() {
   const device = ref<DeviceData>({
     name: '连接中...',
     connectionText: '等待连接',
-    batteryPercent: 0,
     signalStrength: 0,
     isOnline: false,
   });

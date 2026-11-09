@@ -21,7 +21,6 @@ const { capsuleTopGap } = useCapsuleGap();
 const device = ref<DeviceData>({
   name: '婴儿监护器',
   connectionText: '未连接',
-  batteryPercent: 0,
   signalStrength: 0,
   isOnline: false,
 });
@@ -213,7 +212,7 @@ onShow(() => {
             <image class="row-icon" :src="getIcon('signal-bars', 'primary')" mode="aspectFit" />
             <view class="row-body flex-1">
               <text class="row-title text-main">{{ device.name }}</text>
-              <text class="row-desc text-secondary block">电量 {{ device.batteryPercent }}% · {{ device.connectionText }}</text>
+              <text class="row-desc text-secondary block">充电宝供电 · {{ device.connectionText }}</text>
             </view>
             <view class="online-badge rounded-pill" :class="device.isOnline ? 'online-badge--on' : 'online-badge--off'">
               {{ device.isOnline ? '在线' : '离线' }}

@@ -19,7 +19,6 @@ export interface VolumeData {
 export interface DeviceData {
   name: string;
   connectionText: string;
-  batteryPercent: number;
   signalStrength: number;
   isOnline: boolean;
 }
