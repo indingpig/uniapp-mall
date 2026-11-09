@@ -16,13 +16,15 @@
 
 ```bash
 pnpm run dev          # H5 开发服务器
-pnpm run dev -- --platform mp-weixin   # 微信小程序
-pnpm run dev -- --platform app-plus    # App
+pnpm run dev mp-weixin   # 微信小程序（unh 的 platform 是位置参数）
+pnpm run dev app-plus    # App
 pnpm run build        # 生产构建
 pnpm run lint         # ESLint 检查
 pnpm run lint:fix     # ESLint 自动修复
 pnpm run type-check   # vue-tsc 类型检查
 ```
+
+- **勿用旧写法 `pnpm run dev -- --platform mp-weixin`**：pnpm v11 会把 `--` 原样透传，unh 解析不到 platform，实际跑成 H5（2026-11-09 在 WSL 机踩坑验证）
 
 #### 真机调试（HBuilderX CLI，Mac）
 
@@ -36,6 +38,14 @@ pnpm run type-check   # vue-tsc 类型检查
 - `deviceId` 用 `adb devices` 查询；HBuilderX 未启动时先执行 `cli open`
 - 自定义基座一次性构建好即可复用，只在原生插件/权限变动时重做
 - CLI 卡住不退出时：`pkill -f "cli launch app-android"` 后重跑（HBuilderX 主进程不用动）；调用时**不要接管道**（`| tail` 等会缓冲到进程结束才输出，看起来像卡死）
+
+#### 小程序调试（Windows/WSL 机专用；Mac 原生路径无需这些步骤）
+
+- 开发者工具**拒绝 UNC 路径**：把 dist 映射成本地符号链接后导入 GUI（一次即可）：
+  `mklink /D D:\bc-mp \\wsl.localhost\Ubuntu\home\sheldon\projects\babycryMonitor\uniapp\dist\dev\mp-weixin`
+- 之后全自动：改代码 → vite 重编译 → WSL dist 更新 → IDE 监听 `D:\bc-mp` 自动刷新模拟器
+- mp-weixin 的 appid 是真实小程序 ID（`manifest.config.ts`），预览/真机调试可用；开发者工具需扫码登录
+- **别依赖 `cli.bat`**：当前版本（2.02.2609250）CLI 有已知问题：服务端口开着却报「已关闭」、宣称可交互输入 y 确认但实际没有该交互、HTTP `/v2/open` 会把 IDE 搞崩；走 GUI 导入 + 文件监听最稳
 
 ### server（在 `server/` 下执行）
 
