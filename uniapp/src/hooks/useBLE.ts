@@ -351,7 +351,9 @@ export function useBLE() {
         }
         if (obj.error) {
           endWifiScan();
-          statusText.value = '设备扫描 WiFi 失败, 请手输 WiFi 名称';
+          statusText.value = obj.error === 'pairing_timeout'
+            ? '未完成配对，请重试并在系统弹窗中确认'
+            : '设备扫描 WiFi 失败, 请手输 WiFi 名称';
           return;
         }
         if (obj.ssid)
@@ -378,15 +380,15 @@ export function useBLE() {
     wifiScanning.value = true;
     statusText.value = '正在获取周边 WiFi 列表...';
 
-    // 兜底: 固件未实现/notify 丢失时 6s 收尾, 不永远转圈
+    // 兜底: 首次要等用户在系统弹窗里确认配对, 给足 25s, 不永远转圈也不误判超时
     wifiListTimer = setTimeout(() => {
       if (!wifiScanning.value)
         return;
       endWifiScan();
       statusText.value = wifiList.value.length > 0
         ? `已获取 ${wifiList.value.length} 个 WiFi`
-        : '获取 WiFi 列表超时, 请手输 WiFi 名称';
-    }, 6000);
+        : '获取 WiFi 列表超时（弹出配对框时请先确认）, 也可手输 WiFi 名称';
+    }, 25000);
 
     const listRef = characteristicOf(platformServiceUuid, platformCharUuids.wifiList);
     peripheral.observe(listRef, {

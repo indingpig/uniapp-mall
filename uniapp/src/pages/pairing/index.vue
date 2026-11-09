@@ -584,7 +584,7 @@ onBeforeUnmount(() => {
                 <image class="wifi-more__arrow" :src="getIcon('chevron-down', 'muted')" mode="aspectFit" />
               </view>
             </template>
-            <text v-else-if="!wifiScanning" class="wifi-empty text-secondary block">点「刷新列表」，设备会扫描周边网络</text>
+            <text v-else-if="!wifiScanning" class="wifi-empty text-secondary block">点「刷新列表」，首次会弹系统配对框，确认后开始扫描</text>
 
             <view class="wifi-card__divider" />
 
