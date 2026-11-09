@@ -118,18 +118,19 @@ export default defineManifestConfig({
   'quickapp': {},
   /* 小程序特有相关 */
   'mp-weixin': {
-    appid: '',
+    appid: 'wxbdd9c39c1e2d69fa',
     setting: {
       urlCheck: false,
     },
     usingComponents: true,
     darkmode: true,
     themeLocation: 'theme.json',
+    /* 微信小程序蓝牙授权说明；插件类型未收录 scope.bluetooth，故断言为宽 Record */
     permission: {
       'scope.bluetooth': {
         desc: '用于扫描并连接宝宝监护器设备',
       },
-    },
+    } as Record<string, { desc: string }>,
   },
   'mp-alipay': {
     usingComponents: true,
