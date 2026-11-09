@@ -39,8 +39,11 @@ const currentStep = ref<'scan' | 'wifi' | 'pairing' | 'done'>('scan');
 const wifiSSID = ref('');
 const wifiPass = ref('');
 const showPassword = ref(false);
-// 优先用上次配对成功的地址（规范 5.4：换网络忘改会把设备指到不可达地址）
-const serverUrl = ref(uni.getStorageSync(CACHE_KEY.PAIRED_SERVER_URL) || 'ws://192.168.21.92:3001/ws');
+// 服务器地址优先级：上次配对成功写入的值 > 构建期环境变量 > 空（手填）
+// 规范 5.4：换网络忘改会把设备指到不可达地址；不在代码里写死 IP，改 .env.* 即可
+const serverUrl = ref(
+  uni.getStorageSync(CACHE_KEY.PAIRED_SERVER_URL) || import.meta.env.VITE_WS_URL || '',
+);
 const scanAttempted = ref(false);
 
 /* ---------- 规范 5.4：WiFi 配网页状态 ---------- */
@@ -278,6 +281,12 @@ async function onSelectDevice(device: BLEDevice) {
 }
 
 async function onStartPair() {
+  // 环境变量缺失时 serverUrl 可能是空串，别让固件收到空地址后静默失败
+  if (!serverUrl.value) {
+    showAdvanced.value = true;
+    showToast('请填写服务器地址');
+    return;
+  }
   if (!wifiSSID.value) {
     showToast('请输入 WiFi 名称');
     return;
