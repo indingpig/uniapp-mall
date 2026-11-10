@@ -3,8 +3,8 @@ import { onBeforeUnmount, onMounted, readonly, ref, watch } from 'vue';
 import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
 import { STATUS_META, toCardState } from '@/constants/babyStatus';
 import { maybeNotifyCry } from '@/utils/notify';
+import { resolveServerUrl } from '@/utils/server';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001/ws';
 const POLL_INTERVAL = 5000;
 const RECONNECT_DELAY = 3000;
 
@@ -88,9 +88,16 @@ export function useBabyMonitor() {
   /* -------------------- WebSocket -------------------- */
 
   function connectWs() {
+    // 每次连接现读地址：家人加入/重新配对后无需重启 App 即生效
+    const wsUrl = resolveServerUrl();
+    if (!wsUrl) {
+      console.warn('[WS] 未配置服务器地址（配对或加入家庭监护后可用）');
+      return;
+    }
+    console.warn('[WS] connect', wsUrl);
     // 必须传 complete 回调才返回 SocketTask（不传回调时返回 Promise，
     // success 回调里的 res 不是 SocketTask）
-    socket = uni.connectSocket({ url: WS_URL, complete: () => {} });
+    socket = uni.connectSocket({ url: wsUrl, complete: () => {} });
 
     socket.onOpen(() => {
       console.warn('[WS] Connected');
@@ -162,6 +169,13 @@ export function useBabyMonitor() {
       socket = null;
     }
     wsActive = false;
+  }
+
+  /** 立即按最新 server 地址重连（加入/换绑后调用，不等 3s 自动重连） */
+  function reconnect() {
+    closeWs();
+    stopPolling();
+    connectWs();
   }
 
   /* -------------------- 指令下发（App → server 中继 → 设备） -------------------- */
@@ -259,5 +273,6 @@ export function useBabyMonitor() {
     listening: readonly(listening),
     sendCmd,
     refresh,
+    reconnect,
   };
 }

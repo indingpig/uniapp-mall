@@ -12,12 +12,14 @@ import { CACHE_KEY } from '@/constants/cache';
 import { useBabyMonitor } from '@/hooks/useBabyMonitor';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
+import { isValidServerUrl } from '@/utils/server';
+import { hasLocalPairing, storage } from '@/utils/storage';
 
 /* ------------------------------------------------------------------ */
 /*  服务端数据                                                          */
 /* ------------------------------------------------------------------ */
 
-const { status, volume, device, durationSec, listening, sendCmd, refresh } = useBabyMonitor();
+const { status, volume, device, durationSec, listening, sendCmd, refresh, reconnect } = useBabyMonitor();
 
 /* ------------------------------------------------------------------ */
 /*  本地数据                                                            */
@@ -234,6 +236,54 @@ function goPairing() {
   uni.navigateTo({ url: '/pages/pairing/index' });
 }
 
+/* ------------------------------------------------------------------ */
+/*  家庭共享：家人手机加入为观众（2026-11-10 决策，方案一）              */
+/*  不碰设备、不走配网：拿到 server 地址即可观看，所有权由配网窗口兜底  */
+/* ------------------------------------------------------------------ */
+
+function onJoinTap() {
+  // #ifdef APP-PLUS
+  uni.scanCode({
+    onlyFromCamera: false,
+    success: ({ result }) => confirmJoin(result),
+  });
+  // #endif
+  // #ifndef APP-PLUS
+  uni.showModal({
+    title: '加入家庭监护',
+    editable: true,
+    placeholderText: '粘贴服务器地址，如 ws://192.168.1.100:3001/ws',
+    success: ({ confirm, content }) => {
+      if (confirm && content)
+        confirmJoin(content);
+    },
+  });
+  // #endif
+}
+
+function confirmJoin(raw: string) {
+  const url = raw.trim();
+  if (!isValidServerUrl(url)) {
+    uni.showToast({ title: '地址应以 ws:// 或 wss:// 开头', icon: 'none' });
+    return;
+  }
+  uni.showModal({
+    title: '加入家庭监护',
+    content: `将连接 ${url}，与家人共同查看宝宝状态`,
+    success: ({ confirm }) => {
+      if (!confirm)
+        return;
+      storage.set(CACHE_KEY.PAIRED_SERVER_URL, url);
+      // 设备真名待 server 注册表（v1.2）落地后由 /api/device 回填
+      storage.set(CACHE_KEY.PAIRED_DEVICE, { name: '宝宝监护器' });
+      hasPairedDevice.value = true;
+      greeting.value = buildGreeting();
+      reconnect();
+      uni.showToast({ title: '已加入家庭监护', icon: 'success' });
+    },
+  });
+}
+
 function onHelpTap() {
   uni.showToast({ title: '帮助中心开发中', icon: 'none' });
 }
@@ -258,8 +308,7 @@ onMounted(() => {
 // 空态判定放 onShow：从配对页 navigateBack 返回时页面不会重新 mounted，
 // 每次可见时重读配对标记，才能从空态切回正常态
 onShow(() => {
-  const paired = uni.getStorageSync(CACHE_KEY.PAIRED_DEVICE);
-  hasPairedDevice.value = !!(paired && typeof paired === 'object' && paired.name);
+  hasPairedDevice.value = hasLocalPairing();
   greeting.value = hasPairedDevice.value ? buildGreeting() : '你好'; // 空态无设备语境（规范 12.2）
 });
 
@@ -301,6 +350,10 @@ onBeforeUnmount(() => {
         <AppButton size="cta" @tap="goPairing">
           <image class="btn-cta__icon" :src="getIcon('bluetooth', 'white')" mode="aspectFit" />
           去配对设备
+        </AppButton>
+        <AppButton size="cta" variant="secondary" @tap="onJoinTap">
+          <image class="btn-cta__icon" :src="getIcon('scan', 'ink')" mode="aspectFit" />
+          加入家庭监护
         </AppButton>
         <text class="help-link text-secondary block text-center" @tap="onHelpTap">如何配对？查看教程</text>
 
