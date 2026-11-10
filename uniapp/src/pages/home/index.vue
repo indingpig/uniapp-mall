@@ -9,6 +9,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fetchBabyHistory } from '@/api/baby';
 import { EVENT_META, QUIET_HINT, STATUS_META, toCardState, VOLUME_MAX_DB, VOLUME_MIN_DB, VOLUME_ZONES } from '@/constants/babyStatus';
 import { CACHE_KEY } from '@/constants/cache';
+import { colors } from '@/constants/colors';
 import { useBabyMonitor } from '@/hooks/useBabyMonitor';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
@@ -116,7 +117,7 @@ const volumeDisplay = computed<string>(() =>
 );
 
 const volumeValueColor = computed<string>(() =>
-  volumeOffline.value ? '#B3AB9D' : zone.value.color,
+  volumeOffline.value ? colors.muted : zone.value.color,
 );
 
 const volumeHint = computed<string>(() => {
@@ -396,7 +397,7 @@ onBeforeUnmount(() => {
             :src="isDeviceOffline ? '/static/icons/face-sleep-offline.svg' : meta.face"
             mode="aspectFit"
           />
-          <text class="status-text font-bold" :style="{ color: isDeviceOffline ? '#8C8578' : meta.color }">
+          <text class="status-text font-bold" :style="{ color: isDeviceOffline ? colors.warmGray : meta.color }">
             {{ isDeviceOffline ? '设备离线' : meta.text }}
           </text>
           <text class="status-duration" :class="isDeviceOffline ? 'text-muted' : 'text-secondary'">
@@ -573,11 +574,11 @@ page {
   }
 }
 
-/* 离线提示条（规范 12.1）：琥珀底 #F7EBD4 r12 */
+/* 离线提示条（规范 12.1）：琥珀底 r12 */
 .offline-banner {
   gap: 12rpx;
   padding: 20rpx 24rpx;
-  background-color: #F7EBD4;
+  background-color: $color-amber-soft;
 
   &__icon {
     width: 32rpx; // 16px
@@ -587,7 +588,7 @@ page {
   &__text {
     font-size: 24rpx; // 12px
     font-weight: 500;
-    color: #B07A28;
+    color: $color-amber-ink;
   }
 
   &__spinner {
@@ -646,19 +647,19 @@ page {
   gap: 8rpx;
   width: 128rpx;
   height: 40rpx;
-  background-color: #E9F0E1;
+  background-color: $color-primary-soft;
 
   &__dot {
     width: 12rpx;
     height: 12rpx;
-    background-color: #55823F;
+    background-color: $color-primary-deep;
     animation: live-blink 1s ease infinite;
   }
 
   &__text {
     font-size: 20rpx;
     font-weight: 600;
-    color: #55823F;
+    color: $color-primary-deep;
     line-height: 1;
   }
 }
@@ -721,13 +722,13 @@ page {
   width: 176rpx;
   height: 64rpx;
   border-radius: 32rpx;
-  background-color: #F7EBD4;
+  background-color: $color-amber-soft;
   flex-shrink: 0;
 
   &__text {
     font-size: 24rpx;
     font-weight: 500;
-    color: #B07A28;
+    color: $color-amber-ink;
   }
 }
 
@@ -758,7 +759,7 @@ page {
 }
 
 .vol-track--offline {
-  background-color: #EDE6D8; // 离线禁用变体：整条灰轨（规范 12.1）
+  background-color: $color-card-soft; // 离线禁用变体：整条灰轨（规范 12.1）
 }
 
 .vol-hint {
@@ -769,7 +770,7 @@ page {
 .vol-live-hint {
   margin-top: 8rpx;
   font-size: 22rpx; // 11px
-  color: #B3AB9D;
+  color: $color-text-muted;
 }
 
 /* ------------------------------------------------------------------ */
@@ -849,11 +850,11 @@ page {
   }
 
   &--disabled {
-    // 离线禁用变体（规范 12.1）：#EDE6D8 底 + #A39B8C 图标文字，不可点
-    background-color: #EDE6D8;
+    // 离线禁用变体（规范 12.1）：中性底 + 禁用色图标文字，不可点
+    background-color: $color-card-soft;
 
     .action-btn__text {
-      color: #A39B8C;
+      color: $color-disabled;
     }
   }
 
@@ -865,7 +866,7 @@ page {
   &__stop {
     width: 24rpx; // 12×12 白色方形停止符（规范 12.3）
     height: 24rpx;
-    background-color: #FFFFFF;
+    background-color: $color-white;
     border-radius: 4rpx;
   }
 

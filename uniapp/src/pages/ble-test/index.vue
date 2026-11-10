@@ -300,7 +300,7 @@ onBeforeUnmount(doDisconnect);
   border-radius: 36rpx;
   font-size: 26rpx;
 
-  &--primary { background-color: $color-primary; color: #fff; }
+  &--primary { background-color: $color-primary; color: $color-white; }
   &--secondary { background-color: $color-bg; color: $color-text-primary; }
   &--sm { height: 60rpx; padding: 0 24rpx; font-size: 24rpx; }
 }
@@ -312,14 +312,14 @@ onBeforeUnmount(doDisconnect);
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  background-color: #1e1e1e;
+  background-color: $color-dev-terminal-bg;
   padding: 20rpx;
   font-family: 'Courier New', monospace;
 }
 
 .log-line {
   font-size: 22rpx;
-  color: #7ec87e;
+  color: $color-dev-terminal-ink;
   line-height: 1.8;
   white-space: pre-wrap; // 长十六进制串换行,不横向撑破日志框
   word-break: break-all;

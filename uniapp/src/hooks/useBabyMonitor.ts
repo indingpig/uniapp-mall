@@ -2,6 +2,7 @@ import type { BabyStatusData, DeviceData, VolumeData } from '@/api/baby';
 import { onBeforeUnmount, onMounted, readonly, ref, watch } from 'vue';
 import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
 import { STATUS_META, toCardState } from '@/constants/babyStatus';
+import { colors } from '@/constants/colors';
 import { maybeNotifyCry } from '@/utils/notify';
 import { resolveServerUrl } from '@/utils/server';
 
@@ -29,7 +30,7 @@ export function useBabyMonitor() {
     status: 'offline',
     statusText: '连接中...',
     iconKey: 'face-cry',
-    iconColor: '#b3b3b3',
+    iconColor: colors.muted,
     durationSec: 0,
     isOnline: false,
   });

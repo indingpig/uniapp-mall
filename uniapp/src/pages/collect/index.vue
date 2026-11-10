@@ -543,11 +543,11 @@ onBeforeUnmount(() => {
   border-radius: 36rpx;
   font-size: 26rpx;
 
-  &--primary { background-color: $color-primary; color: #fff; }
+  &--primary { background-color: $color-primary; color: $color-white; }
   &--secondary { background-color: $color-bg; color: $color-text-primary; }
   &--sm { height: 60rpx; padding: 0 24rpx; font-size: 24rpx; }
-  &--rec-start { background-color: $color-coral; color: #fff; }
-  &--rec-stop { background-color: $color-primary; color: #fff; }
+  &--rec-start { background-color: $color-coral; color: $color-white; }
+  &--rec-stop { background-color: $color-primary; color: $color-white; }
   &[disabled] { opacity: 0.4; }
 }
 
@@ -559,7 +559,7 @@ onBeforeUnmount(() => {
 .bar-fill {
   height: 100%;
   width: 0;
-  background: linear-gradient(90deg, #7ba05b, #e0a35b, #d96a5b);
+  background: linear-gradient(90deg, $color-primary, $color-amber, $color-danger);
 }
 
 .rms-text {
@@ -583,7 +583,7 @@ onBeforeUnmount(() => {
     background-color: $color-primary;
 
     .cat__text {
-      color: #fff;
+      color: $color-white;
       font-weight: 600;
     }
   }
@@ -614,14 +614,14 @@ onBeforeUnmount(() => {
   max-width: 100%;
   box-sizing: border-box;
   overflow: hidden;
-  background-color: #1e1e1e;
+  background-color: $color-dev-terminal-bg;
   padding: 20rpx;
   font-family: 'Courier New', monospace;
 }
 
 .log-line {
   font-size: 22rpx;
-  color: #7ec87e;
+  color: $color-dev-terminal-ink;
   line-height: 1.8;
   white-space: pre-wrap;
   word-break: break-all;

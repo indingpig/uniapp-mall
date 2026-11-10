@@ -11,7 +11,7 @@
  * 按压反馈 opacity 0.8 / 80ms（规范 13.1 P2）。
  *
  * @example
- *   <AppButton size="cta"><BaseIcon name="bluetooth" :size="18" color="#FFFFFF" />去配对设备</AppButton>
+ *   <AppButton size="cta"><image class="btn-cta__icon" :src="getIcon('bluetooth', 'white')" mode="aspectFit" />去配对设备</AppButton>
  *   <AppButton size="quick" variant="secondary" :disabled="offline">静音提醒</AppButton>
  *   <AppButton variant="danger">退出登录</AppButton>
  */
@@ -87,7 +87,7 @@ const hoverClass = computed(() => (props.disabled ? 'none' : 'app-btn--hover'));
 /* 形态 */
 .app-btn--primary {
   background-color: $color-primary;
-  color: #FFFFFF;
+  color: $color-white;
 }
 
 .app-btn--secondary {
@@ -108,7 +108,7 @@ const hoverClass = computed(() => (props.disabled ? 'none' : 'app-btn--hover'));
 .app-btn--disabled {
   background-color: $color-card-soft;
   border: none;
-  color: #A39B8C;
+  color: $color-disabled;
 }
 
 .app-btn--hover {

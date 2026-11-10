@@ -555,7 +555,7 @@ const neutralRatio = computed(() =>
           <view
             v-for="(d, i) in distribution"
             :key="d.status"
-            :style="{ flexGrow: d.ratio, backgroundColor: DIST_META[d.status]?.color ?? '#EDE6D8' }"
+            :style="{ flexGrow: d.ratio, backgroundColor: DIST_META[d.status]?.color ?? colors.cardSoft }"
             class="dist-bar__seg"
             :class="{ 'dist-bar__seg--first': i === 0, 'dist-bar__seg--last': i === distribution.length - 1 && neutralRatio <= 0 }"
             :aria-label="`${DIST_META[d.status]?.label ?? d.status}，${fmtDuration(d.ms)}，占比 ${Math.round(d.ratio * 100)}%`"
@@ -565,7 +565,7 @@ const neutralRatio = computed(() =>
           <view
             v-if="neutralRatio > 0"
             class="dist-bar__seg"
-            :style="{ flexGrow: neutralRatio, backgroundColor: '#EDE6D8' }"
+            :style="{ flexGrow: neutralRatio, backgroundColor: colors.cardSoft }"
             :aria-label="`其他时段，占比 ${Math.round(neutralRatio * 100)}%`"
           />
         </view>

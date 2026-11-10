@@ -15,9 +15,10 @@ onHide(() => setAppForeground(false));
 @use '@/styles/utilities.scss';
 
 page {
-  background-color: #f4ede0;
+  /* 页面底色与正文色走 styles/uni.scss token（此前写死 #f4ede0/#1f1f1f，与 $color-bg / $color-text-primary 不一致） */
+  background-color: $color-bg;
   font-family: $font-family-base;
-  color: #1f1f1f;
+  color: $color-text-primary;
   font-size: 30rpx;
   line-height: 1.4;
 }

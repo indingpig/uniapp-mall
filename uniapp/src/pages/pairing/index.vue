@@ -3,6 +3,7 @@ import type { BLEDevice, WifiAp } from '@/hooks/useBLE';
 import { onShow } from '@dcloudio/uni-app';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { CACHE_KEY } from '@/constants/cache';
+import { colors } from '@/constants/colors';
 import { useBLE } from '@/hooks/useBLE';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
@@ -421,7 +422,7 @@ onBeforeUnmount(() => {
         </view>
 
         <view class="qr-placeholder rounded-md flex items-center justify-center mt-6">
-          <text class="text-tertiary">小程序码</text>
+          <text class="qr-placeholder__text">小程序码</text>
         </view>
         <text class="qr-hint text-secondary block text-center">微信扫码打开小程序</text>
 
@@ -522,7 +523,7 @@ onBeforeUnmount(() => {
               <uni-load-more
                 status="loading"
                 :icon-size="18"
-                color="#8C8578"
+                :color="colors.secondary"
                 :content-text="{ contentdown: '', contentrefresh: '正在搜索更多设备…', contentnomore: '' }"
               />
             </view>
@@ -785,7 +786,7 @@ page {
 .steps__num {
   font-size: 21rpx; // micro 11px
   font-weight: 600;
-  color: #ffffff;
+  color: $color-white;
 }
 
 .steps__dot--pending .steps__num {
@@ -1108,7 +1109,7 @@ page {
   padding: 24rpx;
 
   &--error {
-    background-color: #fdf3f1; // 规范: 错误行浅红底
+    background-color: $color-danger-soft; // 规范: 错误行浅红底
   }
 
   &__label {
@@ -1201,11 +1202,11 @@ page {
   transform: translateX(-50%);
   z-index: 30;
   padding: 16rpx 36rpx;
-  background-color: rgba(59, 54, 46, 0.92); // #3B362E 92%
+  background-color: rgba(59, 54, 46, 0.92); // 暖墨 #3B362E 92%（半透明，无对应不透明 token）
 
   &__text {
     font-size: 25rpx;
-    color: #ffffff;
+    color: $color-white;
   }
 }
 
@@ -1295,7 +1296,12 @@ page {
   width: 212rpx; // 110px
   height: 212rpx;
   margin: 0 auto;
-  background-color: #e3e7ee;
+  background-color: $color-scan-placeholder;
+
+  &__text {
+    font-size: 24rpx;
+    color: $color-scan-placeholder-ink;
+  }
 }
 
 .qr-hint {
@@ -1352,7 +1358,7 @@ page {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(0, 0, 0, 0.35); // #00000059
+  background-color: $color-mask;
 }
 
 .success-modal {
@@ -1441,7 +1447,7 @@ page {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(0, 0, 0, 0.35); // #00000059
+  background-color: $color-mask;
 }
 
 .net-modal {

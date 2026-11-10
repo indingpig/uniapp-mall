@@ -62,7 +62,7 @@ function toggle() {
   width: rpx(22);
   height: rpx(22);
   border-radius: 50%;
-  background-color: #FFFFFF;
+  background-color: $color-white;
   box-shadow: 0 rpx(1) rpx(3) rgba(0, 0, 0, 0.15);
   transition: transform 150ms ease;
 }

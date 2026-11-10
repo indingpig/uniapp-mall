@@ -19,12 +19,14 @@ export const colors = {
   amberSoft: '#F7EBD4',
   amberInk: '#B07A28',
   danger: '#D96A5B',
+  dangerSoft: '#F8E3DE', // 浅红底（哭声提醒图标底/错误行/危险提示）
   dangerInk: '#B84A3C', // 规范未收录：统计哭闹柱选中态深红
   coral: '#D96A5B',
   warmGray: '#8C8578',
 
   /* 品牌表情色 */
   orange: '#E8825A',
+  orangeSoft: '#FBE7DE', // 清醒活跃事件图标底（规范画布 .lgc）
   gold: '#F2C14E',
   teal: '#8FB8D8',
 

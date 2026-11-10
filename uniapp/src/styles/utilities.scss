@@ -177,7 +177,7 @@ $space-scale: (
 .text-main { color: $color-text-primary; }
 .text-secondary { color: $color-text-secondary; }
 .text-muted { color: $color-text-muted; }
-.text-white { color: #ffffff; }
+.text-white { color: $color-white; }
 
 .bg-primary { background-color: $color-primary; }
 .bg-primary-soft { background-color: $color-primary-soft; }
@@ -190,7 +190,7 @@ $space-scale: (
 .bg-page { background-color: $color-bg; }
 .bg-card { background-color: $color-card; }
 .bg-card-soft { background-color: $color-card-soft; }
-.bg-white { background-color: #ffffff; }
+.bg-white { background-color: $color-white; }
 
 /* ========== 边框与圆角 ========== */
 .border { border: 1px solid $color-border; }

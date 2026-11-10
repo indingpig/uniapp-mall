@@ -8,7 +8,7 @@ export default defineUniPages({
     backgroundColorBottom: '@bgColorBottom',
     backgroundColorTop: '@bgColorTop',
     backgroundTextStyle: '@bgTxtStyle',
-    navigationBarBackgroundColor: '#000000',
+    navigationBarBackgroundColor: '#F4EDE1', // 与 theme.json light.bgColor 一致（navigationStyle 为 custom，实际不渲染）
     navigationBarTextStyle: '@navTxtStyle',
     navigationBarTitleText: '婴儿监护器',
     navigationStyle: NAVIGATION_STYLE,
@@ -16,8 +16,8 @@ export default defineUniPages({
   tabBar: {
     custom: true,
     color: '#8C8578',
-    selectedColor: '#7ea279',
-    backgroundColor: '#ffffff',
+    selectedColor: '#7BA05B', // 主绿，原值为设计稿外的 #7ea279
+    backgroundColor: '#FFFFFF', // 与 $color-card 一致
     list: [
       {
         pagePath: 'pages/home/index',

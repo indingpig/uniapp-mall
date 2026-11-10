@@ -150,7 +150,7 @@ function onTap(key: string) {
     >
       <image
         class="tab__icon"
-        :src="getIcon(tab.icon, current === tab.key ? '#ffffff' : '#A39B8C')"
+        :src="getIcon(tab.icon, current === tab.key ? 'white' : 'disabled')"
         mode="aspectFit"
       />
       <text
@@ -171,7 +171,7 @@ function onTap(key: string) {
   height: 112rpx;
   border-radius: 56rpx;
   padding: 0 12rpx;
-  box-shadow: 0 12rpx 32rpx rgba(60, 50, 30, 0.08);
+  box-shadow: $shadow-tabbar;
 }
 
 .tab-bar__thumb {
@@ -198,10 +198,10 @@ function onTap(key: string) {
   }
 
   &__label {
-    color: #A39B8C; // 规范：未激活 Tab
+    color: $color-disabled; // 规范：未激活 Tab
 
     &--active {
-      color: #ffffff;
+      color: $color-white;
       font-weight: 500;
     }
   }

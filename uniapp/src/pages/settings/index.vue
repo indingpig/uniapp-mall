@@ -9,6 +9,7 @@ import UQRCode from 'uqrcodejs';
 import { computed, getCurrentInstance, nextTick, onMounted, ref } from 'vue';
 import { fetchDevice } from '@/api/baby';
 import { CACHE_KEY } from '@/constants/cache';
+import { colors } from '@/constants/colors';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
 import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAuthorized } from '@/utils/notify';
@@ -231,7 +232,7 @@ function onLogout() {
   uni.showModal({
     title: '退出登录',
     content: '确定要退出当前账号吗？',
-    confirmColor: '#D96A5B',
+    confirmColor: colors.danger,
     success: ({ confirm }) => {
       if (confirm)
         uni.showToast({ title: '已退出登录（演示）', icon: 'none' });
@@ -441,7 +442,7 @@ page {
 /*  卡片分组与行                                                        */
 /* ------------------------------------------------------------------ */
 .group {
-  box-shadow: 0 4rpx 24rpx rgba(60, 50, 30, 0.04);
+  box-shadow: $shadow-card;
 }
 
 .row {
@@ -499,14 +500,14 @@ page {
 
   &--off {
     color: $color-warm-gray;
-    background-color: #f0ebdf;
+    background-color: $color-card-soft;
   }
 }
 
 .plus-chip {
   width: 64rpx;
   height: 64rpx;
-  background-color: #f2ebdc;
+  background-color: $color-card-soft;
 
   &__icon {
     width: 28rpx;
@@ -535,7 +536,7 @@ page {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: rgba(0, 0, 0, 0.35); // #00000059
+  background-color: $color-mask;
 }
 
 .share-modal {
@@ -563,7 +564,7 @@ page {
   &__qr {
     margin-top: 32rpx;
     padding: 24rpx;
-    background-color: #fff; // 二维码底必须纯白，深色主题下也不可透出卡片色
+    background-color: $color-white; // 二维码底必须纯白，深色主题下也不可透出卡片色
   }
 
   &__canvas {

@@ -45,6 +45,7 @@ $color-tear: #8FB8D8;               // 哭闹泪滴
 $color-bg: #F4EDE1;                 // 页面暖奶油底
 $color-card: #FFFFFF;               // 卡片 / 输入框
 $color-card-soft: #EDE6D8;          // 中性图标底（neutral-bg：有动静/添加设备/未激活步骤圆）
+$color-white: #FFFFFF;              // 纯白（主按钮/激活 Tab 的前景文字与图标，不随卡片语义变化）
 
 /* 文字（暖墨色系） */
 $color-text-primary: #3B362E;       // 主文字（ink）
@@ -57,6 +58,20 @@ $color-divider: #F2EDE2;            // 卡内分割线
 $color-border: #EBE3D4;             // 卡片描边
 $color-border-tab: #E8E1D3;         // TabBar 描边
 $color-border-btn: #E5DECF;         // 次按钮（白底描边）描边
+
+/* 中性/禁用补充（规范 12.1 禁用变体 + TabBar 未激活态 + 小程序码占位） */
+$color-disabled: #A39B8C;           // 禁用变体的图标与文字、TabBar 未激活项
+$color-scan-placeholder: #E4E8EF;   // 小程序码占位块底（规范画布 .qr）
+$color-scan-placeholder-ink: #8C93A3; // 小程序码占位块文字（规范画布 .qr）
+
+/* 开发者工具终端配色（采集页/蓝牙调试页日志窗：刻意脱离奶油主题，保证等宽日志可读） */
+$color-dev-terminal-bg: #1E1E1E;
+$color-dev-terminal-ink: #7EC87E;
+
+/* 遮罩与阴影（弹框统一口径：遮罩压暗吸顶顶栏，卡片投影极轻） */
+$color-mask: rgba(0, 0, 0, 0.35);
+$shadow-card: 0 4rpx 24rpx rgba(60, 50, 30, 0.04);
+$shadow-tabbar: 0 12rpx 32rpx rgba(60, 50, 30, 0.08);
 
 /* 音量条三分区（正常 0-60% / 偏高 60-80% / 哭声区 80-100%），与 babyStatus.ts VOLUME_ZONES 同步 */
 $volume-zone-1: #DDE9D3;
