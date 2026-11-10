@@ -18,7 +18,7 @@ babycryMonitor/
 │   │   │   ├── pairing/             # 设备配对（BLE 扫描 + WiFi 配网 + 失败分级）
 │   │   │   ├── collect/             # 哭声数据采集页（开发者工具：录音→WAV）
 │   │   │   └── ble-test/            # BLE 串口调试工具
-│   │   ├── components/              # AppButton / AppSwitch / BabyStatusCard / CustomTabBar 等
+│   │   ├── components/              # AppButton / AppSwitch / CustomTabBar（页面均自绘布局）
 │   │   ├── hooks/                   # useBabyMonitor / useBLE / useCapsuleGap
 │   │   ├── constants/               # babyStatus（状态语义/音量分区）/ ble / cache / colors（TS 色源）
 │   │   ├── utils/                   # icons（getIcon）、request 封装、storage 封装
@@ -159,7 +159,7 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 - 📶 **配对** — BLE 扫描（RSSI 四档信号条）+ WiFi 配网（扫码填入、失败分级提示、成功弹窗）
 - 🔋 **设备信息** — 连接状态、供电方式（充电宝供电）、信号
 - 🛡️ **自定义胶囊 TabBar** — `CustomTabBar` 组件 + `pages.config.ts` tabBar `custom: true`（小程序端如遇异常需迁移至微信 `custom-tab-bar/` 官方机制）
-- 🌓 **深色模式** — 支持浅色/深色主题切换
+- 🌓 **深色模式** — `theme.json` 已按宝宝监护器色板配置 light/dark 两套原生底色（页面内主题切换尚未实现，见 todolist）
 
 ---
 

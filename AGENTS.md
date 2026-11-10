@@ -6,7 +6,7 @@
 
 | 目录 | 说明 |
 |------|------|
-| `uniapp/` | 移动端 App（uni-app 3 + Vue 3 + TS + Pinia，@uni-helper/unh 工具链） |
+| `uniapp/` | 移动端 App（uni-app 3 + Vue 3 + TS，@uni-helper/unh 工具链） |
 | `server/` | Node.js 后端（Express + ws，内置状态模拟器，ESM） |
 | `arduino/baby_cry_detector/` | ESP32 固件（PlatformIO，主工程 + 多个独立子工程） |
 

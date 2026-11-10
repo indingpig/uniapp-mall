@@ -17,13 +17,29 @@
 
 - [ ] **WiFi 弧线分档** — 与信号条不同,需三端:固件加 WiFi RSSI 上报字段 → server 透传 → App 分档渲染(现为写死满格绿)
 
+## 服务端数据层(2026-11-10 全量代码复核新增,待排期)
+
+> 本轮复核「关注的问题」1 / 2 / 5,均属服务端或固件数据链路,改动面较大或需先定口径,按用户要求记录、以后解决。
+
+- [ ] **复核问题 1:历史缓冲区上限让周/月统计与今日事件几乎恒空** — `dataStore.js` `MAX_HISTORY=500`,设备 500ms 一条 ≈ 只留最近 4 分钟;但统计页按 7 天/自然月请求、首页「今日事件」也走 `/api/history`。先定口径:按天分桶落盘(重启不再丢)或把 UI 收窄成「最近 N 分钟」,再动存储
+- [ ] **复核问题 2:`/api/history` 分页失效** — `routes/history.js` 先 `getRecent(pageSize)` 再对结果切片,`total` 恒 ≤ `pageSize`、`page=2` 恒返回空数组;应先取全量再切片(或 `getRecent` 加 offset)。改动小,可与问题 1 一起做
+- [ ] **复核附带发现:`/api/stats/hourly` 跨天累加** — `hourlyStats` 只按小时为键,进程常开跨天后不同日期的同一小时混算
+
 ## 低优先级:工程卫生(碎片时间)
 
 - [x] 推送远端 — 全部本地提交已同步(2026-11-10 拉取确认,origin/master 已含)
 - [ ] **配对页五项修复真机回归**(`fef3453` 已推手机,未验证) — ①点设备「连接中…」反馈 ②步骤条横杠独立点亮(3 步中性) ③WiFi 其他网络弹框 ④弹框遮罩压暗顶栏(z-200) ⑤配网超时分层提示(server 没起时文案);验证需板子配网模式+串口日志配合
 - [ ] `<route>` 块废弃警告 → 迁移到 `definePage()`(uni-pages 下个版本移除,不急)
 - [ ] 首页快捷操作按钮(监听/静音提醒)收编 `AppButton` — 含 muted/禁用变体逐态迁移,2026-11-09 样式收编时刻意跳过(状态多,风险大)
-- [ ] `colors.ts` 的 `zone1-3` 与 `babyStatus.ts` `VOLUME_ZONES` 双源合一 — 现两处注释互指,改动需两边同步
+- [ ] `colors.ts` 的 `zone1-3` 与 `babyStatus.ts` `VOLUME_ZONES` 双源合一 — 现两处注释互指,改动需两边同步。**2026-11-10 部分推进**:`VOLUME_ZONES` 已改为引用 `colors.primary/amber/danger/zone1-3`,不再自带 hex;剩余重复仅为 `colors.ts` 与 `uni.scss` 的 `$volume-zone-*` 两份值(SCSS 与 TS 天然无法互引,只能靠注释互指)
+- [ ] **`pinia` 依赖未移除** — 2026-11-10 清空死 store 后 `main.ts` 已不再创建 Pinia 实例,业务代码零引用;`package.json` 的 `pinia` / `vue-demi` 依赖与 `pnpm-workspace.yaml` 的 allowBuilds 条目仍留着,删除需改锁文件,下次装依赖时一并处理
+- [ ] **小程序端 darkmode 未落地** — `manifest.config.ts` 的 `mp-weixin.darkmode` / `h5.darkmode` 为 true 且 `theme.json` 已配深色值,但页面内无 `prefers-color-scheme` 适配,深色下仅原生底变而内容仍是浅色奶油卡(README 已按实况改写)
+
+### 2026-11-10 清理留档
+
+- [x] 死组件清理 — 删除 7 个零引用组件(`BabyStatusCard` / `EventItem` / `GroupCard` / `Pill` / `VolumeBar` / `BaseIcon` / `Cell` / `IconCircle` / `SwitchRow` 及其相互依赖闭包),`components.d.ts` 由构建重生成
+- [x] 死 store 与死跳转 — 删 `src/stores/`(counter/user + Pinia 接线);`interceptor.ts` 去掉指向已不存在 `pages/login/index` 的 401 分支与 token 注入;`cache.ts` 删 `TOKEN`/`USER_INFO`
+- [x] 色源统一(问题 7) — `App.vue` 页面底色 `#f4ede0`→`$color-bg`(`#F4EDE1`,原值差 1 通道)、正文色→`$color-text-primary`;`theme.json` 从商城橙 `#ff6b00` 换成监护器色板;`pages.config.ts` tabBar 选中色 `#7ea279`→`#7BA05B`;首页/设置/配对/统计/采集/5 个组件里约 40 处 hex 全部收进 token;`babyStatus.ts` 15 处 hex 改走 `colors.ts`;新增 `$color-white`/`$color-disabled`/`$color-mask`/`$shadow-card`/`$shadow-tabbar`/`$color-dev-terminal-*` 等 token 并确认各有使用者(无死抽象);SCSS 与 TS 双份值已逐条比对一致
 
 ## 配网与设备管理(自 `配网与设备管理改进方案.md` 迁入,2026-11-10 删档)
 
@@ -31,7 +47,7 @@
 > 已完成项不列:4.2 恢复出厂(BOOT 长按 10s,实测通过)、2 的轻量部分(配对窗口 + Just Works 加密)。
 > 阶段策略:先做设备/App 单侧能力(阶段一) → 测试服 ~100 行参照实现(阶段二) → 真服务端按契约重写(阶段三)。
 
-- [ ] **改进点 5:WiFi 掉线自动重连**(实施顺序第 1,高频缺口) — 路由器半夜重启即永久失联,只能拔电
+- [ ] **改进点 5:WiFi 掉线自动重连**(实施顺序第 1,高频缺口;2026-11-10 复核确认属实,按用户要求记录待以后解决) — 路由器半夜重启即永久失联,只能拔电
   - `wifiLoop()` 现首行 `if (!s_attempting) return;`,连接成功后掉线不再重试
   - 加「曾连接但掉线」检测(`WiFi.status()!=WL_CONNECTED` → 用 NVS 凭据重连);失败指数退避 3s→30s→60s 封顶,成功清零;LED 慢闪区分配网快闪
   - 纯固件单侧几十行;掉线计数顺带成为 App 离线横幅「已尝试 N 次」的真实数据源
