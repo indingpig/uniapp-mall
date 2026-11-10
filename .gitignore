@@ -30,3 +30,6 @@ dist
 
 # PlatformIO 自动生成（每台机器各一份，勿提交）
 .vscode/launch.json
+
+# CodeBuddy 工具目录（另一 AI 编码工具的 worktree，勿提交）
+.codebuddy/

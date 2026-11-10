@@ -38,6 +38,8 @@ pnpm run type-check   # vue-tsc 类型检查
 - `deviceId` 用 `adb devices` 查询；HBuilderX 未启动时先执行 `cli open`
 - 自定义基座一次性构建好即可复用，只在原生插件/权限变动时重做
 - CLI 卡住不退出时：`pkill -f "cli launch app-android"` 后重跑（HBuilderX 主进程不用动）；调用时**不要接管道**（`| tail` 等会缓冲到进程结束才输出，看起来像卡死）
+- 卡住分两种：日志还在流 = 只杀 CLI；**连编译都没起来（卡在「项目 xxx 开始编译」后无任何输出，ps 里也无编译子进程）= HBuilderX 任务队列已僵死，须连主进程一起重启**（`pkill -x HBuilderX` → `open -a HBuilderX` → `cli open` 后再推；2026-11-10 实测，重跑三次无效、重启后一次成功）
+- **HBuilderX 空闲较久（约 10 分钟+）后的第一次 `cli launch` 容易僵死**（连「开始编译」都出不来）；重启 HBuilderX 后首推必成功，之后的连续快速推送也不僵。2026-11-10 样本：每次僵死都发生在空闲后首推，每次重启后立刻正常；曾误判为 H5 dev server 并发冲突（同时运行 H5 时确实也僵过，但停掉后仍僵，非根因）。**做法：距上次推送较久时，直接先重启 HBuilderX 再推，别浪费一轮 40 秒的僵死等待**
 
 #### 小程序调试（Windows/WSL 机专用；Mac 原生路径无需这些步骤）
 
