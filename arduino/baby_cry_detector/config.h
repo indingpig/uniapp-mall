@@ -101,3 +101,10 @@
 #define SERVER_REPORT_MS_IDLE     2000
 
 #define SERVER_RECONNECT_MS       3000  // WS 断线重连间隔
+
+/* 死链检测 (TCP 半开黑洞: 板子在发 audio, 服务端早已不可达, 但 TCP 写不报错,
+ * 双方各揣着一条「假活」连接, App 周期性误判离线):
+ * 固件每 SERVER_PING_MS 发一帧 WS ping (服务端 ws 库自动回 pong),
+ * 超过 SERVER_DEAD_LINK_MS 未收到服务端任何字节即判死链, 主动断开走重连 */
+#define SERVER_PING_MS            10000  // 心跳 ping 间隔
+#define SERVER_DEAD_LINK_MS       30000  // 无任何下行字节的死链判定阈值 (≈3 个 ping 周期)

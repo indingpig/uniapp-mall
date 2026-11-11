@@ -58,8 +58,9 @@
   - **附带修复(2026-11-11 真机抓到)**:已配网设备开机未关窗 —— `s_enabled` 默认 true,原逻辑只对出厂态开窗、已配网态等 `server_connected` 才关窗,server 连不上时 BLE 写入口/广播无限期敞开(且 `/setserver` 门控被 `IsEnabled()==true` 架空);现开机即按出厂/已配网分流关窗
 - [ ] **改进点 4.3:OTA**(实施顺序第 3,与恢复出厂当时一并排的运维兜底) — 前置:分区表 `huge_app.csv` 无 OTA 槽,先换 `nvs+otadata+2×3MB ota_0/1`(借一次 USB 烧录写新表);局域网用 ArduinoOTA,产品化演进服务端下发固件(配合改进点 8 版本号比对)
 - [ ] **改进点 4.1:SoftAP 降级配网** — BLE 不可用(手机不支持/权限)时兜底;可搬 `audio_app` 的 AP+Web 配网(`http://192.168.4.1/config`),极简替代是给 `/setserver` 配 AP 模式;SmartConfig 已淘汰勿用
-- [ ] **ServerLink 死链检测(2026-11-10 真机新发现)** — 板子每 2s 必发 audio,server 侧却每 20~40s 出现 15s+ 空窗,板子串口无 disconnect(TCP 半开黑洞),App 周期性误判离线
-  - `server_link.cpp` 无应用层心跳/超时:server 侧 ping 它会回 pong(已实现),但自己不发 ping、也不检测「多久没收到 server 任何字节」;需心跳 + 死链超时主动重连
+- [x] **ServerLink 死链检测(2026-11-10 真机新发现)** — 完成(2026-11-11 **真机端到端验证通过**):对抗 TCP 半开黑洞,根治 App 周期性误判离线
+  - 固件每 10s 发一帧 WS ping(server ws 库自动回 pong),30s 未收到服务端任何字节判死链主动断开走重连(`SERVER_PING_MS`/`SERVER_DEAD_LINK_MS`);验证:SIGSTOP 暂停 node → 30s 触发 → 3s 重试 → 恢复后 1s 重连,正常链路 2min+ 零误报
+  - 首版误报教训:活性刷新必须在 `wsProcessIncoming` **之前**(帧被消费后 available() 恒为 0);WSL 编译+Windows esptool 烧录路线见 `todo-配网安全.md` 调试注意
 - [ ] **改进点 8:设备信息/遥测上报**(实施顺序第 4) — 卡着本清单两项跨端任务(WiFi 弧线分档缺 RSSI、离线横幅「已尝试 N 次」缺重连计数)
   - 版本号构建注入(`build_flags -DFW_VERSION` 用 git describe);DeviceInfo 动态组装 `{name,version,has_wifi,server_url_set}` 并在配网状态变化时 notify——现 `ble_provision.cpp:434` 仍写死 `version:"1.0","has_wifi":false`,已配网设备在 App 里永远显示「未配网」
   - 上行加遥测:`audio` 心跳带 `rssi` 或独立 `telemetry` 消息(rssi/reconnects/uptime_s/heap_free),server 透传给 App

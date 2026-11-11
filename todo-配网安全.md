@@ -59,6 +59,15 @@
   现主固件开机即按出厂/已配网分流关窗
 - [x] **WiFi 掉线自动重连** — 代码完成（2026-11-11）：掉线检测（曾连上 + STA 断开）+ 退避 3s→30s→60s 封顶，首轮放弃也转入退避重连；掉线期 LED 慢闪，重连计数供改进点 8 遥测。**待真机验证**（详见主单「配网与设备管理」改进点 5）
 
+- [x] **ServerLink 死链检测** — 完成（2026-11-11，真机端到端验证通过）：
+  固件每 10s 发一帧 WS ping（server 的 ws 库自动回 pong），30s 未收到服务端任何字节即判死链
+  主动断开走重连；对抗「TCP 半开黑洞」（板子每 2s 必发 audio 但 server 早已不可达，
+  TCP 写不报错、双方各揣一条假活连接，App 周期性误判离线）。
+  验证：SIGSTOP 暂停 node → 精确 30s 触发「死链」日志 → 3s 间隔重试 → CONT 后 1s 重连成功；
+  正常链路 2 分钟+ 零误报。首版曾误报：活性刷新放在 wsProcessIncoming 之后（帧全被消费，
+  available() 恒为 0），已修（刷新移到处理之前）
+- [x] **WiFi 掉线自动重连** — 代码完成（2026-11-11）：掉线检测（曾连上 + STA 断开）+ 退避 3s→30s→60s 封顶，首轮放弃也转入退避重连；掉线期 LED 慢闪，重连计数供改进点 8 遥测。**待真机验证**（详见主单「配网与设备管理」改进点 5）
+
 ## 调试注意
 
 - 日志走板载原生 USB（`CDC_ON_BOOT=1`），**CH343 串口口看不到运行日志**
@@ -66,6 +75,25 @@
   「开串口那一次」的；按 RST 后当轮日志抓不到属预期
 - pyserial 抓日志脚本在 USB 重枚举时会抛 SerialException 退出，属预期
 - 提交前跑 `cd uniapp && pnpm run lint && pnpm run type-check`
+
+### WSL 开发机烧录路线（2026-11-11 实测，usbipd 未装）
+
+- **编译在 WSL**：`~/.local/bin/pio`（pip --user 装的 PlatformIO 6.2）；EI 库已拷到
+  `~/ArduinoProject/libraries`，`platformio.ini` lib_extra_dirs 第三条即它
+- **烧录在 Windows**：WSL 构建的 `firmware.bin` 拷到 `C:\Users\Sheldon\AppData\Local\Temp\bcflash\`，
+  用 `.platformio\penv\Scripts\python.exe`（自带 pyserial）跑 `tool-esptoolpy\esptool.py`，
+  **只烧 app**：`write_flash 0x10000 firmware.bin`（bootloader/分区表不动）
+- **PIO 工具链下载在国内直连只有 12KB/s**：走 Windows 侧代理（v2rayN 默认口
+  `192.168.16.1:10809`）设 `HTTPS_PROXY` 环境变量即可（~800KB/s）；大包（框架 246MB）
+  代理也会中途卡死（pio 不续传），用 curl 分块并行下载 + `pio pkg install -t file://` 本地装，
+  装完要**手改 `~/.platformio/packages/<包>/.piopm`** 补 `spec.owner`（file:// 安装缺 owner，
+  pio 不认会重新下载）
+- **烧录后瞬态坑**：flash 完直接开串口，板子可能出现「SYN 发得出、SYN-ACK 收不进」
+  的假死（真机抓包证实单向丢包）；用 esptool 跑一次进出下载模式（如 `chip_id`）再开串口即恢复
+- **WSL server 供板子连接**：portproxy 已改指向 WSL IP（`0.0.0.0:3001 → 192.168.23.72:3001`，
+  **WSL 重启后 IP 会变，需重新 netsh set**）+ 防火墙放行规则 `BabyMonitor-WS-3001`（TCP 3001 入站）；
+  3001 曾被上次联调遗留的僵尸 node 占用，netstat 查两个监听者即此症
+- **板子 NVS 里的服务器地址**是 `ws://192.168.1.24:3001/ws`（Windows LAN IP）
 
 ## 相关文档
 

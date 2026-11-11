@@ -25,6 +25,8 @@ static uint16_t s_port = 80;
 static WiFiClient s_client;
 static uint32_t s_lastAttempt = 0;
 static uint32_t s_lastAudioSend = 0;
+static uint32_t s_lastPingMs = 0;    // 上次 WS 心跳 ping
+static uint32_t s_lastRxMs = 0;      // 上次收到服务端任何字节 (死链检测用)
 static bool     s_inferDirty = false;
 static char     s_inferLabel[24] = { 0 };
 static float    s_inferScore = 0;
@@ -90,7 +92,9 @@ static bool wsSendMasked(uint8_t opcode, const uint8_t* payload, size_t len) {
   h += 4;
 
   for (size_t i = 0; i < len; i++) masked[i] = payload[i] ^ maskKey[i & 3];
-  return s_client.write(hdr, h) == h && s_client.write(masked, len) == len;
+  if (s_client.write(hdr, h) != h) return false;
+  if (len == 0) return true;   // write(buf, 0) 的返回值实现有差异, 空载荷不依赖它
+  return s_client.write(masked, len) == len;
 }
 
 static bool wsSendText(const char* text) {
@@ -273,6 +277,8 @@ static bool tryConnect() {
   }
 
   s_lastAudioSend = 0;   // 连上立即发一帧心跳
+  s_lastPingMs = 0;      // 连上立即发一帧 ping
+  s_lastRxMs = millis();
   setConnected(true);
   Serial.printf("[ServerLink] connected ws://%s:%u/ws (free heap=%u)\n",
                 s_host.c_str(), s_port, ESP.getFreeHeap());
@@ -372,6 +378,11 @@ void serverLinkLoop() {
     return;
   }
 
+  /* 活性刷新必须在 wsProcessIncoming 之前: 后者会消费掉所有到齐的帧,
+   * 放在之后 available() 恒为 0, pong 到达也刷新不到 */
+  uint32_t now = millis();
+  if (s_client.available() > 0) s_lastRxMs = now;
+
   if (!wsProcessIncoming()) {
     disconnect();
     return;
@@ -381,7 +392,17 @@ void serverLinkLoop() {
     return;
   }
 
-  uint32_t now = millis();
+  if (now - s_lastRxMs >= SERVER_DEAD_LINK_MS) {
+    Serial.printf("[ServerLink] 死链: %lus 未收到服务端任何数据, 主动重连\n",
+                  (unsigned long)((now - s_lastRxMs) / 1000));
+    disconnect();
+    return;
+  }
+  if (now - s_lastPingMs >= SERVER_PING_MS) {
+    s_lastPingMs = now;
+    wsSendMasked(0x9, nullptr, 0);   // WS 心跳 ping, 服务端 ws 库自动回 pong
+  }
+
   uint32_t interval = s_listening ? SERVER_REPORT_MS_ACTIVE : SERVER_REPORT_MS_IDLE;
   if (now - s_lastAudioSend >= interval) {
     s_lastAudioSend = now;
