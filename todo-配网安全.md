@@ -22,24 +22,17 @@
 - **处置**：代码已整体移除（原实现见 git 历史 `4c5e584`）；恢复出厂统一走
   BOOT 长按 10s。固件挂死场景用 BOOT+RST 进 ROM 下载模式重烧（开发场景足够）。
 
-## 待真机验证（2026-11-09 改，编译与 H5 模拟器已过）
+## 待真机验证（2026-11-11 真机联调更新）
 
-- [ ] **配对与扫描绑定** — 固件把「扫 WiFi 列表」改为必须在加密链路上执行
-  （`ble_provision.cpp` 的 `s_encrypted` 门控）：
-  ① 未配对手机点「刷新列表」→ 系统弹配对框 → 确认后设备自动开始扫描，无需再点一次；
-  ② 不确认 → 20s 后 App 提示「未完成配对，请重试并在系统弹窗中确认」；
-  ③ 已配对手机重连 → 静默加密、不弹框、直接扫出列表
-  - 已验证 ①：2026-11-09 16:35 日志 `配对/加密 OK` → `WiFi scan started (retries=0)` → `sent 12 APs`
-  - 待验证 ②：超时分支（拒绝配对后 20s 的提示与状态复位）
-- [ ] **出厂态配网窗口限时** — 原 `closeProvisionWindow()` 对出厂态 early-return，
-  没配过网就无限广播。现改为上电开 `PROVISION_WINDOW_MS`（5 分钟）窗口，超时停广播、
-  LED 转慢闪；BOOT 短按 3s 重开（出厂态同样生效）
-  - 已验证：5 分钟整关闭（16:18:23 开启 → 16:23:23 `[BLE] 配网窗口关闭, 停止广播`）
-  - 待验证：窗口关闭后 BOOT 3s 能否恢复广播 + 快闪
-- [ ] **配对页「连接中」按钮** — 原 `width: 100rpx`（=50px）装不下「连接中…」（实测文字正好 50px），
-  中文按字换行后溢出 54rpx 高度；改为 `min-width` + `padding` + `nowrap`，并加 `--busy` 减淡
-  - 已验证：H5 模拟器按钮 67×28、文字 50×18 单行、scrollHeight 无溢出
-  - 待验证：真机观感（减淡是否足够区分、宽度变化是否让设备名挤压）
+- [x] **配对与扫描绑定** — ① 已验证（2026-11-09 日志 `配对/加密 OK` → 扫描 → 回列表）；
+  ③ 已验证（2026-11-11：手机与板子在 11-09 已建立 BOND 绑定（`ESP_LE_AUTH_BOND`，持久），
+  重连静默加密、不弹框、直接扫出列表 —— 不弹框为预期行为，非 bug）
+  - 待验证 ②：拒绝配对后 20s 的超时提示。重测路径：手机删除 `BabyMonitor-3004` 配对记录 →
+    重新配网时故意不确认弹框 → 应 20s 提示「未完成配对」
+- [x] **出厂态配网窗口限时** — 完整验证：5 分钟整关闭（2026-11-09）+
+  **关闭后 BOOT 3s 重开恢复广播快闪（2026-11-11 真机）**
+- [x] **配对页「连接中」按钮** — 真机回归通过（2026-11-11，配对页五项修复全部正常：
+  连接中反馈/步骤条横杠/其他网络弹框/遮罩压暗顶栏/无溢出变形）
 
 ## 待办
 
@@ -57,11 +50,14 @@
   （`WL_WRONG_PASSWORD` → `error:wifi_password` 等）
 - [ ] **App 服务器地址烘焙问题** — `.env.production` 固化 IP（现为 192.168.3.5），
   换网络即失效；方向：运行时可配置
-- [ ] **App 扫描按 Service UUID 过滤** — `useBLE.ts` `services: []` 传
-  `BLE_SERVICE_UUID`（UTS 插件已支持该参数）
-- [ ] **Server URL 校验收敛** — 校验函数（`ws://`/`wss://` 前缀、长度）接入两处：
-  `ble_provision.cpp` ServerURLWriteCallback、`collect_server.cpp` handleSetServer
-- [ ] **WiFi 掉线自动重连** — `wifi_connect.cpp` 掉线检测 + 指数退避（3s→30s→60s 封顶）
+- [x] **App 扫描按 Service UUID 过滤** — 完成（2026-11-11，已过 lint/type-check，待真机）：
+  `useBLE.ts` `services: [BLE_SERVICE_UUID]`；固件广播确认带该 UUID（addServiceUUID + scan response）
+- [x] **Server URL 校验收敛** — 完成（2026-11-11，已烧录，待真机）：`server_url.h` 两处共用
+  （`ws://`/`wss://` 前缀、长度、去空白、host 非空）接入 `ble_provision.cpp` ServerURLWriteCallback
+  与 `collect_server.cpp` handleSetServer；`/setserver` 另加「未配网态/窗口期才开放」门槛。
+  **附带修复**：已配网设备开机未关窗（`s_enabled` 默认 true 等 server_connected 才关），
+  现主固件开机即按出厂/已配网分流关窗
+- [x] **WiFi 掉线自动重连** — 代码完成（2026-11-11）：掉线检测（曾连上 + STA 断开）+ 退避 3s→30s→60s 封顶，首轮放弃也转入退避重连；掉线期 LED 慢闪，重连计数供改进点 8 遥测。**待真机验证**（详见主单「配网与设备管理」改进点 5）
 
 ## 调试注意
 

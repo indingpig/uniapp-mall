@@ -28,7 +28,7 @@
 ## 低优先级:工程卫生(碎片时间)
 
 - [x] 推送远端 — 全部本地提交已同步(2026-11-10 拉取确认,origin/master 已含)
-- [ ] **配对页五项修复真机回归**(`fef3453` 已推手机,未验证) — ①点设备「连接中…」反馈 ②步骤条横杠独立点亮(3 步中性) ③WiFi 其他网络弹框 ④弹框遮罩压暗顶栏(z-200) ⑤配网超时分层提示(server 没起时文案);验证需板子配网模式+串口日志配合
+- [x] **配对页五项修复真机回归** — 通过(2026-11-11 真机联调):连接中反馈/步骤条横杠/其他网络弹框/遮罩压暗顶栏/无溢出变形,五项全部正常(⑤超时分层提示因配网一次成功未触发,归入 todo-配网安全 ②超时分支一并测)
 - [ ] `<route>` 块废弃警告 → 迁移到 `definePage()`(uni-pages 下个版本移除,不急)
 - [ ] 首页快捷操作按钮(监听/静音提醒)收编 `AppButton` — 含 muted/禁用变体逐态迁移,2026-11-09 样式收编时刻意跳过(状态多,风险大)
 - [ ] `colors.ts` 的 `zone1-3` 与 `babyStatus.ts` `VOLUME_ZONES` 双源合一 — 现两处注释互指,改动需两边同步。**2026-11-10 部分推进**:`VOLUME_ZONES` 已改为引用 `colors.primary/amber/danger/zone1-3`,不再自带 hex;剩余重复仅为 `colors.ts` 与 `uni.scss` 的 `$volume-zone-*` 两份值(SCSS 与 TS 天然无法互引,只能靠注释互指)
@@ -47,15 +47,15 @@
 > 已完成项不列:4.2 恢复出厂(BOOT 长按 10s,实测通过)、2 的轻量部分(配对窗口 + Just Works 加密)。
 > 阶段策略:先做设备/App 单侧能力(阶段一) → 测试服 ~100 行参照实现(阶段二) → 真服务端按契约重写(阶段三)。
 
-- [ ] **改进点 5:WiFi 掉线自动重连**(实施顺序第 1,高频缺口;2026-11-10 复核确认属实,按用户要求记录待以后解决) — 路由器半夜重启即永久失联,只能拔电
-  - `wifiLoop()` 现首行 `if (!s_attempting) return;`,连接成功后掉线不再重试
-  - 加「曾连接但掉线」检测(`WiFi.status()!=WL_CONNECTED` → 用 NVS 凭据重连);失败指数退避 3s→30s→60s 封顶,成功清零;LED 慢闪区分配网快闪
-  - 纯固件单侧几十行;掉线计数顺带成为 App 离线横幅「已尝试 N 次」的真实数据源
-- [ ] **改进点 1:扫描用 Service UUID 过滤**(实施顺序第 1,可与上并行) — 名字可仿冒且 Android 广播名常截断漏扫
-  - UTS 插件已支持 `services` 参数,只差 `useBLE.ts:170`(`services: []`)传入 `BLE_SERVICE_UUID`,一处改动
-- [ ] **改进点 3+7 剩余:写入口 URL 校验收敛**(实施顺序第 2) — 两处共用同一校验函数,一次做完
-  - `ble_provision.cpp` ServerURL 写入与 `collect_server.cpp` `/setserver` 现在都只 `trim()` 不校验
-  - 校验:`ws://`/`wss://` 前缀(第一天就放行 wss)+长度+去空白;`/setserver` 还需「仅未配网态开放」(需把配网状态暴露给 collect_server)
+- [x] **改进点 5:WiFi 掉线自动重连**(实施顺序第 1,高频缺口) — 代码完成并上板(2026-11-11);开机自动连/正常链路真机已验,**掉线自愈场景仍待验证(需路由器断电→上电配合,看串口「重连尝试 #N」日志与 LED 慢闪)**
+  - `wifiLoop()` 新增掉线检测(曾连上 + STA 断开)与退避重连状态机:3s→30s→60s 封顶,成功清零;首轮 10 次放弃后不再「等新凭据」等死,同样转入退避重连
+  - 掉线重连期 LED 慢闪(与配网快闪区分);`wifiGetReconnectCount()` 供改进点 8 遥测,成为 App 离线横幅「已尝试 N 次」的真实数据源
+- [x] **改进点 1:扫描用 Service UUID 过滤**(实施顺序第 1) — 完成(2026-11-11 **真机验证通过**:配网扫描命中设备全流程走通)
+  - `useBLE.ts` `services: [BLE_SERVICE_UUID]`;固件广播已带该 UUID(`ble_provision.cpp` addServiceUUID + scan response),H5 mock 不受影响(mock 只按 namePrefix 过滤)
+- [x] **改进点 3+7 剩余:写入口 URL 校验收敛**(实施顺序第 2) — 完成(2026-11-11 **真机验证通过**:关窗时 `not_allowed`;开窗时非法协议/超长/内部空格/缺参四分支全拦,合法写入放行)
+  - 新增 `server_url.h`(header-only,免改 platformio src_filter,两处共用):`ws://`/`wss://` 前缀 + 长度 ≤96 + 去空白 + host 非空
+  - BLE ServerURL 拒非法值并回报新状态码 `error:server_url`(App 有 `error:*` 通用兜底提示);`/setserver` 加门槛「未配网态或配网窗口期才开放」(复用 `wifiHasSavedCredentials()`+`bleProvisionIsEnabled()`,无需新接口),非法值回 `bad_url`、已配网关窗拒 `not_allowed`
+  - **附带修复(2026-11-11 真机抓到)**:已配网设备开机未关窗 —— `s_enabled` 默认 true,原逻辑只对出厂态开窗、已配网态等 `server_connected` 才关窗,server 连不上时 BLE 写入口/广播无限期敞开(且 `/setserver` 门控被 `IsEnabled()==true` 架空);现开机即按出厂/已配网分流关窗
 - [ ] **改进点 4.3:OTA**(实施顺序第 3,与恢复出厂当时一并排的运维兜底) — 前置:分区表 `huge_app.csv` 无 OTA 槽,先换 `nvs+otadata+2×3MB ota_0/1`(借一次 USB 烧录写新表);局域网用 ArduinoOTA,产品化演进服务端下发固件(配合改进点 8 版本号比对)
 - [ ] **改进点 4.1:SoftAP 降级配网** — BLE 不可用(手机不支持/权限)时兜底;可搬 `audio_app` 的 AP+Web 配网(`http://192.168.4.1/config`),极简替代是给 `/setserver` 配 AP 模式;SmartConfig 已淘汰勿用
 - [ ] **ServerLink 死链检测(2026-11-10 真机新发现)** — 板子每 2s 必发 audio,server 侧却每 20~40s 出现 15s+ 空窗,板子串口无 disconnect(TCP 半开黑洞),App 周期性误判离线
