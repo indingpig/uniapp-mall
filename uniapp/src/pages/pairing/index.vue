@@ -7,6 +7,7 @@ import { colors } from '@/constants/colors';
 import { useBLE } from '@/hooks/useBLE';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
+import { isValidServerUrl } from '@/utils/server';
 import { getConnectedSsid, scanWifiQr } from '@/utils/wifi';
 
 const {
@@ -286,6 +287,12 @@ async function onStartPair() {
   if (!serverUrl.value) {
     showAdvanced.value = true;
     showToast('请填写服务器地址');
+    return;
+  }
+  // 与固件校验口径对齐，写前先拦：填错（如误填 WiFi 密码）等 30s 超时才发现
+  if (!isValidServerUrl(serverUrl.value)) {
+    showAdvanced.value = true;
+    showToast('服务器地址需以 ws:// 开头，如 ws://192.168.1.24:3001/ws');
     return;
   }
   if (!wifiSSID.value) {
