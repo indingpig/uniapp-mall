@@ -16,12 +16,12 @@
  *   识别结果回传 server 广播给 App; App 停止监听 → {"cmd":"listen_off"}。
  *   App 采集页连 ws://babycry.local/ws 采集训练数据 (与推理同一条滤波链)。
  *
- * 配网安全 (BOOT + RST 双键分工):
- *   出厂态 (NVS 无凭据) 常开广播 + LED 慢闪待配网;
+ * 配网安全 (BOOT 双手势; RST 连击已废弃, 见下方「恢复出厂」节):
+ *   出厂态/窗口期 LED 快闪可配网, 无凭据且窗口已关 LED 慢闪;
  *   已配网设备平时无广播、拒绝凭据写入 —— BOOT 按住 3s 松手打开 5 分钟
- *   配网窗口 (LED 快闪); 恢复出厂 = 3s 内连按 3 次 RST 键 (清 NVS + 重启,
- *   计数持久化 NVS, 只认上电级复位, 串口/烧录不误触)。
- *   BLE 写凭据走 Just Works 会话加密 (ESP_LE_AUTH_BOND, 持久绑定)。
+ *   配网窗口 (LED 快闪); 恢复出厂 = BOOT 按住 10s (擦 NVS, 等松手才重启)。
+ *   BLE 写凭据走 Just Works 加密 (ESP_LE_AUTH_BOND 持久绑定):
+ *   首次配对系统弹框, 已配对手机重连静默加密。
  *
  * 接线 (INMP441):  WS→4, SCK→5, SD→6, VCC→3.3V, GND→GND, L/R→GND (左声道)
  */
@@ -288,9 +288,15 @@ void setup() {
   bleProvisionInit(deviceName);
   bleProvisionSetCredentialsCallback(onCredentialsReceived);
 
-  // 配网窗口: 出厂态同样限时 —— 上电开一个 PROVISION_WINDOW_MS 窗口,
-  // 超时停广播 (省电 + 收敛攻击面), 需要时 BOOT 短按 3s 重开
-  if (isFactoryState()) openProvisionWindow();
+  // 配网窗口: 出厂态限时开窗 (超时停广播, BOOT 短按 3s 重开);
+  // 已配网设备开机即关窗停广播 —— s_enabled 默认 true, 若等 server_connected
+  // 才收口, server 连不上时 BLE 写入口/广播会无限期敞开 (2026-11-11 真机抓到:
+  // server 不可达的已配网设备持续广播, /setserver 门控也被架空)
+  if (isFactoryState()) {
+    openProvisionWindow();
+  } else {
+    closeProvisionWindow();
+  }
 
   // 音频采集链 (Core 0): I2S + 高通滤波, 常开
   audioPipelineStart();

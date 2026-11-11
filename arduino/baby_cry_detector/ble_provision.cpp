@@ -1,5 +1,6 @@
 #include "ble_provision.h"
 #include "config.h"
+#include "server_url.h"
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -63,10 +64,12 @@ static bool writeAllowed(const char* what) {
 }
 
 /* ================================================================== */
-/*  Just Works 会话级加密 (改进点 2 轻量部分)                            */
+/*  Just Works 配对加密 (改进点 2 轻量部分)                              */
 /*  无屏幕做不了 Passkey, MITM 由配网窗口 (物理存在证明) 兜住;            */
-/*  ESP_LE_AUTH_NO_BOND 不持久化绑定 —— 恢复出厂清 NVS 后不会出现        */
-/*  「手机存旧绑定密钥连不上设备」的经典坑, 每次连接重新协商加密           */
+/*  ESP_LE_AUTH_BOND 持久绑定 (setAuthenticationMode, 见 init):          */
+/*  首次配对系统弹框确认, 已配对手机重连静默加密不再弹框。               */
+/*  恢复出厂擦 NVS 连带清掉设备侧绑定密钥 —— 手机须先删除配对记录,       */
+/*  否则旧密钥加密失败靠 onAuthenticationComplete 退避重试重协商          */
 /* ================================================================== */
 
 class SecurityCallbacks : public BLESecurityCallbacks {
@@ -111,6 +114,13 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
     if (!writeAllowed("ServerURL")) return;
     String url = String(c->getValue().c_str());
     url.trim();
+
+    // 写入口校验 (与 /setserver 共用 server_url.h): 拒非法值并回报 App 就地提示
+    if (!serverUrlValid(url)) {
+      Serial.printf("[BLE] Server URL rejected (invalid): [%s]\n", url.c_str());
+      bleProvisionUpdateStatus(BLE_STATUS_ERROR_SERVER_URL);
+      return;
+    }
     Serial.printf("[BLE] Server URL received: [%s]\n", url.c_str());
 
     // 持久化服务器地址 (重启后由 server_link 从 NVS 读取并连接后端)

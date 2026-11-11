@@ -9,6 +9,9 @@
 
 #include "audio_pipeline.h"
 #include "config.h"
+#include "server_url.h"
+#include "ble_provision.h"
+#include "wifi_connect.h"
 
 /* ================================================================== */
 /*  状态                                                                */
@@ -219,11 +222,23 @@ static String queryParam(const String& query, const char* key) {
   return urlDecode(query.substring(start, end));
 }
 
-/* 开发辅助: 免 BLE 写入服务器地址 (重启后由 server_link 从 NVS 读取) */
+/* 开发辅助: 免 BLE 写入服务器地址 (重启后由 server_link 从 NVS 读取)
+ * 仅未配网态 / 配网窗口期开放 (改进点 3+7 运行时侧): 已配网设备的改指向
+ * 收敛到 BOOT 短按 3s + App 重配网, 防 LAN 内任意主机改地址 */
 static void handleSetServer(WiFiClient& c, const String& query) {
+  if (wifiHasSavedCredentials() && !bleProvisionIsEnabled()) {
+    Serial.println("[SetServer] rejected: 已配网且窗口未开");
+    sendJson(c, "{\"ok\":false,\"err\":\"not_allowed\"}");
+    return;
+  }
   String url = queryParam(query, "url");
   if (url.length() == 0) {
     sendJson(c, "{\"ok\":false,\"err\":\"empty_url\"}");
+    return;
+  }
+  if (!serverUrlValid(url)) {
+    Serial.printf("[SetServer] rejected (invalid): [%s]\n", url.c_str());
+    sendJson(c, "{\"ok\":false,\"err\":\"bad_url\"}");
     return;
   }
   Preferences prefs;

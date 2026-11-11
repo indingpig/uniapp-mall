@@ -14,6 +14,7 @@
 #define NVS_KEY_WIFI_SSID      "wifi_ssid"
 #define NVS_KEY_WIFI_PASS      "wifi_pass"
 #define NVS_KEY_SERVER_URL     "server_url"
+#define SERVER_URL_MAX_LEN     96      // 服务器地址上限 (写入口校验, 见 server_url.h)
 // 已废弃: NVS_KEY_RST_SEQ / NVS_KEY_LAST_RST (RST 连击方案, 2026-11-08 移除;
 // 残留键值留在 NVS 里无害, 恢复出厂时会一并擦除)
 
@@ -43,6 +44,7 @@
 #define BLE_STATUS_ERROR_WIFI       "error:wifi_failed"
 #define BLE_STATUS_ERROR_WIFI_PASS  "error:wifi_password"  // 密码错误 (4 次握手超时), App 就地提示
 #define BLE_STATUS_ERROR_PROVISION  "error:provisioning_closed"  // 配网窗口未开, 写入被拒
+#define BLE_STATUS_ERROR_SERVER_URL "error:server_url"  // 服务器地址未通过校验, 写入被拒
 #define BLE_STATUS_FACTORY_RESET    "factory_reset"  // 恢复出厂 (BOOT 长按 10s) 触发时经 BLE 通知
 
 /* ================================================================== */
