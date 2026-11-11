@@ -91,33 +91,49 @@ class SecurityCallbacks : public BLESecurityCallbacks {
 /*  特征值写入回调 (配网窗口未开时一律拒绝)                               */
 /* ================================================================== */
 
+/* 诊断用: 写入原始字节 hex (排查句柄错位/CCCD 残留等诡异写入, 上限 32 字节) */
+static String hexDump(const std::string& v) {
+  String out;
+  for (size_t i = 0; i < v.length() && i < 32; i++) {
+    char buf[4];
+    snprintf(buf, sizeof(buf), "%02x", (uint8_t)v[i]);
+    out += buf;
+  }
+  return out;
+}
+
 class SSIDWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("SSID")) return;
-    s_pendingSSID = String(c->getValue().c_str());
+    std::string raw = c->getValue();
+    s_pendingSSID = String(raw.c_str());
     s_pendingSSID.trim();
-    Serial.printf("[BLE] SSID received: [%s]\n", s_pendingSSID.c_str());
+    Serial.printf("[BLE] SSID received: [%s] len=%u hex=%s\n",
+                  s_pendingSSID.c_str(), (unsigned)raw.length(), hexDump(raw).c_str());
   }
 };
 
 class PassWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("Password")) return;
-    s_pendingPass = String(c->getValue().c_str());
+    std::string raw = c->getValue();
+    s_pendingPass = String(raw.c_str());
     s_pendingPass.trim();
-    Serial.println("[BLE] Password received (hidden)");
+    Serial.printf("[BLE] Password received (hidden) len=%u\n", (unsigned)raw.length());
   }
 };
 
 class ServerURLWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("ServerURL")) return;
-    String url = String(c->getValue().c_str());
+    std::string raw = c->getValue();
+    String url = String(raw.c_str());
     url.trim();
 
     // 写入口校验 (与 /setserver 共用 server_url.h): 拒非法值并回报 App 就地提示
     if (!serverUrlValid(url)) {
-      Serial.printf("[BLE] Server URL rejected (invalid): [%s]\n", url.c_str());
+      Serial.printf("[BLE] Server URL rejected (invalid): [%s] len=%u hex=%s\n",
+                    url.c_str(), (unsigned)raw.length(), hexDump(raw).c_str());
       bleProvisionUpdateStatus(BLE_STATUS_ERROR_SERVER_URL);
       return;
     }
@@ -179,7 +195,9 @@ class ServerConnectionCallback : public BLEServerCallbacks {
     s_encryptPending = false;
     s_encryptDone = false;
     s_encrypted = false;
-    Serial.println("[BLE] App connected");
+    const uint8_t* bda = param->connect.remote_bda;
+    Serial.printf("[BLE] App connected (%02x:%02x:%02x:%02x:%02x:%02x)\n",
+                  bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
   }
 
   void onDisconnect(BLEServer* s) override {
