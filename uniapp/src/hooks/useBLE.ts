@@ -167,7 +167,9 @@ export function useBLE() {
     scanner = createScanner();
 
     scanner.startScan({
-      services: [] as string[],
+      // 按 Service UUID 过滤 (改进点 1): 设备名可仿冒且 Android 广播名常截断漏扫,
+      // 固件广播已带 BLE_SERVICE_UUID (ble_provision.cpp addServiceUUID)
+      services: [BLE_SERVICE_UUID],
       namePrefix: DEVICE_NAME_PREFIX,
       onAdvertisement: (adv: Advertisement) => {
         const name = adv.name || '';
