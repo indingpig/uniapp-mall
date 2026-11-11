@@ -242,14 +242,7 @@ function goPairing() {
 /*  不碰设备、不走配网：拿到 server 地址即可观看，所有权由配网窗口兜底  */
 /* ------------------------------------------------------------------ */
 
-function onJoinTap() {
-  // #ifdef APP-PLUS
-  uni.scanCode({
-    onlyFromCamera: false,
-    success: ({ result }) => confirmJoin(result),
-  });
-  // #endif
-  // #ifndef APP-PLUS
+function promptJoinUrl() {
   uni.showModal({
     title: '加入家庭监护',
     editable: true,
@@ -259,6 +252,29 @@ function onJoinTap() {
         confirmJoin(content);
     },
   });
+}
+
+function onJoinTap() {
+  // #ifdef APP-PLUS
+  // 扫码/手填双入口：删除设备后本机二维码入口（设置页家庭共享节）已隐藏，
+  // 只有扫码会把本机逼进「必须重新配网才能回来」的死路
+  uni.showActionSheet({
+    itemList: ['扫码二维码加入', '手动输入服务器地址'],
+    success: ({ tapIndex }) => {
+      if (tapIndex === 0) {
+        uni.scanCode({
+          onlyFromCamera: false,
+          success: ({ result }) => confirmJoin(result),
+        });
+      }
+      else {
+        promptJoinUrl();
+      }
+    },
+  });
+  // #endif
+  // #ifndef APP-PLUS
+  promptJoinUrl();
   // #endif
 }
 

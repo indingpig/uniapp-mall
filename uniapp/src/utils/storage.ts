@@ -20,3 +20,13 @@ export function hasLocalPairing(): boolean {
   const paired = uni.getStorageSync(CACHE_KEY.PAIRED_DEVICE);
   return !!(paired && typeof paired === 'object' && paired.name);
 }
+
+/**
+ * 清除本机的设备配对与服务器地址记录（设置页「删除设备」用）。
+ * 只删 App 端记录：设备 NVS 凭据不受影响（恢复出厂只能走设备 BOOT 长按 10s
+ * 硬件手势），server 侧记录待设备注册表立项后再联动（todolist v1.2）。
+ */
+export function clearPairingRecords(): void {
+  uni.removeStorageSync(CACHE_KEY.PAIRED_DEVICE);
+  uni.removeStorageSync(CACHE_KEY.PAIRED_SERVER_URL);
+}
