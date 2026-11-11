@@ -314,8 +314,8 @@ void loop() {
   }
   if (s_windowUntil != 0) {
     led_blink(PROV_LED_FAST_MS);        // 窗口期 (含出厂态首个窗口): 快闪 = 可配网
-  } else if (isFactoryState()) {
-    led_blink(PROV_LED_SLOW_MS);        // 出厂态但窗口已关: 慢闪提示还需要配网
+  } else if (isFactoryState() || wifiIsReconnecting()) {
+    led_blink(PROV_LED_SLOW_MS);        // 出厂态待配网 / 掉线退避重连中: 慢闪
   }
 
   // 采集服务端 (HTTP /rms, /setserver + WS 采集推流)

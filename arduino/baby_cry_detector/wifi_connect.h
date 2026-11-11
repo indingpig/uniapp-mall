@@ -4,6 +4,7 @@
  * 职责:
  *   - 管理 WiFi 连接状态机 (非阻塞, 在 wifiLoop() 中轮询)
  *   - NVS 持久化 WiFi 凭据, 开机自动重连
+ *   - 掉线自愈: 曾连上后掉线按退避序列 (3s→30s→60s 封顶) 自动重连
  *   - 连接状态通过回调上报 (通常转发给 BLE 模块通知 App)
  *
  * 与 BLE 模块解耦:
@@ -58,3 +59,15 @@ bool wifiHasSavedCredentials();
  * 获取本地 IP (未连接时返回 "0.0.0.0")
  */
 String wifiGetIP();
+
+/**
+ * 是否处于「曾连上后掉线 (或首轮放弃) 的退避重连」状态
+ * 用于 LED 慢闪区分配网快闪 (主固件 loop 中指示)
+ */
+bool wifiIsReconnecting();
+
+/**
+ * 本轮掉线以来已发起的重连尝试次数 (连上即清零, 新一轮掉线重新计数)
+ * 改进点 8 遥测字段的数据源: App 离线横幅「已尝试 N 次」
+ */
+uint32_t wifiGetReconnectCount();
