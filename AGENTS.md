@@ -283,7 +283,12 @@ pio device monitor           # 串口监视器（115200）
 - **PlatformIO 不会把 `build_src_filter` 里的 `.ino` 当源文件编译**（可编译扩展只有 c/cpp/cc/cxx/c++/S/asm）：`src_dir` 根目录的 `.ino` 会先被转成临时的 `.ino.cpp` 再编译，所以过滤要用 `+<xxx.ino*>` 匹配转换后的文件名；子目录里的 `.ino` 永不转换，子工程若要编译须在环境里把 `src_dir` 指到该子目录（参考 `[env:audio_app]`）
 - 依赖 Edge Impulse 推理库 `babyCry_inferencing`，`lib_extra_dirs` 同时列出两台开发机的库目录（Windows 开发机 `D:/ArduinoProject/libraries`、Mac `/Users/sheldon/Documents/Arduino/libraries`），不存在的目录会被自动跳过
 - Mac 上 `pio` 未进 PATH，用 `~/.platformio/penv/bin/pio`（VS Code PlatformIO 扩展自带）
-- BLE + WiFi + EI 模型体积大，使用 `huge_app.csv` 分区（3MB App，无 OTA）
+- Windows 上同理：PATH 里的 `pio.exe` 可能是坏的，用 `%USERPROFILE%\.platformio\penv\Scripts\pio.exe`
+- 板子为 **ESP32-S3 N16R8**（16MB Flash + 8MB OTA-PSRAM），但 `board = esp32-s3-devkitc-1` 的板卡定义是 N8 且无 PSRAM，故 `platformio.ini` 里显式 `board_upload.flash_size = 16MB`（否则镜像头写 8MB，bootloader 不认 4MB 以上地址）
+- 分区表 `partitions_n16r8.csv`（仓库根）铺满 16MB：`app0`/`app1` 各 3MB OTA 双槽 + `spiffs` 数据区 9.875MB + coredump
+  - **CSV 必须纯 ASCII**：PlatformIO 按系统默认编码（Windows GBK）解析，中文注释会让 `_parse_partitions` 抛 `UnicodeDecodeError` 构建失败
+  - `upload.maximum_size` 不用手写，PlatformIO 会按 `app0` 的 3MB 自动覆盖
+  - **PSRAM 当前是关闭的**：`build_flags` 无 `BOARD_HAS_PSRAM` → `esp32-hal-psram.h` 会 `#undef CONFIG_SPIRAM`，`ps_malloc()` 恒返回 NULL，`psramInit/psramFound` 编成 7 字节空桩。启用需同时上 `board_build.arduino.memory_type = qio_opi`（R8 是 OCTAL，默认的 `qio_qspi` 是 QUAD）+ `-DBOARD_HAS_PSRAM`
 - 主固件 `baby_cry_detector` 的编译组成：`baby_cry_detector.ino` + `ble_provision.*` + `wifi_connect.*` + `led.*` + `config.h`
 
 ### 其他
