@@ -59,6 +59,10 @@ function loadLocalRecords() {
 
 const settings = ref<MonitorSettings>(loadMonitorSettings());
 
+/** 固件更新信息（规范 5.5 固件更新条）：OTA/版本比对（todo-产品 P1-5）落地前
+ *  恒为 null → 琥珀条整条隐藏；有数据时渲染「发现新版本 v{x}，建议更新」 */
+const firmwareUpdate = ref<{ version: string } | null>(null);
+
 function onSettingChange() {
   persistMonitorSettings(settings.value);
 }
@@ -173,6 +177,7 @@ function onUnpair() {
 
       <!-- ========= 连接信息卡（r16）：WiFi/IP/信号待固件遥测（改进点 8）接真数据 ========= -->
       <view class="group bg-card rounded-card">
+        <text class="group__title text-main font-bold block">连接信息</text>
         <view class="row">
           <text class="row-label text-secondary">WiFi 网络</text>
           <view class="flex-1" />
@@ -190,16 +195,25 @@ function onUnpair() {
         </view>
       </view>
 
-      <!-- 固件更新条：琥珀横幅（ic-download + 立即更新），规范 5.5「无新版本整条隐藏」；
-           版本比对/OTA 链路（todo-产品 P1-5）落地前恒无数据，暂不渲染 -->
+      <!-- 固件更新条（规范 5.5 琥珀条，ic-download 16px）：OTA/版本比对（todo-产品
+           P1-5）落地前恒无版本数据，v-if 整条隐藏 —— 结构按设计稿先行实现 -->
+      <view v-if="firmwareUpdate" class="firmware-bar flex items-center">
+        <image class="firmware-bar__icon" :src="getIcon('download', 'amberInk')" mode="aspectFit" />
+        <text class="firmware-bar__text block">发现新版本 v{{ firmwareUpdate.version }}，建议更新</text>
+        <view class="flex-1" />
+        <text class="firmware-bar__action font-medium">立即更新</text>
+        <image class="firmware-bar__chevron" :src="getIcon('chevron-right', 'amberInk')" mode="aspectFit" />
+      </view>
 
       <!-- ========= 监测设置卡（r16） ========= -->
       <view class="group bg-card rounded-card">
+        <text class="group__title text-main font-bold block">监测设置</text>
         <view class="row">
           <text class="row-title text-main">哭声灵敏度</text>
           <view class="flex-1" />
           <!-- 灵敏度二级页 v1.2 待补（规范 5.5），暂只读展示；可在设置页 ActionSheet 调整 -->
           <text class="row-value text-secondary">{{ settings.sensitivity }}</text>
+          <image class="row-chevron" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
         </view>
         <view class="row">
           <text class="row-title text-main">哭声提醒</text>
@@ -356,6 +370,45 @@ page {
 
 .row-title {
   font-size: 30rpx; // 15px
+}
+
+/* 卡内组标题（规范 5.5：「连接信息」「监测设置」17px Bold） */
+.group__title {
+  padding: 28rpx 32rpx 4rpx;
+  font-size: 34rpx;
+}
+
+.row-chevron {
+  width: 32rpx;
+  height: 32rpx;
+}
+
+/* 固件更新条（规范 5.5：琥珀 #F7EBD4 r12，ic-download 染 #B07A28） */
+.firmware-bar {
+  gap: 12rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 12rpx;
+  background-color: $color-amber-soft;
+
+  &__icon {
+    width: 32rpx;
+    height: 32rpx;
+  }
+
+  &__text {
+    font-size: 26rpx;
+    color: $color-amber-ink;
+  }
+
+  &__action {
+    font-size: 26rpx;
+    color: $color-amber-ink;
+  }
+
+  &__chevron {
+    width: 24rpx;
+    height: 24rpx;
+  }
 }
 
 /* ------------------------------------------------------------------ */
