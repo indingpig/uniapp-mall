@@ -43,8 +43,14 @@ export interface HistoryRecord {
   status: BabyStatusData['status'];
 }
 
-export function fetchBabyHistory(): Promise<{ items: HistoryRecord[] }> {
-  return http.get<{ items: HistoryRecord[] }>('/api/history').then(res => res.data);
+/** 事件层记录（设计规范 6/T-07）：「有动静」等不改主状态的事件，时间线单条呈现 */
+export interface TimelineEvent {
+  time: number;
+  type: 'noise';
+}
+
+export function fetchBabyHistory(): Promise<{ items: HistoryRecord[]; events?: TimelineEvent[] }> {
+  return http.get<{ items: HistoryRecord[]; events?: TimelineEvent[] }>('/api/history').then(res => res.data);
 }
 
 export interface DailyStat {
@@ -55,10 +61,10 @@ export interface DailyStat {
   sampleCount: number;
 }
 
-export function fetchHistoryRange(from: number, to: number, pageSize = 1000): Promise<HistoryRecord[]> {
+export function fetchHistoryRange(from: number, to: number, pageSize = 1000): Promise<{ items: HistoryRecord[]; events: TimelineEvent[] }> {
   return http
-    .get<{ items: HistoryRecord[] }>(`/api/history?from=${from}&to=${to}&pageSize=${pageSize}`)
-    .then(res => res.data.items);
+    .get<{ items: HistoryRecord[]; events: TimelineEvent[] }>(`/api/history?from=${from}&to=${to}&pageSize=${pageSize}`)
+    .then(res => res.data);
 }
 
 export function fetchDailyStats(days = 7): Promise<DailyStat[]> {

@@ -144,9 +144,16 @@ interface BabyEvent {
   title: string;
   detail: string;
   timeText: string;
+  /** 事件时间戳（噪声事件与状态切换事件归并排序用） */
+  ts: number;
 }
 
 const events = ref<BabyEvent[]>([]);
+/** 今日最新事件时间戳（铃铛红点未读判定基准，规范 S-06） */
+const lastEventTs = ref(0);
+/** 红点未读：今日最新事件时间戳 > 最近一次已读时刻（铃铛点击后清零） */
+const bellReadAt = ref<number>(Number(uni.getStorageSync(CACHE_KEY.BELL_READ_AT) || 0));
+const hasUnreadBell = computed(() => hasPairedDevice.value && lastEventTs.value > bellReadAt.value);
 
 function formatTime(ts: number): string {
   const d = new Date(ts);
@@ -156,7 +163,9 @@ function formatTime(ts: number): string {
 
 function loadEvents() {
   fetchBabyHistory()
-    .then(({ items }) => {
+    .then(({ items, events: noiseEvents }) => {
+      lastEventTs.value = items[0]?.time ?? 0;
+      const todayStart = new Date().setHours(0, 0, 0, 0);
       const list: BabyEvent[] = [];
       for (let i = 0; i < items.length - 1 && list.length < 3; i++) {
         const cur = items[i];
@@ -173,9 +182,27 @@ function loadEvents() {
           title: m.title,
           detail: cur.status === 'crying' && durationMin >= 1 ? `持续 ${durationMin} 分钟` : '状态切换',
           timeText: formatTime(cur.time),
+          ts: cur.time,
         });
       }
-      events.value = list;
+      // 事件层「有动静」（规范 T-07）：与状态切换事件按时间归并，单条呈现
+      const noiseMeta = EVENT_META.noise;
+      for (const e of noiseEvents ?? []) {
+        if (e.time < todayStart)
+          continue;
+        list.push({
+          key: `noise-${e.time}`,
+          icon: noiseMeta.icon,
+          color: noiseMeta.color,
+          chipBg: noiseMeta.chipBg,
+          title: noiseMeta.title,
+          detail: '翻身声检测',
+          timeText: formatTime(e.time),
+          ts: e.time,
+        });
+      }
+      list.sort((a, b) => b.ts - a.ts);
+      events.value = list.slice(0, 3);
     })
     .catch(() => {});
 }
@@ -192,7 +219,8 @@ function formatDuration(totalSec: number): string {
   const mm = Math.floor((s % 3600) / 60);
   const ss = s % 60;
   const pad = (n: number) => n.toString().padStart(2, '0');
-  return hh > 0 ? `${pad(hh)}:${pad(mm)}:${pad(ss)}` : `${pad(mm)}:${pad(ss)}`;
+  // 规范 L-06：状态卡计时恒为 h:mm:ss（设计稿 01「已持续 1:23:45」）
+  return `${pad(hh)}:${pad(mm)}:${pad(ss)}`;
 }
 
 function buildGreeting(): string {
@@ -208,8 +236,15 @@ function buildGreeting(): string {
   return '晚上好';
 }
 
+/** 铃铛（规范 S-06）：点击 → 历史页当日，红点清零（新事件会重新点亮） */
 function onBellTap() {
-  uni.showToast({ title: '通知中心开发中', icon: 'none' });
+  bellReadAt.value = Date.now();
+  storage.set(CACHE_KEY.BELL_READ_AT, bellReadAt.value);
+  // 联动历史页「当日」：复用统计下钻的日期定位机制
+  const d = new Date();
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  uni.setStorageSync('STATS_DRILL_DATE', key);
+  goHistory();
 }
 
 function toggleListen() {
@@ -309,6 +344,14 @@ function goHistory() {
   uni.switchTab({ url: '/pages/history/index' });
 }
 
+/** 「查看全部」→ 历史页当日（规范 S-06）：复用统计下钻的日期定位机制 */
+function goHistoryToday() {
+  const d = new Date();
+  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  uni.setStorageSync('STATS_DRILL_DATE', key);
+  goHistory();
+}
+
 function goSettings() {
   uni.switchTab({ url: '/pages/settings/index' });
 }
@@ -357,9 +400,15 @@ onBeforeUnmount(() => {
       <!-- 头部：问候语 + 通知铃铛（吸顶；胶囊避让必须留在本元素上，吸顶后才不钻到胶囊底下） -->
       <view class="header sticky-top flex items-center justify-between" :style="capsuleTopGap ? { paddingTop: `${capsuleTopGap}px` } : undefined">
         <text class="header__greeting text-main font-bold">{{ greeting }}，{{ userName }}</text>
-        <view class="bell relative" @tap="onBellTap">
-          <image class="bell__icon" :src="getIcon('bell', 'ink')" mode="aspectFit" />
-          <view v-if="hasPairedDevice" class="bell__dot rounded-full bg-coral absolute" />
+        <view class="flex items-center gap-3">
+          <!-- 静音态徽章（设计稿 20）：header 琥珀胶囊提示当前静音中 -->
+          <view v-if="muted && !isDeviceOffline" class="mute-badge rounded-pill">
+            静音中
+          </view>
+          <view class="bell relative" @tap="onBellTap">
+            <image class="bell__icon" :src="getIcon('bell', 'ink')" mode="aspectFit" />
+            <view v-if="hasUnreadBell" class="bell__dot rounded-full bg-coral absolute" />
+          </view>
         </view>
       </view>
 
@@ -498,7 +547,7 @@ onBeforeUnmount(() => {
           <view class="flex items-center justify-between">
             <text class="card__title font-bold" :class="isDeviceOffline ? 'text-muted' : 'text-main'">今日事件</text>
             <text v-if="isDeviceOffline" class="events-sync text-muted">重连后同步</text>
-            <view v-else class="flex items-center gap-1" @tap="goHistory">
+            <view v-else class="flex items-center gap-1" @tap="goHistoryToday">
               <text class="events-more text-secondary">查看全部</text>
               <image class="events-more__arrow" :src="getIcon('chevron-right', 'secondary')" mode="aspectFit" />
             </view>
@@ -537,15 +586,16 @@ onBeforeUnmount(() => {
           </view>
           <view
             class="action-btn rounded-pill flex items-center justify-center gap-2"
-            :class="isDeviceOffline ? 'action-btn--disabled' : (muted ? 'action-btn--muted' : 'action-btn--plain bg-card')"
+            :class="isDeviceOffline ? 'action-btn--disabled' : (muted ? 'action-btn--muted-on' : 'action-btn--plain bg-card')"
             @tap="toggleMute"
           >
             <image
               class="action-btn__icon"
-              :src="getIcon('bell-off', muted ? 'danger' : (isDeviceOffline ? 'disabled' : 'ink'))"
+              :src="getIcon('bell-off', muted ? 'white' : (isDeviceOffline ? 'disabled' : 'ink'))"
               mode="aspectFit"
             />
-            <text class="action-btn__text" :class="muted ? 'text-coral' : 'text-main'">静音提醒</text>
+            <!-- 静音态（设计稿 20）：绿底白字「静音中」，非旧版浅红方案 -->
+            <text class="action-btn__text" :class="muted ? 'text-white' : 'text-main'">{{ muted ? '静音中' : '静音提醒' }}</text>
           </view>
         </view>
       </template>
@@ -597,6 +647,15 @@ page {
     font-size: 52rpx;
     letter-spacing: 1rpx;
   }
+}
+
+/* 静音态徽章（设计稿 20）：header 琥珀胶囊 */
+.mute-badge {
+  padding: 8rpx 20rpx;
+  background-color: $color-amber-soft;
+  font-size: 22rpx;
+  font-weight: 500;
+  color: $color-amber-ink;
 }
 
 /* 离线提示条（规范 12.1）：琥珀底 r12 */
@@ -870,8 +929,9 @@ page {
     box-shadow: 0 4rpx 24rpx rgba(60, 50, 30, 0.04);
   }
 
-  &--muted {
-    background-color: $color-danger-soft;
+  // 静音态（设计稿 20）：绿底白字「静音中」，与监听按钮同为实底绿
+  &--muted-on {
+    background-color: $color-primary;
   }
 
   &--disabled {

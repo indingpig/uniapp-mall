@@ -7,6 +7,8 @@ export const CACHE_KEY = {
   PAIRED_SERVER_URL: 'BABY_PAIRED_SERVER_URL',
   /** 设备重命名的本机昵称（设备详情页导航行「重命名」，规范 5.5；空=显示配对设备名） */
   DEVICE_NAME_OVERRIDE: 'BABY_DEVICE_NAME_OVERRIDE',
+  /** 首页铃铛红点已读时刻（规范 S-06：今日最新事件时间戳 > 此值即点亮红点） */
+  BELL_READ_AT: 'BABY_BELL_READ_AT',
   /** TabBar 上一次激活的 tab key（用于高亮滑块的移动方向） */
   TABBAR_PREV: 'BABY_TABBAR_PREV',
   /** 采集页: 开发板地址（http://babycry.local 或 IP） */
