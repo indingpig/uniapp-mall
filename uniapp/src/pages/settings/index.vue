@@ -15,7 +15,7 @@ import { getIcon } from '@/utils/icons';
 import { loadMonitorSettings, persistMonitorSettings, SENSITIVITY_OPTIONS } from '@/utils/monitorSettings';
 import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAuthorized } from '@/utils/notify';
 import { resolveServerUrl } from '@/utils/server';
-import { clearPairingRecords, hasLocalPairing } from '@/utils/storage';
+import { hasLocalPairing } from '@/utils/storage';
 
 const { capsuleTopGap } = useCapsuleGap();
 
@@ -146,9 +146,6 @@ const QR_SIZE = 180; // px，须与 canvas 宽高一致
 const shareVisible = ref(false);
 const shareUrl = ref('');
 
-/** 设备详情弹框（含删除设备入口） */
-const deviceModalVisible = ref(false);
-
 function onShareTap() {
   const url = resolveServerUrl();
   if (!url) {
@@ -194,35 +191,9 @@ function goCollect() {
   uni.navigateTo({ url: '/pages/collect/index' });
 }
 
+/** 设备卡 → 设备详情页（规范 5.5）：重命名/监测设置/解除配对都在详情页 */
 function onDeviceTap() {
-  deviceModalVisible.value = true;
-}
-
-function onDeviceModalClose() {
-  deviceModalVisible.value = false;
-}
-
-/**
- * 删除设备：仅清 App 端记录（配对记录 + 服务器地址），设备本身不受影响——
- * 恢复出厂只能走设备 BOOT 长按 10s 硬件手势（配网安全模型的物理存在证明），
- * server 侧记录待设备注册表立项后再联动。删除后各页经 onShow 重读
- * hasLocalPairing() 自动回到空态/占位态。
- */
-function onDeleteDevice() {
-  uni.showModal({
-    title: '删除设备',
-    content: `将清除本机与 ${device.value.name} 的配对记录及服务器地址，设备本身不受影响，可随时重新配对接回。`,
-    confirmText: '删除',
-    confirmColor: colors.danger,
-    success: ({ confirm }) => {
-      if (!confirm)
-        return;
-      clearPairingRecords();
-      hasPairedDevice.value = false;
-      deviceModalVisible.value = false;
-      uni.showToast({ title: '已删除设备', icon: 'none' });
-    },
-  });
+  uni.navigateTo({ url: '/pages/device-detail/index' });
 }
 
 /** 未配对时设备行即配对入口（与首页空态口径一致） */
@@ -404,29 +375,6 @@ onShow(() => {
           复制地址
         </AppButton>
         <text class="share-modal__later" @tap="onShareClose">关闭</text>
-      </view>
-    </view>
-
-    <!-- 设备详情弹框（删除设备入口：仅清本机记录，恢复出厂走设备 BOOT 10s 硬件手势） -->
-    <view v-if="deviceModalVisible" class="device-mask" @tap="onDeviceModalClose">
-      <view class="device-modal" @tap.stop>
-        <text class="device-modal__title">{{ device.name }}</text>
-        <view class="device-modal__meta">
-          <view class="device-modal__meta-row">
-            <text class="device-modal__meta-label text-secondary">连接状态</text>
-            <text class="text-main">{{ device.connectionText }}</text>
-          </view>
-          <view class="device-modal__meta-row">
-            <text class="device-modal__meta-label text-secondary">供电方式</text>
-            <text class="text-main">充电宝供电</text>
-          </view>
-        </view>
-        <text class="device-modal__hint text-secondary block">删除设备仅清除本机的配对记录与服务器地址，设备将继续工作，家人观看不受影响。</text>
-        <text class="device-modal__hint text-secondary block">设备恢复出厂：长按设备上的 BOOT 键 10 秒（需在设备旁操作）。</text>
-        <AppButton size="cta" variant="danger" class="device-modal__cta" @tap="onDeleteDevice">
-          删除设备
-        </AppButton>
-        <text class="device-modal__later" @tap="onDeviceModalClose">关闭</text>
       </view>
     </view>
 
@@ -618,66 +566,6 @@ page {
     font-size: 22rpx;
     text-align: center;
     word-break: break-all;
-  }
-
-  &__cta {
-    width: 100%;
-    margin-top: 32rpx;
-  }
-
-  &__later {
-    margin-top: 24rpx;
-    padding: 8rpx;
-    font-size: 25rpx;
-    color: $color-text-muted;
-  }
-}
-
-.device-mask {
-  @include modal-mask;
-}
-
-.device-modal {
-  @include modal-card;
-
-  &__title {
-    max-width: 100%;
-    font-size: 40rpx;
-    font-weight: 700;
-    color: $color-primary-deep;
-    word-break: break-all;
-    text-align: center;
-  }
-
-  &__meta {
-    width: 100%;
-    margin-top: 28rpx;
-    padding: 24rpx;
-    border-radius: 16rpx;
-    background-color: $color-card-soft;
-  }
-
-  &__meta-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 26rpx;
-
-    & + & {
-      margin-top: 16rpx;
-    }
-  }
-
-  &__meta-label {
-    font-size: 26rpx;
-  }
-
-  &__hint {
-    width: 100%;
-    margin-top: 16rpx;
-    font-size: 24rpx;
-    line-height: 1.5;
-    text-align: left;
   }
 
   &__cta {
