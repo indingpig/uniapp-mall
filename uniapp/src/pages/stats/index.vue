@@ -26,6 +26,15 @@ onShow(() => {
   loadPeriod();
 });
 
+/** 空态 CTA（设计稿 13）：与首页空态同构 */
+function goPairing() {
+  uni.navigateTo({ url: '/pages/pairing/index' });
+}
+
+function onHelpTap() {
+  uni.showToast({ title: '帮助中心开发中', icon: 'none' });
+}
+
 /* ------------------------------------------------------------------ */
 /*  周期分段（今日 / 本周 / 本月）                                       */
 /* ------------------------------------------------------------------ */
@@ -81,7 +90,7 @@ async function loadPeriod() {
   try {
     if (period.value === 'today') {
       // 昨天数据一并拉取：昨天作睡眠/哭闹环比基线（summary.total 是缓冲区全量，不能当昨日）
-      const [sum, dailyStats, records] = await Promise.all([
+      const [sum, dailyStats, range] = await Promise.all([
         fetchStatsSummary(),
         fetchDailyStats(2),
         fetchHistoryRange(dayStart(Date.now() - 86_400_000).getTime(), Date.now()),
@@ -89,12 +98,12 @@ async function loadPeriod() {
       summary.value = sum;
       prevDayCry.value = dailyStats.length > 1 ? dailyStats[0].cryCount : 0;
       daily.value = dailyStats.slice(-1);
-      applyDerived(records, Date.now(), dayStart(Date.now()).getTime());
+      applyDerived(range.items, Date.now(), dayStart(Date.now()).getTime());
     }
     else if (period.value === 'week') {
       daily.value = await fetchDailyStats(7);
       const start = dayStart(Date.now() - 6 * 86_400_000).getTime();
-      const records = await fetchHistoryRange(start, Date.now());
+      const { items: records } = await fetchHistoryRange(start, Date.now());
       applyDerived(records, Date.now());
     }
     else {
@@ -103,7 +112,7 @@ async function loadPeriod() {
       const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const spanDays = Math.ceil((Date.now() - prevMonthStart.getTime()) / 86_400_000) + 1;
       daily.value = await fetchDailyStats(spanDays);
-      const records = await fetchHistoryRange(prevMonthStart.getTime(), Date.now());
+      const { items: records } = await fetchHistoryRange(prevMonthStart.getTime(), Date.now());
       applyDerived(records, Date.now());
     }
   }
@@ -225,22 +234,37 @@ const monthBuckets = computed(() => {
   });
 });
 
-/** 柱状图数据源：本周 = 最近 7 天逐日（可点选下钻）；本月 = 周聚合（展示为主） */
+/** 柱状图数据源：本周 = 最近 7 天逐日（可点选下钻）；本月 = 周聚合（展示为主）。
+ *  incomplete = 过去无样本日（L-04③ 设备离线整天）：柱位显示 wifi-off 琥珀图标 +
+ *  标签琥珀，不参与最长日与有效日均计算，不可点选下钻 */
 const chartBars = computed(() => {
   if (period.value === 'week') {
-    return daily.value.map((d, i) => ({
-      key: d.date,
-      label: i === daily.value.length - 1 ? '今天' : `周${WEEKDAY[new Date(`${d.date}T00:00:00`).getDay()]}`,
-      sample: d.sampleCount,
-      cry: d.cryCount,
-      selectable: true,
-      isToday: i === daily.value.length - 1,
-    }));
+    return daily.value.map((d, i) => {
+      const isToday = i === daily.value.length - 1;
+      const incomplete = !isToday && d.sampleCount === 0;
+      return {
+        key: d.date,
+        label: isToday ? '今天' : `周${WEEKDAY[new Date(`${d.date}T00:00:00`).getDay()]}`,
+        sample: d.sampleCount,
+        cry: d.cryCount,
+        selectable: !incomplete,
+        isToday,
+        incomplete,
+      };
+    });
   }
-  return monthBuckets.value.map(b => ({ ...b, selectable: false, isToday: false }));
+  return monthBuckets.value.map(b => ({ ...b, selectable: false, isToday: false, incomplete: false }));
 });
 const sampleMax = computed(() => Math.max(1, ...chartBars.value.map(b => b.sample)));
 const cryMax = computed(() => Math.max(1, ...chartBars.value.map(b => b.cry)));
+
+/** 本周窗口内的离线整天数（L-04③）：过去 6 日中样本数为 0 的天（今天恒为实时累计） */
+const weekIncompleteDays = computed(() =>
+  period.value === 'week' ? chartBars.value.filter(b => b.incomplete).length : 0,
+);
+
+/** 本周有效日（有采样数据的天数），用于「日均（按 N 个有效日计算）」 */
+const weekValidDays = computed(() => daily.value.filter(d => d.sampleCount > 0).length);
 
 /** 柱高百分比（相对组内最大值，最低 6% 保证可点视觉存在） */
 function barHeight(value: number, max: number): string {
@@ -307,6 +331,9 @@ const sleepSub = computed(() => {
     const max = monthMaxSleep.value;
     return `合计 ${fmtDuration(monthSleepMs.value)} · 最长 ${max ? `${fmtDuration(max[1])}（${max[0].slice(5, 7)}/${pad2(dayOfMonth(max[0]))}）` : '--'}`;
   }
+  // L-04③ 部分数据态：有离线整天时改口径为「按有效日计算」（设计稿 11-部分数据）
+  if (weekIncompleteDays.value > 0)
+    return `日均（按 ${weekValidDays.value} 个有效日计算）`;
   return `日均 ${sleepAvgText.value}${sleepMaxDay.value ? ` · 最长 ${fmtDuration(sleepMaxDay.value[1])}（周${WEEKDAY[new Date(`${sleepMaxDay.value[0]}T00:00:00`).getDay()]}）` : ''}`;
 });
 
@@ -371,6 +398,9 @@ const crySub = computed(() => {
     return `已选中：${selectedDayLabel.value} · 点击空白处返回汇总`;
   if (period.value === 'month')
     return `平均每周 ${(cryTotal.value * 7 / elapsedDays.value).toFixed(1)} 次 · 单次最长 ${cryMaxText.value}`;
+  // L-04③ 部分数据态：副文改口径（设计稿 11-部分数据）
+  if (period.value === 'week' && weekIncompleteDays.value > 0)
+    return `有效日数据 · ${weekIncompleteDays.value} 天部分数据未计入`;
   return `平均单次 ${cryAvgText.value} · 最长 ${cryMaxText.value}`;
 });
 
@@ -391,11 +421,42 @@ const neutralRatio = computed(() =>
       <text class="page-title text-main font-bold">统计</text>
     </view>
 
-    <!-- ========= 首次空态门控 ========= -->
-    <view v-if="!hasPairedDevice" class="empty text-center">
-      <image class="empty__img" src="/static/icons/ic-monitor-wave.svg" mode="aspectFit" />
-      <text class="empty__text block text-secondary">连接设备后，这里会展示宝宝的统计回顾</text>
-    </view>
+    <!-- ========= 首次空态门控（设计稿 13：标题保留、分段控件隐藏、完整空态结构） ========= -->
+    <template v-if="!hasPairedDevice">
+      <text class="page-title text-main font-bold block">统计</text>
+      <view class="empty text-center">
+        <image class="empty__img" src="/static/icons/ic-monitor-wave.svg" mode="aspectFit" />
+        <text class="empty__title text-main font-semibold block">还没有统计数据</text>
+        <text class="empty__text block text-secondary">连接宝宝监护器后，这里会展示宝宝的睡眠与哭闹统计</text>
+      </view>
+      <AppButton size="cta" @tap="goPairing">
+        <image class="btn-cta__icon" :src="getIcon('bluetooth', 'white')" mode="aspectFit" />
+        去配对设备
+      </AppButton>
+      <text class="help-link text-secondary block text-center" @tap="onHelpTap">如何配对？查看教程</text>
+      <view class="card rights-card bg-card rounded-lg mt-6">
+        <text class="rights-card__title text-main font-bold">连接后你将看到</text>
+        <view class="rights-row flex items-center gap-3 mt-4">
+          <view class="event-chip rounded-full bg-primary-soft flex items-center justify-center shrink-0">
+            <image class="event-chip__icon" :src="getIcon('moon', 'primary')" mode="aspectFit" />
+          </view>
+          <text class="rights-row__text text-main">睡眠时长趋势与周/月对比</text>
+        </view>
+        <view class="rights-row flex items-center gap-3 mt-3">
+          <view class="event-chip rounded-full bg-danger-soft flex items-center justify-center shrink-0">
+            <image class="event-chip__icon" :src="getIcon('droplet', 'danger')" mode="aspectFit" />
+          </view>
+          <!-- 文案按规范 I-09 裁定：不做「平均响应」指标，改为持续时长 -->
+          <text class="rights-row__text text-main">哭闹次数与持续时长</text>
+        </view>
+        <view class="rights-row flex items-center gap-3 mt-3">
+          <view class="event-chip rounded-full bg-amber-soft flex items-center justify-center shrink-0">
+            <image class="event-chip__icon" :src="getIcon('bar-chart', 'amber')" mode="aspectFit" />
+          </view>
+          <text class="rights-row__text text-main">状态时间分布占比</text>
+        </view>
+      </view>
+    </template>
 
     <template v-else>
       <!-- ========= 周期分段控件 ========= -->
@@ -409,6 +470,12 @@ const neutralRatio = computed(() =>
         >
           <text class="seg__label" :class="period === p.key ? 'text-white font-medium' : 'text-secondary'">{{ p.label }}</text>
         </view>
+      </view>
+
+      <!-- 部分数据提示条（L-04③，设计稿 11-部分数据）：本周有离线整天时 -->
+      <view v-if="weekIncompleteDays > 0 && period === 'week'" class="partial-banner rounded-lg flex items-center">
+        <image class="partial-banner__icon" :src="getIcon('wifi-off', 'amberInk')" mode="aspectFit" />
+        <text class="partial-banner__text">本周有 {{ weekIncompleteDays }} 天设备离线，相关数据未计入</text>
       </view>
 
       <!-- ========= 睡眠时长卡 ========= -->
@@ -469,7 +536,10 @@ const neutralRatio = computed(() =>
             @tap.stop="b.selectable && toggleDay(i)"
           >
             <view class="bars__zone flex-1 w-full flex items-end justify-center">
+              <!-- L-04③ 部分数据态：离线整天显示 wifi-off 琥珀图标，无柱 -->
+              <image v-if="b.incomplete" class="bars__offline" :src="getIcon('wifi-off', 'amberInk')" mode="aspectFit" />
               <view
+                v-else
                 class="bars__bar rounded-sm w-full"
                 :style="{
                   height: barHeight(b.sample, sampleMax),
@@ -477,7 +547,7 @@ const neutralRatio = computed(() =>
                 }"
               />
             </view>
-            <text class="bars__label text-secondary" :class="{ 'bars__label--today text-main': b.isToday || selectedDayIndex === i }">{{ b.label }}</text>
+            <text class="bars__label text-secondary" :class="{ 'bars__label--today text-main': b.isToday || selectedDayIndex === i, 'bars__label--incomplete': b.incomplete }">{{ b.label }}</text>
           </view>
         </view>
       </view>
@@ -532,7 +602,9 @@ const neutralRatio = computed(() =>
             @tap.stop="b.selectable && toggleDay(i)"
           >
             <view class="bars__zone flex-1 w-full flex items-end justify-center">
+              <image v-if="b.incomplete" class="bars__offline" :src="getIcon('wifi-off', 'amberInk')" mode="aspectFit" />
               <view
+                v-else
                 class="bars__bar rounded-sm w-full"
                 :style="{
                   height: barHeight(b.cry, cryMax),
@@ -540,7 +612,7 @@ const neutralRatio = computed(() =>
                 }"
               />
             </view>
-            <text class="bars__label text-secondary" :class="{ 'bars__label--today text-main': b.isToday || selectedDayIndex === i }">{{ b.label }}</text>
+            <text class="bars__label text-secondary" :class="{ 'bars__label--today text-main': b.isToday || selectedDayIndex === i, 'bars__label--incomplete': b.incomplete }">{{ b.label }}</text>
           </view>
         </view>
       </view>
@@ -806,7 +878,12 @@ page {
   }
 }
 
-/* ---------- 首次空态 ---------- */
+/* ---------- 首次空态（设计稿 13：完整结构同首页空态） ---------- */
+.page-title {
+  padding: 16rpx 4rpx 0;
+  font-size: 56rpx;
+}
+
 .empty {
   // 空态统一自 state.scss（与历史页同形状）
   @include empty-state;
@@ -815,8 +892,75 @@ page {
     @include empty-img;
   }
 
+  &__title {
+    margin-top: 16rpx;
+    font-size: 37rpx; // 19px
+  }
+
   &__text {
     @include empty-text;
+    max-width: 480rpx;
   }
+}
+
+/* 空态预告卡（「连接后你将看到」）与 CTA 图标——样式对齐首页空态 */
+.btn-cta__icon {
+  width: 36rpx;
+  height: 36rpx;
+}
+
+.help-link {
+  margin-top: 20rpx;
+  font-size: 25rpx;
+}
+
+.rights-card {
+  &__title {
+    font-size: 30rpx;
+  }
+}
+
+.rights-row {
+  &__text {
+    font-size: 27rpx; // 14px
+    font-weight: 500;
+  }
+}
+
+.event-chip {
+  width: 64rpx;
+  height: 64rpx;
+
+  &__icon {
+    width: 32rpx;
+    height: 32rpx;
+  }
+}
+
+/* ---------- 部分数据态（L-04③，设计稿 11-部分数据） ---------- */
+.partial-banner {
+  gap: 12rpx;
+  padding: 20rpx 24rpx;
+  background-color: $color-amber-soft;
+
+  &__icon {
+    width: 32rpx;
+    height: 32rpx;
+  }
+
+  &__text {
+    font-size: 24rpx;
+    font-weight: 500;
+    color: $color-amber-ink;
+  }
+}
+
+.bars__offline {
+  width: 40rpx;
+  height: 40rpx;
+}
+
+.bars__label--incomplete {
+  color: $color-amber-ink;
 }
 </style>
