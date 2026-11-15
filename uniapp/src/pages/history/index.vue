@@ -3,7 +3,7 @@
 </route>
 
 <script setup lang="ts">
-import type { HistoryRecord } from '@/api/baby';
+import type { TimelineEvent } from '@/api/baby';
 import type { IconKey } from '@/utils/icons';
 import { onShow } from '@dcloudio/uni-app';
 import { computed, ref } from 'vue';
@@ -68,6 +68,7 @@ function shiftDay(delta: number) {
 /* ------------------------------------------------------------------ */
 interface TimelineRow {
   key: string;
+  ts: number;
   timeText: string;
   icon: IconKey;
   color: string;
@@ -108,29 +109,50 @@ function loadDay() {
   const end = start.getTime() + DAY_MS;
   loading.value = true;
   fetchHistoryRange(start.getTime(), Math.min(end, Date.now()))
-    .then((records: HistoryRecord[]) => {
-      const { events, sleepMs: sleep, cryCount: cries } = deriveTimeline(records, Math.min(end, Date.now()));
+    .then(({ items, events }) => {
+      const { events: statusEvents, sleepMs: sleep, cryCount: cries } = deriveTimeline(items, Math.min(end, Date.now()));
       sleepMs.value = sleep;
       cryCount.value = cries;
-      eventCount.value = events.length;
-      rows.value = events.map((e) => {
-        const m = EVENT_META[e.to as keyof typeof EVENT_META] ?? EVENT_META.offline;
-        // 标题行 = 事件名 · 原因；副文 = 持续时长（≥1 分钟才显示，对齐设计稿 10）
-        const title = `${META_TITLE[e.to] ?? '状态切换'} · ${META_SUB[e.to] ?? ''}`;
-        const detail = e.durationMs >= 60_000 ? `持续 ${Math.round(e.durationMs / 60_000)} 分钟` : '短暂出现';
-        return {
-          key: `${e.time}`,
-          timeText: fmtTime(e.time),
-          icon: m.icon,
-          color: m.color,
-          chipBg: m.chipBg,
-          title,
-          detail,
-        };
-      });
+      rows.value = buildRows(statusEvents, events ?? []).sort((a, b) => b.ts - a.ts);
+      eventCount.value = rows.value.length;
     })
     .catch(() => {})
     .finally(() => { loading.value = false; });
+}
+
+/** 状态切换事件 + 噪声事件层（规范 T-07）按时间归并成时间线行 */
+function buildRows(
+  statusEvents: ReturnType<typeof deriveTimeline>['events'],
+  noiseEvents: TimelineEvent[],
+): TimelineRow[] {
+  const statusRows = statusEvents.map((e) => {
+    const m = EVENT_META[e.to as keyof typeof EVENT_META] ?? EVENT_META.offline;
+    // 标题行 = 事件名 · 原因；副文 = 持续时长（≥1 分钟才显示，对齐设计稿 10）
+    const title = `${META_TITLE[e.to] ?? '状态切换'} · ${META_SUB[e.to] ?? ''}`;
+    const detail = e.durationMs >= 60_000 ? `持续 ${Math.round(e.durationMs / 60_000)} 分钟` : '短暂出现';
+    return {
+      key: `${e.time}`,
+      ts: e.time,
+      timeText: fmtTime(e.time),
+      icon: m.icon,
+      color: m.color,
+      chipBg: m.chipBg,
+      title,
+      detail,
+    };
+  });
+  const noiseMeta = EVENT_META.noise;
+  const noiseRows: TimelineRow[] = noiseEvents.map(e => ({
+    key: `noise-${e.time}`,
+    ts: e.time,
+    timeText: fmtTime(e.time),
+    icon: noiseMeta.icon,
+    color: noiseMeta.color,
+    chipBg: noiseMeta.chipBg,
+    title: '有动静 · 翻身声检测',
+    detail: '短暂出现',
+  }));
+  return [...statusRows, ...noiseRows];
 }
 
 const sleepText = computed(() => fmtDuration(sleepMs.value));
