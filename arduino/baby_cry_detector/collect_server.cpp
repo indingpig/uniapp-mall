@@ -136,7 +136,9 @@ static bool wsHandleIncoming(WiFiClient& c) {
       if (c.available() < 4) return true;
       for (int i = 0; i < 4; i++) mask[i] = c.read();
     }
-    if (len > 512) return false;
+    // 严格小于 sizeof(wsPayload): text 分支要写 wsPayload[len]='\0', len==512 时
+    // 会越界 1 字节破坏相邻 BSS (server_link.cpp 的 s_rxPayload 同款判定是对的)
+    if (len >= sizeof(wsPayload)) return false;
 
     // 等全部 payload 到齐 (关键: 命令帧可能分片到达, 必须读完整再解析)
     size_t got = 0;
@@ -157,11 +159,14 @@ static bool wsHandleIncoming(WiFiClient& c) {
       c.write(closeFrame, 2);
       return false;
     } else if (opcode == 0x9) {   // ping → pong
+      // RFC6455: 控制帧载荷上限 125 字节。客户端 ping 超长时必须截断回显 ——
+      // pong 是 127 字节栈缓冲, 原实现按 len(≤511) memcpy 会溢出 loopTask 栈
+      size_t plen = (len > 125) ? 125 : (size_t)len;
       uint8_t pong[2 + 125];
       pong[0] = 0x8A;
-      pong[1] = (uint8_t)len;
-      memcpy(pong + 2, wsPayload, (size_t)len);
-      c.write(pong, 2 + (size_t)len);
+      pong[1] = (uint8_t)plen;
+      memcpy(pong + 2, wsPayload, plen);
+      c.write(pong, 2 + plen);
     } else if (opcode == 0x1 && len > 0) {  // text 命令
       wsPayload[len] = 0;
       if (strstr((char*)wsPayload, "\"start\"")) {
