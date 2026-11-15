@@ -90,6 +90,9 @@ importers:
       '@dcloudio/uni-uts-v1':
         specifier: 3.0.0-5030420261029002
         version: 3.0.0-5030420261029002(rollup@4.63.5)(supports-color@8.1.1)
+      '@dcloudio/uts-linux-x64-gnu':
+        specifier: 3.0.0-5030420261029002
+        version: 3.0.0-5030420261029002
       '@dcloudio/vite-plugin-uni':
         specifier: 3.0.0-5030420261029002
         version: 3.0.0-5030420261029002(postcss@8.5.28)(rollup@4.63.5)(supports-color@8.1.1)(vite@5.2.8(@types/node@25.9.8)(sass@1.64.2)(terser@5.51.2))(vue@3.4.21(typescript@5.9.3))
@@ -1027,6 +1030,12 @@ packages:
 
   '@dcloudio/uni-uts-v1@3.0.0-5030420261029002':
     resolution: {integrity: sha512-Y2KF89Cn8P8hdAIsOmfhDE44eCPflmA7vt9oqMspkweNsgFMFzs7YilgG532YuxcjJHFBls8Uj2eYngtPi7Piw==}
+
+  '@dcloudio/uts-darwin-arm64@3.0.0-5030420261029002':
+    resolution: {integrity: sha512-hyxbimRVg8Y7RL4aygsgTlgaLHKIkU3plaOizArYBCKvoSrIZVOhfKlC1+6cWNN8asQC23nkUokDg4JrvtnhcA==}
+    engines: {node: '>=10'}
+    cpu: [arm64]
+    os: [darwin]
 
   '@dcloudio/uts-darwin-x64@3.0.0-5030420261029002':
     resolution: {integrity: sha512-0F3u5OUYF8eEglbm2nitCm6y/9s2wQrQA0C1MqtKQvp/p/laff5Qbzk2TYorV75o1fP40pBbPkpxPVdVvb69vw==}
@@ -7598,11 +7607,13 @@ snapshots:
       - rollup
       - supports-color
 
+  '@dcloudio/uts-darwin-arm64@3.0.0-5030420261029002':
+    optional: true
+
   '@dcloudio/uts-darwin-x64@3.0.0-5030420261029002':
     optional: true
 
-  '@dcloudio/uts-linux-x64-gnu@3.0.0-5030420261029002':
-    optional: true
+  '@dcloudio/uts-linux-x64-gnu@3.0.0-5030420261029002': {}
 
   '@dcloudio/uts-linux-x64-musl@3.0.0-5030420261029002':
     optional: true
@@ -7615,6 +7626,7 @@ snapshots:
 
   '@dcloudio/uts@3.0.0-5030420261029002':
     optionalDependencies:
+      '@dcloudio/uts-darwin-arm64': 3.0.0-5030420261029002
       '@dcloudio/uts-darwin-x64': 3.0.0-5030420261029002
       '@dcloudio/uts-linux-x64-gnu': 3.0.0-5030420261029002
       '@dcloudio/uts-linux-x64-musl': 3.0.0-5030420261029002

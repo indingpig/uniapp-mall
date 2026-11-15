@@ -4,8 +4,8 @@ export default defineManifestConfig({
   'name': '宝宝监护器',
   'appid': '__UNI__F18597F',
   'description': '婴儿监护器 - 实时监测宝宝状态',
-  'versionName': '1.0.0',
-  'versionCode': '100',
+  'versionName': '1.0.1',
+  'versionCode': '101',
   'transformPx': false,
   // 应用默认语言：固定 zh-Hans，H5 端内置组件文案（ActionSheet 取消、Modal 按钮等）不随浏览器语言漂移
   'locale': 'zh-Hans',
