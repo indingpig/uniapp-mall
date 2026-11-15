@@ -24,6 +24,16 @@ const {
 } = useBLE();
 
 const bleNotSupported = ref(false);
+/** 蓝牙权限被拒（设计稿 21）：App 端蓝牙授权为 denied 时的引导态。
+ *  与「不支持蓝牙」区分：被拒可去系统设置开启，开启后本态自动解除 */
+const bleBlocked = ref<'' | 'denied'>('');
+
+function checkBlePermission() {
+  // #ifdef APP-PLUS
+  const setting = uni.getAppAuthorizeSetting();
+  bleBlocked.value = setting.bluetoothAuthorized === 'denied' ? 'denied' : '';
+  // #endif
+}
 // #ifdef H5
 // H5 恒走适配器：支持 Web Bluetooth 的浏览器挂真实蓝牙，其余挂模拟器（见 mock/ble-adapter.ts）
 bleNotSupported.value = false;
@@ -153,11 +163,13 @@ const shownDevices = computed<BLEDevice[]>(() =>
 /*  页面状态机：unsupported / idle / scanning / timeout / wifi / pairing / done */
 /* ------------------------------------------------------------------ */
 
-type PairingPhase = 'unsupported' | 'idle' | 'scanning' | 'timeout' | 'wifi' | 'pairing' | 'done';
+type PairingPhase = 'unsupported' | 'permission-denied' | 'idle' | 'scanning' | 'timeout' | 'wifi' | 'pairing' | 'done';
 
 const phase = computed<PairingPhase>(() => {
   if (MOCK_STATE)
     return MOCK_STATE;
+  if (bleBlocked.value === 'denied')
+    return 'permission-denied';
   if (bleNotSupported.value)
     return 'unsupported';
   // wifi/pairing/done 由 currentStep 决定且不回退：配网中设备掉线时
@@ -250,6 +262,9 @@ async function startScanFlow() {
   radarLoop();
   // #endif
   await startScan();
+  // 适配器打开失败（蓝牙未开/权限被拒）→ 复核授权状态，进 21 号引导态
+  if (!scanning.value)
+    checkBlePermission();
 }
 
 function stopScanFlow() {
@@ -348,6 +363,20 @@ function onAppGuide() {
   uni.showToast({ title: '应用商店搜索「宝宝守护」', icon: 'none' });
 }
 
+/* 蓝牙权限被拒引导（设计稿 21）的两个动作 */
+function onOpenAppSettings() {
+  // 跳系统应用设置页；开启蓝牙权限后回到本页，onShow 复核自动解除引导态
+  uni.openAppAuthorizeSetting();
+}
+
+function onPermissionExplain() {
+  uni.showModal({
+    title: '为什么需要蓝牙权限',
+    content: '蓝牙与附近设备权限仅用于扫描并连接监护器，不用于定位或收集位置信息。',
+    showCancel: false,
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /*  生命周期                                                            */
 /* ------------------------------------------------------------------ */
@@ -357,6 +386,9 @@ onShow(() => {
   if (scanning.value && !radarTimer)
     radarLoop();
   // #endif
+  // 从系统设置返回时复核权限：用户开启蓝牙权限后解除 21 号引导态
+  if (bleBlocked.value === 'denied')
+    checkBlePermission();
 });
 
 onBeforeUnmount(() => {
@@ -383,18 +415,60 @@ onBeforeUnmount(() => {
       <text class="navbar__title text-main font-semibold">设备配对</text>
     </view>
 
-    <!-- ========= 三步条（引导态隐藏） ========= -->
-    <view v-if="phase !== 'unsupported'" class="steps flex items-center">
+    <!-- ========= 三步条（引导态/权限被拒态隐藏） ========= -->
+    <view v-if="phase !== 'unsupported' && phase !== 'permission-denied'" class="steps flex items-center">
       <template v-for="(label, i) in STEP_LABELS" :key="label">
         <view v-if="i > 0" class="steps__line" :class="{ 'steps__line--done': stepLines[i] }" />
         <view class="steps__dot rounded-full flex items-center justify-center" :class="`steps__dot--${stepStates[i]}`">
-          <text class="steps__num">{{ i + 1 }}</text>
+          <!-- 完成态 = 白勾（设计稿 03/12/15 步骤条） -->
+          <image v-if="stepStates[i] === 'done'" class="steps__check" :src="getIcon('check', 'white')" mode="aspectFit" />
+          <text v-else class="steps__num">{{ i + 1 }}</text>
         </view>
         <text class="steps__label" :class="`steps__label--${stepStates[i]}`">{{ label }}</text>
       </template>
     </view>
 
     <view class="main" :style="{ paddingTop: `${capsuleTopGap}px` }">
+      <!-- ========= 蓝牙权限被拒引导态（设计稿 21）：开启后 onShow 复核自动解除 ========= -->
+      <template v-if="phase === 'permission-denied'">
+        <view class="guide-hero flex flex-col items-center">
+          <view class="guide-hero__circle rounded-full bg-amber-soft flex items-center justify-center">
+            <image class="guide-hero__icon" :src="getIcon('bluetooth', 'amber')" mode="aspectFit" />
+          </view>
+          <text class="guide-hero__title text-main font-bold">需要开启蓝牙权限</text>
+          <text class="guide-hero__desc text-secondary text-center">请允许 App 使用蓝牙，否则无法搜索并连接监护器</text>
+        </view>
+
+        <view class="group bg-card rounded-card mt-4">
+          <view class="row" @tap="onOpenAppSettings">
+            <view class="row-chip rounded-full bg-primary-soft flex items-center justify-center shrink-0">
+              <image class="row-chip__icon" :src="getIcon('gear', 'primary')" mode="aspectFit" />
+            </view>
+            <view class="row-body flex-1">
+              <text class="row-title text-main block">前往系统设置开启</text>
+              <text class="row-desc text-secondary block">设置 › 应用 › 权限</text>
+            </view>
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
+          </view>
+          <view class="row" @tap="onPermissionExplain">
+            <view class="row-chip rounded-full bg-amber-soft flex items-center justify-center shrink-0">
+              <image class="row-chip__icon" :src="getIcon('eye', 'amberInk')" mode="aspectFit" />
+            </view>
+            <view class="row-body flex-1">
+              <text class="row-title text-main block">查看权限说明</text>
+              <text class="row-desc text-secondary block">为什么需要蓝牙与附近设备权限</text>
+            </view>
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
+          </view>
+        </view>
+
+        <text class="perm-foot text-muted block text-center">已配对设备不受影响，仍可查看历史与统计</text>
+
+        <view class="btn-ghost-h48 bg-card rounded-pill flex items-center justify-center mt-8" @tap="goBack">
+          <text class="btn-ghost-text text-main">返回</text>
+        </view>
+      </template>
+
       <!-- ========= 不支持蓝牙引导态 ========= -->
       <template v-if="phase === 'unsupported'">
         <view class="guide-hero flex flex-col items-center">
@@ -536,6 +610,9 @@ onBeforeUnmount(() => {
             </view>
           </view>
         </view>
+
+        <!-- 配对需 2.4GHz WiFi（规范 E-01，设计稿 03 底部提示行） -->
+        <text v-if="phase === 'scanning'" class="band-hint text-muted block text-center">配对需 2.4GHz WiFi，请确认手机已连接家庭网络</text>
 
         <!-- WiFi 配网（连接设备后显示，规范 5.4 板 1 紧凑重设计） -->
         <template v-if="phase === 'wifi' || phase === 'pairing' || phase === 'done'">
@@ -813,6 +890,12 @@ page {
   &--done {
     color: $color-text-primary;
   }
+}
+
+/* 完成态白勾（设计稿 03/12/15 步骤条） */
+.steps__check {
+  width: 22rpx;
+  height: 22rpx;
 }
 
 .steps__line {
@@ -1524,5 +1607,17 @@ page {
     text-align: center;
     font-size: 24rpx;
   }
+}
+
+/* ---------- 扫描底部 2.4GHz 提示（设计稿 03 底部提示行） ---------- */
+.band-hint {
+  margin-top: 24rpx;
+  font-size: 24rpx;
+}
+
+/* ---------- 蓝牙权限被拒引导态（设计稿 21） ---------- */
+.perm-foot {
+  margin-top: 32rpx;
+  font-size: 24rpx;
 }
 </style>
