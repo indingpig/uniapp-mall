@@ -316,6 +316,16 @@ onShow(() => {
             <view class="flex-1" />
             <AppSwitch v-model="pushNotifySwitch" @change="onPushNotifyChange" />
           </view>
+          <!-- 离线警告推送（设计定义补全 D-02/Q-01，规范 5 节 05 屏新增行）：
+               成员级各自生效，默认开；关闭后不接收设备离线推送，
+               不影响哭闹推送与 App 内离线提示条。推送通道落地后的接线点 -->
+          <view class="row">
+            <view class="row-body flex-1">
+              <text class="row-title text-main block">离线警告推送</text>
+              <text class="row-desc text-secondary block">关闭后不再接收设备离线提醒</text>
+            </view>
+            <AppSwitch v-model="settings.offlinePushEnabled" @change="persistSettings" />
+          </view>
         </view>
       </view>
 

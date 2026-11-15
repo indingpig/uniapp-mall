@@ -18,6 +18,13 @@ export interface MonitorSettings {
   alertVolume: string;
   /** 推送通知（含系统授权引导，见设置页 onPushNotifyChange） */
   pushNotify: boolean;
+  /**
+   * 离线警告推送（设计定义补全 D-02/Q-01，规范 5 节 05 屏新增行）：
+   * 成员级各自生效，默认开；关闭后该成员不再接收 A-04/A-05 离线推送，
+   * 不影响哭闹推送、不影响 App 内离线提示条。推送通道（厂商/APNs）落地前
+   * 本开关仅持久化偏好，接线点在通知发送侧。
+   */
+  offlinePushEnabled: boolean;
 }
 
 export const SENSITIVITY_OPTIONS = ['低', '中等', '高'];
@@ -28,6 +35,7 @@ export const DEFAULT_MONITOR_SETTINGS: MonitorSettings = {
   sensitivity: '中等',
   alertVolume: '70%',
   pushNotify: true,
+  offlinePushEnabled: true,
 };
 
 /** 读取监控设置：损坏数据/首启回默认值；旧记录缺新键（如 stateChangeAlert）自动补默认 */
