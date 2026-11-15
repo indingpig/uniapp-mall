@@ -22,11 +22,13 @@ export function hasLocalPairing(): boolean {
 }
 
 /**
- * 清除本机的设备配对与服务器地址记录（设置页「删除设备」用）。
- * 只删 App 端记录：设备 NVS 凭据不受影响（恢复出厂只能走设备 BOOT 长按 10s
- * 硬件手势），server 侧记录待设备注册表立项后再联动（todolist v1.2）。
+ * 清除本机的设备配对与服务器地址记录（设置页「删除设备」/ 设备详情页
+ * 「解除配对」用，规范 5.5）。只删 App 端记录：设备 NVS 凭据不受影响
+ * （恢复出厂只能走设备 BOOT 长按 10s 硬件手势），server 侧记录待设备
+ * 注册表立项后再联动（todolist v1.2）。昵称跟随设备一并清除。
  */
 export function clearPairingRecords(): void {
   uni.removeStorageSync(CACHE_KEY.PAIRED_DEVICE);
   uni.removeStorageSync(CACHE_KEY.PAIRED_SERVER_URL);
+  uni.removeStorageSync(CACHE_KEY.DEVICE_NAME_OVERRIDE);
 }

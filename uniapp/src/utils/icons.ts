@@ -28,6 +28,7 @@ export type IconKey
     | 'chevron-right'
     | 'clock-empty'
     | 'clock'
+    | 'device'
     | 'download'
     | 'droplet'
     | 'error'
@@ -91,6 +92,9 @@ const ICONS: Record<IconKey, string> = {
 
   'clock':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+
+  'device':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="1.8"/><path d="M14.8 9.5a2.8 2.8 0 1 1-5.6 0a2.8 2.8 0 1 1 5.6 0z" stroke="currentColor" stroke-width="1.8"/><path d="M8 19C9.2 17.6 10.6 16.9 12 16.9C13.4 16.9 14.8 17.6 16 19" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M5.5 22C7.3 19.8 9.5 18.8 12 18.8C14.5 18.8 16.7 19.8 18.5 22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
 
   'download':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10l5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 15V3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',

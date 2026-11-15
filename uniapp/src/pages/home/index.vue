@@ -313,6 +313,15 @@ function goSettings() {
   uni.switchTab({ url: '/pages/settings/index' });
 }
 
+/** 设备信息卡入口（规范 5.5）：在线 → 设备详情页；离线无 chevron，仍去设置页 */
+function goDeviceDetail() {
+  if (isDeviceOffline.value) {
+    goSettings();
+    return;
+  }
+  uni.navigateTo({ url: '/pages/device-detail/index' });
+}
+
 /* ------------------------------------------------------------------ */
 /*  生命周期                                                            */
 /* ------------------------------------------------------------------ */
@@ -421,8 +430,8 @@ onBeforeUnmount(() => {
           </text>
         </view>
 
-        <!-- 设备在线卡片 -->
-        <view class="card bg-card rounded-lg flex items-center" @tap="goSettings">
+        <!-- 设备在线卡片（规范 5.5：右侧 chevron → 设备详情页） -->
+        <view class="card bg-card rounded-lg flex items-center" @tap="goDeviceDetail">
           <image
             class="device-card__signal"
             :src="getIcon(isDeviceOffline ? 'wifi-off' : 'wifi-signal', isDeviceOffline ? 'empty' : 'primary')"

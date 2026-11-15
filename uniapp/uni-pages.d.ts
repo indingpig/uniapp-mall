@@ -7,6 +7,7 @@ type _LocationUrl =
   "/pages/home/index" |
   "/pages/ble-test/index" |
   "/pages/collect/index" |
+  "/pages/device-detail/index" |
   "/pages/history/index" |
   "/pages/pairing/index" |
   "/pages/settings/index" |

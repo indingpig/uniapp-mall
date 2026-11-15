@@ -4,14 +4,15 @@
 
 <script setup lang="ts">
 import type { DeviceData } from '@/api/baby';
+import type { MonitorSettings } from '@/utils/monitorSettings';
 import { onShow } from '@dcloudio/uni-app';
 import UQRCode from 'uqrcodejs';
 import { computed, getCurrentInstance, nextTick, onMounted, ref } from 'vue';
 import { fetchDevice } from '@/api/baby';
-import { CACHE_KEY } from '@/constants/cache';
 import { colors } from '@/constants/colors';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getIcon } from '@/utils/icons';
+import { loadMonitorSettings, persistMonitorSettings, SENSITIVITY_OPTIONS } from '@/utils/monitorSettings';
 import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAuthorized } from '@/utils/notify';
 import { resolveServerUrl } from '@/utils/server';
 import { clearPairingRecords, hasLocalPairing } from '@/utils/storage';
@@ -40,25 +41,12 @@ function loadDevice() {
 
 /* ------------------------------------------------------------------ */
 /*  监控设置（本地持久化，后端暂无对应接口）                              */
+/*  偏好结构收敛在 utils/monitorSettings.ts（设备详情页监测设置卡共用）    */
 /* ------------------------------------------------------------------ */
 
-interface MonitorSettings {
-  cryAlert: boolean;
-  sensitivity: string;
-  alertVolume: string;
-  pushNotify: boolean;
-}
-
-const SENSITIVITY_OPTIONS = ['低', '中等', '高'];
 const VOLUME_OPTIONS = ['30%', '50%', '70%', '100%'];
-const DEFAULT_SETTINGS: MonitorSettings = {
-  cryAlert: true,
-  sensitivity: '中等',
-  alertVolume: '70%',
-  pushNotify: true,
-};
 
-const settings = ref<MonitorSettings>({ ...DEFAULT_SETTINGS });
+const settings = ref<MonitorSettings>(loadMonitorSettings());
 
 /* 系统通知授权状态：开关显示 = 用户偏好 ∧ 系统授权。
  * 偏好单独存（systemAuth 掉了不代表用户想关，授权恢复后开关自动回到开） */
@@ -71,19 +59,11 @@ const pushNotifySwitch = computed({
 });
 
 function loadSettings() {
-  try {
-    const saved = uni.getStorageSync(CACHE_KEY.MONITOR_SETTINGS);
-    if (saved && typeof saved === 'object')
-      settings.value = { ...DEFAULT_SETTINGS, ...saved };
-  }
-  catch { /* 忽略损坏的本地数据 */ }
+  settings.value = loadMonitorSettings();
 }
 
 function persistSettings() {
-  try {
-    uni.setStorageSync(CACHE_KEY.MONITOR_SETTINGS, { ...settings.value });
-  }
-  catch { /* 存储失败不阻塞 UI */ }
+  persistMonitorSettings(settings.value);
 }
 
 /**

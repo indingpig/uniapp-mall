@@ -2,10 +2,12 @@
 /**
  * 按钮（设计规范 v1.1 第 8 节「按钮」）
  *
- * 三种形态：
+ * 四种形态：
  * - primary 主：绿底白字胶囊（CTA、快捷操作、扫描）
  * - secondary 次：白底 1px #E5DECF 描边（发丝线属 px 例外清单）
  * - danger 危险文本：红字、无底（退出登录）
+ * - dangerOutline 危险描边：白底描边 + 红字（规范 5.5 设备详情页「解除配对」，
+ *   高度沿用 quick 档 h48，5.5 标注的 h46 归一到组件档位）
  * 尺寸：cta = h50（页面主 CTA）；quick = h48（快捷操作对 1:1）；small = 104×34（扫描/停止扫描）。
  * disabled：#EDE6D8 底 + #A39B8C 文字（12.1 快捷操作禁用变体），不可点。
  * 按压反馈 opacity 0.8 / 80ms（规范 13.1 P2）。
@@ -14,11 +16,12 @@
  *   <AppButton size="cta"><image class="btn-cta__icon" :src="getIcon('bluetooth', 'white')" mode="aspectFit" />去配对设备</AppButton>
  *   <AppButton size="quick" variant="secondary" :disabled="offline">静音提醒</AppButton>
  *   <AppButton variant="danger">退出登录</AppButton>
+ *   <AppButton variant="danger-outline">解除配对</AppButton>
  */
 import { computed } from 'vue';
 
 interface Props {
-  variant?: 'primary' | 'secondary' | 'danger';
+  variant?: 'primary' | 'secondary' | 'danger' | 'danger-outline';
   size?: 'cta' | 'quick' | 'small';
   disabled?: boolean;
 }
@@ -100,6 +103,14 @@ const hoverClass = computed(() => (props.disabled ? 'none' : 'app-btn--hover'));
 .app-btn--danger {
   height: rpx(48);
   background-color: transparent;
+  color: $color-danger;
+  font-weight: 500;
+}
+
+/* 危险描边（5.5 解除配对）：次按钮的白底描边 + 危险文本的红字 */
+.app-btn--danger-outline {
+  background-color: $color-card;
+  border: 1px solid $color-border-btn;
   color: $color-danger;
   font-weight: 500;
 }

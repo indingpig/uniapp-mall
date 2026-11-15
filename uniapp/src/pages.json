@@ -42,7 +42,13 @@
     {
       "path": "pages/collect/index",
       "type": "page"
+    },
+    // #ifdef APP || H5
+    {
+      "path": "pages/device-detail/index",
+      "type": "page"
     }
+    // #endif
   ],
   "subPackages": [],
   "tabBar": {

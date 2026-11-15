@@ -5,6 +5,8 @@ export const CACHE_KEY = {
   PAIRED_DEVICE: 'BABY_PAIRED_DEVICE',
   /** 上次配对成功的服务器地址（配对页「高级设置」预填，规范 5.4） */
   PAIRED_SERVER_URL: 'BABY_PAIRED_SERVER_URL',
+  /** 设备重命名的本机昵称（设备详情页导航行「重命名」，规范 5.5；空=显示配对设备名） */
+  DEVICE_NAME_OVERRIDE: 'BABY_DEVICE_NAME_OVERRIDE',
   /** TabBar 上一次激活的 tab key（用于高亮滑块的移动方向） */
   TABBAR_PREV: 'BABY_TABBAR_PREV',
   /** 采集页: 开发板地址（http://babycry.local 或 IP） */
