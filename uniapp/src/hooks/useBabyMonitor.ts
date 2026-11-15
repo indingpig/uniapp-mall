@@ -115,6 +115,10 @@ export function useBabyMonitor() {
               applyStatus(msg.status);
               durationSec.value = msg.durationSec || 0;
             }
+            // 连接瞬间同步设备真实监听状态（多 App 引用计数下，晚入的 App
+            // 可能是别人开着监听，初始 false 会显示错）
+            if (msg.listening !== undefined)
+              listening.value = msg.listening;
             break;
           case 'statusChange':
             if (msg.to) {
@@ -182,8 +186,10 @@ export function useBabyMonitor() {
   /* -------------------- 指令下发（App → server 中继 → 设备） -------------------- */
 
   /**
-   * 发送监听指令。发送成功后本地先置位（乐观更新给出即时反馈），
-   * 设备回执的 listenState 会覆盖为真实状态。
+   * 发送监听指令（引用计数模型：开关的是「自己想不想听」，设备是否真的
+   * 停取决于是否还有其他成员在监听）。listen_on 设备多半会由关转开，乐观
+   * 置 true 给即时反馈；listen_off 不做乐观置 false —— 其他成员仍在监听时
+   * 设备保持开启，显示一律以设备 listenState 回执 / init 为准。
    */
   function sendCmd(cmd: 'listen_on' | 'listen_off') {
     if (!socket || !wsActive) {
@@ -191,7 +197,8 @@ export function useBabyMonitor() {
       return false;
     }
     socket.send({ data: JSON.stringify({ type: 'cmd', cmd }) });
-    listening.value = cmd === 'listen_on';
+    if (cmd === 'listen_on')
+      listening.value = true;
     return true;
   }
 

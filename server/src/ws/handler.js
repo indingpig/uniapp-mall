@@ -3,6 +3,8 @@ import { STATUS } from '../services/detector.js';
 
 const clients = new Set();
 let esp32Client = null;           // 设备连接 (单设备)
+let deviceListening = false;      // 设备真实监听状态 (listenState 回执驱动)
+const listenWanters = new Set();  // 想监听的 app 连接集合 (引用计数: 0→1 开, 归 0 关)
 let lastInference = null;         // { label, ts } 设备最新识别结果, 附到 audio 上喂 detector
 
 // 模型 label 的有效期: 推理 1s 一窗, 取 1.5s 覆盖两次 audio 间隔
@@ -26,14 +28,21 @@ export function createWSServer(server, detector, dataStore) {
     clients.add(ws);
     if (clientType === 'esp32') {
       esp32Client = ws;
+      // 设备 (重)连后按当前意愿恢复监听: 设备重启后 s_listening 归零, 而网络
+      // 抖动重连时设备仍保持监听并自行补发 listenState (server_link.cpp) ——
+      // 两侧最终都以设备回执为准, 这里只负责「有意愿就发一次 listen_on」
+      if (listenWanters.size > 0) {
+        sendToEsp32({ type: 'cmd', cmd: 'listen_on' });
+      }
     }
     console.log(`[WS] ${clientType} connected (total: ${clients.size})`);
 
-    // 新客户端连接后发送当前状态
+    // 新客户端连接后发送当前状态 (含监听状态, 避免晚入的 App 显示过期开关)
     ws.send(JSON.stringify({
       type: 'init',
       status: detector.status,
       durationSec: detector.getDurationSec(),
+      listening: deviceListening,
     }));
 
     ws.on('message', (raw) => {
@@ -79,13 +88,28 @@ export function createWSServer(server, detector, dataStore) {
 
         if (msg.type === 'listenState' && clientType === 'esp32') {
           // 设备监听状态回执: { type:'listenState', listening }
-          broadcastToApps({ type: 'listenState', listening: !!msg.listening });
+          deviceListening = !!msg.listening;
+          broadcastToApps({ type: 'listenState', listening: deviceListening });
           return;
         }
 
         if (msg.type === 'cmd' && clientType === 'app') {
-          // App 指令中继给设备: { type:'cmd', cmd }
-          sendToEsp32({ type: 'cmd', cmd: msg.cmd });
+          // 监听指令走引用计数: 谁想听谁登记, 0→1 时开设备, 归 0 才关设备;
+          // 单个 App 的开关不影响其他成员的监听意愿, App 断开自动退订
+          if (msg.cmd === 'listen_on') {
+            listenWanters.add(ws);
+            if (!deviceListening) {
+              sendToEsp32({ type: 'cmd', cmd: 'listen_on' });
+            }
+          } else if (msg.cmd === 'listen_off') {
+            listenWanters.delete(ws);
+            if (deviceListening && listenWanters.size === 0) {
+              sendToEsp32({ type: 'cmd', cmd: 'listen_off' });
+            }
+          } else {
+            // 其他指令原样透传给设备
+            sendToEsp32({ type: 'cmd', cmd: msg.cmd });
+          }
           return;
         }
       } catch (e) {
@@ -95,9 +119,15 @@ export function createWSServer(server, detector, dataStore) {
 
     ws.on('close', () => {
       clients.delete(ws);
+      listenWanters.delete(ws);
       if (clientType === 'esp32' && esp32Client === ws) {
         esp32Client = null;
+        deviceListening = false;
         lastInference = null;
+      }
+      else if (clientType === 'app' && deviceListening && listenWanters.size === 0) {
+        // 最后一个想听的 App 离开 (含杀进程/断网) → 停设备监听
+        sendToEsp32({ type: 'cmd', cmd: 'listen_off' });
       }
       console.log(`[WS] ${clientType} disconnected (total: ${clients.size})`);
     });
