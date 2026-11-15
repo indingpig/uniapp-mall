@@ -8,6 +8,7 @@ const QUIET_DURATION_MS = 10_000;    // 安静持续多久切换到 sleeping
 
 const CRY_COOLDOWN_MS = 5_000;       // 哭闹触发后冷却时间
 const OFFLINE_TIMEOUT_MS = 15_000;   // 多久没收到数据视为离线
+const NOISE_EVENT_COOLDOWN_MS = 30_000; // 同源事件层: 睡眠中的短暂响动(未吵醒)多久记一次「有动静」
 
 export const STATUS = {
   SLEEPING: 'sleeping',
@@ -25,6 +26,7 @@ export class Detector extends EventEmitter {
     this.lastDataTime = Date.now();
     this.lastStatusChange = Date.now();
     this.lastCryTime = 0;
+    this.lastNoiseTime = 0;
     this.offlineTimer = null;
     this._startOfflineWatch();
   }
@@ -83,6 +85,15 @@ export class Detector extends EventEmitter {
       const loud = this.rmsHistory.filter(s => s.cry).length;
       if (loud >= 2) {
         this._changeStatus(STATUS.AWAKE);
+      }
+      else {
+        // 事件层「有动静」(设计规范 6/T-07): 睡眠中的短暂中等声响, 未达到吵醒
+        // 阈值(cry 样本 <2)——不改主状态, 只记一次事件; 30s 冷却防连续翻身刷屏
+        const latest = this.rmsHistory[this.rmsHistory.length - 1];
+        if (latest && latest.mid && now - this.lastNoiseTime > NOISE_EVENT_COOLDOWN_MS) {
+          this.lastNoiseTime = now;
+          this.emit('noise', { timestamp: now, rms: latest.rms });
+        }
       }
     }
 

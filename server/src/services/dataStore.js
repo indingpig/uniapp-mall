@@ -11,6 +11,10 @@ class DataStore {
     /** 原始数据记录: { time, rms, peak, status }[] */
     this.records = [];
 
+    /** 事件层记录（设计规范 6/T-07）: { time, type }[]，type 目前只有 'noise'。
+     *  与状态采样分开存放：noise 不改变主状态，不该混进状态时间线推导 */
+    this.events = [];
+
     /** 24 小时按小时聚合统计: { hour: { cryCount, maxRms, avgRms, ... } } */
     this.hourlyStats = {};
   }
@@ -33,6 +37,19 @@ class DataStore {
   /** 按时间范围获取 */
   getRange(from, to) {
     return this.records.filter(r => r.time >= from && r.time <= to);
+  }
+
+  /** 记录事件层事件（「有动静」等），容量与 records 同级收敛 */
+  addEvent(type, time = Date.now()) {
+    this.events.push({ time, type });
+    if (this.events.length > 200) {
+      this.events.shift();
+    }
+  }
+
+  /** 按时间范围获取事件层记录 */
+  getEvents(from, to) {
+    return this.events.filter(e => e.time >= from && e.time <= to);
   }
 
   /** 获取当前小时统计 */

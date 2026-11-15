@@ -13,6 +13,10 @@ export function createHistoryRoutes(dataStore) {
     } else {
       records = dataStore.getRecent(Number(pageSize));
     }
+    // 事件层（「有动静」等）随采样记录一并返回，App 时间线把两者按时间归并
+    const events = from && to
+      ? dataStore.getEvents(Number(from), Number(to))
+      : dataStore.getEvents(Date.now() - 6 * 86_400_000, Date.now());
 
     const total = records.length;
     const start = (Number(page) - 1) * Number(pageSize);
@@ -28,6 +32,7 @@ export function createHistoryRoutes(dataStore) {
           db: Math.round(20 * Math.log10(Math.max(r.rms, 1))),
           status: r.status,
         })),
+        events: events.map(e => ({ time: e.time, type: e.type })),
         total,
         page: Number(page),
         pageSize: Number(pageSize),

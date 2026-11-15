@@ -23,6 +23,12 @@ export function createWSServer(server, detector, dataStore) {
     broadcast({ type: 'statusChange', from, to, timestamp });
   });
 
+  // 事件层「有动静」(规范 6/T-07): 睡眠中的短暂声响, 不改主状态——
+  // 落库存为独立事件, /api/history 随 records 一并返回, 时间线单条呈现
+  detector.on('noise', ({ timestamp }) => {
+    dataStore.addEvent('noise', timestamp);
+  });
+
   wss.on('connection', (ws, req) => {
     const clientType = req.url?.includes('esp32') ? 'esp32' : 'app';
     clients.add(ws);
