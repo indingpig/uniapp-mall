@@ -5,6 +5,7 @@
 #include <math.h>
 
 #include "config.h"
+#include "esp_heap_caps.h"
 
 /* 推理窗大小见 config.h INFER_WINDOW_SAMPLES (= EI_CLASSIFIER_RAW_SAMPLE_COUNT)。
  * 注意: 本文件不能 include babyCry_inferencing.h —— EI 模型头文件只允许
@@ -55,8 +56,13 @@ static volatile bool wsCollecting = false;
 static volatile uint32_t wsSamples = 0;
 static volatile bool wsLost = false;
 
-/* 推理窗状态机: 0=填充中 1=待消费 2=消费中 */
-static int16_t windowRaw[INFER_WINDOW_SAMPLES];
+/* 推理窗状态机: 0=填充中 1=待消费 2=消费中
+ *
+ * windowRaw 放在 PSRAM（2026-11-16）：32KB 纯数据、不参与 DMA，
+ * 每 1 秒才填满一次，对访问速度不敏感，是"让出内部 SRAM"的最佳候选。
+ * PSRAM 不可用时自动回落到内部堆（行为与旧版一致，不会因此起不来）。 */
+static int16_t* windowRaw = nullptr;
+static bool windowRawInPsram = false;
 static volatile uint8_t windowState = 0;
 static volatile bool listenEnabled = false;
 static volatile uint32_t windowFill = 0;
@@ -134,7 +140,7 @@ static void audioPipeTask(void* param) {
         wsSamples++;
       }
 
-      if (listenEnabled) {
+      if (listenEnabled && windowRaw != nullptr) {
         if (windowState == 0) {
           windowRaw[windowFill++] = sf;
           if (windowFill >= WINDOW_SAMPLES) {
@@ -162,7 +168,28 @@ static void audioPipeTask(void* param) {
 void audioPipelineStart() {
   memset((void*)rmsRing, 0, sizeof(rmsRing));
   memset((void*)wsRing, 0, sizeof(wsRing));
-  memset((void*)windowRaw, 0, sizeof(windowRaw));
+
+  /* 推理窗优先放 PSRAM；失败则退回内部堆，保证功能可用 */
+  if (windowRaw == nullptr) {
+    windowRaw = (int16_t*)heap_caps_malloc(
+        INFER_WINDOW_SAMPLES * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    windowRawInPsram = (windowRaw != nullptr);
+    if (windowRaw == nullptr) {
+      windowRaw = (int16_t*)heap_caps_malloc(
+          INFER_WINDOW_SAMPLES * sizeof(int16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+      Serial.println("[AudioPipe] windowRaw: PSRAM 分配失败, 回落到内部堆");
+    }
+    if (windowRaw == nullptr) {
+      Serial.println("[AudioPipe] ERR: windowRaw 分配失败, 推理不可用");
+    } else {
+      Serial.printf("[AudioPipe] windowRaw %u B @ %s\n",
+                    (unsigned)(INFER_WINDOW_SAMPLES * sizeof(int16_t)),
+                    windowRawInPsram ? "PSRAM" : "INTERNAL");
+    }
+  }
+  if (windowRaw != nullptr) {
+    memset(windowRaw, 0, INFER_WINDOW_SAMPLES * sizeof(int16_t));
+  }
   // stack: 采集任务只做 I2S 读 + 滤波 + 环形写入, 无深层调用, 8KB 足够
   xTaskCreatePinnedToCore(audioPipeTask, "audioPipe", 8192, nullptr, 2, nullptr, 0);
 }
@@ -201,7 +228,7 @@ bool audioPipelineWindowReady() {
 }
 
 bool audioPipelineTakeWindow(const int16_t** samples, uint32_t* count) {
-  if (windowState != 1) return false;
+  if (windowState != 1 || windowRaw == nullptr) return false;
   *samples = windowRaw;
   *count = WINDOW_SAMPLES;
   windowState = 2;
