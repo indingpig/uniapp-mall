@@ -9,6 +9,8 @@ export const CACHE_KEY = {
   DEVICE_NAME_OVERRIDE: 'BABY_DEVICE_NAME_OVERRIDE',
   /** 首页铃铛红点已读时刻（规范 S-06：今日最新事件时间戳 > 此值即点亮红点） */
   BELL_READ_AT: 'BABY_BELL_READ_AT',
+  /** 统计/首页 → 历史页「定位到某日」下钻信号（一次性，目标页读取后即清除；值为本地日期键 YYYY-MM-DD） */
+  STATS_DRILL_DATE: 'BABY_STATS_DRILL_DATE',
   /** TabBar 上一次激活的 tab key（用于高亮滑块的移动方向） */
   TABBAR_PREV: 'BABY_TABBAR_PREV',
   /** 采集页: 开发板地址（http://babycry.local 或 IP） */

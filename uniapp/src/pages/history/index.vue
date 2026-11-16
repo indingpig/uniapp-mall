@@ -26,9 +26,9 @@ onShow(() => {
   const paired = uni.getStorageSync(CACHE_KEY.PAIRED_DEVICE);
   hasPairedDevice.value = !!(paired && typeof paired === 'object' && paired.name);
   // 统计页下钻联动：读取目标日期并定位（规范 5.2）
-  const drill = uni.getStorageSync('STATS_DRILL_DATE');
+  const drill = uni.getStorageSync(CACHE_KEY.STATS_DRILL_DATE);
   if (drill && typeof drill === 'string') {
-    uni.removeStorageSync('STATS_DRILL_DATE');
+    uni.removeStorageSync(CACHE_KEY.STATS_DRILL_DATE);
     const drillMs = new Date(`${drill}T00:00:00`).getTime();
     const todayMs = new Date();
     todayMs.setHours(0, 0, 0, 0);

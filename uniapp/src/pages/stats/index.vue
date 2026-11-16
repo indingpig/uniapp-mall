@@ -286,7 +286,7 @@ function drillToDay() {
     setPeriod('today');
     return;
   }
-  uni.setStorageSync('STATS_DRILL_DATE', d.date);
+  uni.setStorageSync(CACHE_KEY.STATS_DRILL_DATE, d.date);
   uni.switchTab({ url: '/pages/history/index' });
 }
 

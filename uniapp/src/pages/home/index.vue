@@ -12,6 +12,7 @@ import { CACHE_KEY } from '@/constants/cache';
 import { colors } from '@/constants/colors';
 import { useBabyMonitor } from '@/hooks/useBabyMonitor';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
+import { fmtDateKey } from '@/utils/babyEvents';
 import { getIcon } from '@/utils/icons';
 import { isValidServerUrl } from '@/utils/server';
 import { hasLocalPairing, storage } from '@/utils/storage';
@@ -241,9 +242,7 @@ function onBellTap() {
   bellReadAt.value = Date.now();
   storage.set(CACHE_KEY.BELL_READ_AT, bellReadAt.value);
   // 联动历史页「当日」：复用统计下钻的日期定位机制
-  const d = new Date();
-  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  uni.setStorageSync('STATS_DRILL_DATE', key);
+  storage.set(CACHE_KEY.STATS_DRILL_DATE, fmtDateKey(Date.now()));
   goHistory();
 }
 
@@ -346,9 +345,7 @@ function goHistory() {
 
 /** 「查看全部」→ 历史页当日（规范 S-06）：复用统计下钻的日期定位机制 */
 function goHistoryToday() {
-  const d = new Date();
-  const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  uni.setStorageSync('STATS_DRILL_DATE', key);
+  storage.set(CACHE_KEY.STATS_DRILL_DATE, fmtDateKey(Date.now()));
   goHistory();
 }
 
@@ -710,7 +707,7 @@ page {
 /* ------------------------------------------------------------------ */
 .card {
   padding: 32rpx;
-  box-shadow: 0 4rpx 24rpx rgba(60, 50, 30, 0.04);
+  box-shadow: $shadow-card;
 }
 
 .card--status {
@@ -926,7 +923,7 @@ page {
   }
 
   &--plain {
-    box-shadow: 0 4rpx 24rpx rgba(60, 50, 30, 0.04);
+    box-shadow: $shadow-card;
   }
 
   // 静音态（设计稿 20）：绿底白字「静音中」，与监听按钮同为实底绿
