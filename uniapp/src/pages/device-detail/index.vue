@@ -112,12 +112,12 @@ function onRename() {
  * 解除配对（规范 5.5 底部危险操作）：与设置页「删除设备」同口径——仅清
  * App 端记录（配对记录 + 服务器地址 + 本机昵称），设备本身不受影响，
  * 恢复出厂只能走设备 BOOT 长按 10s 硬件手势。首页/设置页经 onShow 重读
- * hasLocalPairing() 自动回空态/占位态。
+ * hasLocalPairing() 自动回空态/占位态。正文含 E-09 要求的分享成员后果子句。
  */
 function onUnpair() {
   uni.showModal({
     title: '解除配对',
-    content: `将清除本机与 ${deviceName.value} 的配对记录及服务器地址，设备本身不受影响，可随时重新配对接回。`,
+    content: `将清除本机与 ${deviceName.value} 的配对记录及服务器地址，设备本身不受影响；已分享的家庭成员将同步失去访问权限。可随时重新扫描并配对接回。`,
     confirmText: '解除配对',
     confirmColor: colors.danger,
     success: ({ confirm }) => {
@@ -142,7 +142,7 @@ function onUnpair() {
       <text class="navbar__action font-medium" @tap="onRename">重命名</text>
     </view>
 
-    <view class="flex flex-col gap-3">
+    <view class="flex flex-col flex-1 gap-3">
       <!-- ========= 设备概览卡（r20） ========= -->
       <view class="card card--overview bg-card rounded-card-lg flex flex-col items-center">
         <view class="overview__icon rounded-full flex items-center justify-center">
@@ -178,17 +178,17 @@ function onUnpair() {
       <!-- ========= 连接信息卡（r16）：WiFi/IP/信号待固件遥测（改进点 8）接真数据 ========= -->
       <view class="group bg-card rounded-card">
         <text class="group__title text-main font-bold block">连接信息</text>
-        <view class="row">
+        <view class="info-row">
           <text class="row-label text-secondary">WiFi 网络</text>
           <view class="flex-1" />
           <text class="row-value text-muted">--</text>
         </view>
-        <view class="row">
+        <view class="info-row">
           <text class="row-label text-secondary">设备 IP</text>
           <view class="flex-1" />
           <text class="row-value text-muted">--</text>
         </view>
-        <view class="row">
+        <view class="info-row">
           <text class="row-label text-secondary">信号强度</text>
           <view class="flex-1" />
           <text class="row-value text-muted">--</text>
@@ -247,6 +247,8 @@ page {
 <style lang="scss" scoped>
 .page {
   box-sizing: border-box;
+  display: flex; // 纵向 flex + 内容区 flex-1，让底部危险操作贴页底（设计稿 17）
+  flex-direction: column;
   padding: 1.25rem; // 基础页边距（设计稿屏幕左右边距 20px）
   padding-top: 0; // 状态栏避让移入吸顶 navbar 自身（滚动吸顶后由它的不透明背景盖住状态栏区域）
   min-height: 100vh;
@@ -290,7 +292,7 @@ page {
 
 .card {
   padding: 32rpx;
-  box-shadow: 0 4rpx 24rpx rgba(60, 50, 30, 0.04);
+  box-shadow: $shadow-card;
 }
 
 .card--overview {
@@ -302,25 +304,32 @@ page {
   @include list-row();
 }
 
+/* 连接信息卡的键值信息行：设计稿无行分割线 */
+.info-row {
+  @include list-row($divider: false);
+}
+
 /* ------------------------------------------------------------------ */
 /*  设备概览卡                                                          */
 /* ------------------------------------------------------------------ */
 
 .overview {
+  /* 注意：rpx() 入参是设计稿基准（390 画布）的 px 值，函数内部自己乘
+   * 750/390 ≈ 1.923 —— 不要传 2x 导出图的像素值（会放大近一倍） */
   &__icon {
-    width: rpx(136); // 68px 浅绿圈
-    height: rpx(136);
+    width: rpx(68); // 68px 浅绿圈
+    height: rpx(68);
     background-color: $color-primary-soft;
   }
 
   &__icon-img {
-    width: rpx(80); // 40px 监护器图标
-    height: rpx(80);
+    width: rpx(40); // 40px 监护器图标
+    height: rpx(40);
   }
 
   &__name {
     margin-top: 24rpx;
-    font-size: rpx(38); // 19px
+    font-size: rpx(19); // 19px
   }
 
   &__status {
@@ -329,12 +338,12 @@ page {
   }
 
   &__dot {
-    width: rpx(16);
-    height: rpx(16);
+    width: rpx(8);
+    height: rpx(8);
   }
 
   &__status-text {
-    font-size: rpx(24); // 12px
+    font-size: rpx(12); // 12px
   }
 
   &__stats {
@@ -343,18 +352,18 @@ page {
   }
 
   &__stat-value {
-    font-size: rpx(30); // 15px
+    font-size: rpx(15); // 15px
     line-height: 1.3;
   }
 
   &__stat-label {
     margin-top: 4rpx;
-    font-size: rpx(24); // 12px
+    font-size: rpx(12); // 12px
   }
 
   &__divider {
     width: 1px;
-    height: rpx(64);
+    height: rpx(32);
     background-color: $color-divider;
   }
 }
@@ -416,7 +425,7 @@ page {
 /* ------------------------------------------------------------------ */
 
 .unpair {
-  margin-top: 16rpx;
+  margin-top: auto; // 吸收剩余空间贴底；内容超高时退化为 gap-3 的最小间距
 
   &__hint {
     margin-top: 16rpx;

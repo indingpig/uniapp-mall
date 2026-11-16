@@ -9,20 +9,35 @@
  *     <view class="row">...</view>
  *   </view>
  *
- * 行间分割线由相邻兄弟选择器自动生成（首行无线、末行无线）。
- * 高度基准取设置页现行值（min-height 1.1rem 仅兜底，实际高度由 padding + 内容主导）。
+ * 行间分割线由相邻兄弟选择器自动生成（首行无线、末行无线），两侧缩进
+ * 32rpx 与行文字对齐（设计稿 05/17：分割线不通铺到卡边）；键值信息行等
+ * 不需要分割线的传 list-row($divider: false)（如设备详情连接信息卡）。
+ * 高度按规范第 8 节：垂直 padding 12px（24rpx）→ 单行 cell 44、开关行 50；
+ * min-height 1.1rem 仅兜底，实际高度由 padding + 内容主导。
  */
 
-@mixin list-row($gap: 0) {
+@mixin list-row($gap: 0, $divider: true) {
   display: flex;
   align-items: center;
+  position: relative;
   @if $gap > 0 {
     gap: $gap;
   }
   min-height: 1.1rem;
-  padding: 20rpx 32rpx;
+  padding: 24rpx 32rpx;
 
-  & + & {
-    border-top: 1px solid $color-divider;
+  @if $divider {
+    & + & {
+      /* 缩进值与上方行 padding 保持一致 */
+      &::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 32rpx;
+        right: 32rpx;
+        height: 1px;
+        background-color: $color-divider;
+      }
+    }
   }
 }

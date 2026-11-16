@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * 开关（设计规范 v1.1 第 4 节：44×26 r13，球 22 带投影，ON=绿、球居右）
+ * 开关（设计规范 v1.1 第 4 节：44×26 r13，球 22 带投影，ON=绿、球居右；
+ * OFF 轨道 #D5CFC2 见 5.5 监测设置卡）
  *
  * 自绘而非样式化内置 switch：内置组件跨端无法做到该几何与投影。
  * 拨动动画为规范 13.1 P0：球位移 + 底色过渡 150ms ease（纯 CSS transition）。
@@ -46,7 +47,7 @@ function toggle() {
   width: rpx(44);
   height: rpx(26);
   border-radius: rpx(13);
-  background-color: $color-card-soft;
+  background-color: $color-switch-off;
   transition: background-color 150ms ease;
   flex-shrink: 0;
 }
