@@ -19,4 +19,8 @@ export const CACHE_KEY = {
   COLLECT_COUNTERS: 'BABY_COLLECT_COUNTERS',
   /** 采集页: 分类列表（key 与 Edge Impulse 工程标签名对齐） */
   COLLECT_CATEGORIES: 'BABY_COLLECT_CATEGORIES',
+  /** 家庭共享·所有者凭证（首次进入分享页时本地生成并向 server 认领，先到先得） */
+  FAMILY_OWNER: 'BABY_FAMILY_OWNER',
+  /** 家庭共享·成员身份（扫码/受邀加入成功后由 server 签发） */
+  FAMILY_MEMBER: 'BABY_FAMILY_MEMBER',
 } as const;

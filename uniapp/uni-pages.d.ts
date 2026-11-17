@@ -8,6 +8,8 @@ type _LocationUrl =
   "/pages/ble-test/index" |
   "/pages/collect/index" |
   "/pages/device-detail/index" |
+  "/pages/family-join-success/index" |
+  "/pages/family-share/index" |
   "/pages/history/index" |
   "/pages/pairing/index" |
   "/pages/settings/index" |

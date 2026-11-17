@@ -4,8 +4,10 @@ import type { MonitorSettings } from '@/utils/monitorSettings';
 import { onShow } from '@dcloudio/uni-app';
 import { computed, ref } from 'vue';
 import { fetchDevice, fetchStatsSummary } from '@/api/baby';
+import { dissolveFamily, removeFamilyMember } from '@/api/family';
 import { CACHE_KEY } from '@/constants/cache';
 import { colors } from '@/constants/colors';
+import { clearFamilyIdentity, familyErrorMessage, getFamilyMember, getFamilyRole } from '@/utils/family';
 import { getIcon } from '@/utils/icons';
 import { loadMonitorSettings, persistMonitorSettings } from '@/utils/monitorSettings';
 import { clearPairingRecords } from '@/utils/storage';
@@ -47,10 +49,14 @@ function loadSummary() {
   }).catch(() => {});
 }
 
+/** 本机是否家庭成员（P-02 只读）：重命名/监测设置/解除配对为所有者专属 */
+const isMember = ref(false);
+
 function loadLocalRecords() {
   nickname.value = (uni.getStorageSync(CACHE_KEY.DEVICE_NAME_OVERRIDE) as string) || '';
   const paired = uni.getStorageSync(CACHE_KEY.PAIRED_DEVICE);
   pairedName.value = paired && typeof paired === 'object' && paired.name ? paired.name : '';
+  isMember.value = getFamilyRole() === 'member';
 }
 
 /* ------------------------------------------------------------------ */
@@ -109,10 +115,11 @@ function onRename() {
 }
 
 /**
- * 解除配对（规范 5.5 底部危险操作）：与设置页「删除设备」同口径——仅清
- * App 端记录（配对记录 + 服务器地址 + 本机昵称），设备本身不受影响，
+ * 解除配对（规范 5.5 底部危险操作，仅所有者）：与设置页「删除设备」同口径——
+ * 清 App 端记录（配对 + 服务器地址 + 昵称 + 家庭身份），设备本身不受影响，
  * 恢复出厂只能走设备 BOOT 长按 10s 硬件手势。首页/设置页经 onShow 重读
- * hasLocalPairing() 自动回空态/占位态。正文含 E-09 要求的分享成员后果子句。
+ * hasLocalPairing() 自动回空态/占位态。正文含 E-09 要求的分享成员后果子句；
+ * E-14：解除后 server 侧家庭共享一并解散，所有成员同步失效。
  */
 function onUnpair() {
   uni.showModal({
@@ -123,23 +130,60 @@ function onUnpair() {
     success: ({ confirm }) => {
       if (!confirm)
         return;
+      // E-14 联动：解散家庭注册表（成员端经 WS familyChanged 收敛）；本机身份一并清除
+      dissolveFamily().catch(() => {});
+      clearFamilyIdentity();
       clearPairingRecords();
       uni.showToast({ title: '已解除配对', icon: 'none' });
       setTimeout(() => uni.navigateBack(), 600);
     },
   });
 }
+
+/** 成员退出共享（E-13 自助路径）：清成员身份与配对记录，不影响设备与其他成员 */
+function onMemberExit() {
+  const me = getFamilyMember();
+  if (!me)
+    return;
+  uni.showModal({
+    title: '退出家庭共享',
+    content: '退出后将立即失去查看与接收提醒的权限，历史数据不会删除；如需再查看，请让家人重新邀请。',
+    confirmText: '退出',
+    confirmColor: colors.danger,
+    success: ({ confirm }) => {
+      if (!confirm)
+        return;
+      removeFamilyMember(me.id).then(() => {
+        clearFamilyIdentity();
+        clearPairingRecords();
+        uni.showToast({ title: '已退出家庭共享', icon: 'none' });
+        setTimeout(() => uni.navigateBack(), 600);
+      }).catch((e) => {
+        uni.showToast({ title: familyErrorMessage(e), icon: 'none' });
+      });
+    },
+  });
+}
+
+/** 底部危险操作入口：member → 退出共享；owner → 解除配对 */
+function onLeaveTap() {
+  if (isMember.value) {
+    onMemberExit();
+    return;
+  }
+  onUnpair();
+}
 </script>
 
 <template>
   <view class="page">
-    <!-- 吸顶导航行（规范 5.5）：返回 + 标题 + 重命名 -->
+    <!-- 吸顶导航行（规范 5.5）：返回 + 标题 + 重命名（成员只读，无重命名） -->
     <view class="navbar sticky-top flex items-center">
       <view class="navbar__back flex items-center justify-center" @tap="goBack">
         <image class="navbar__back-icon" :src="getIcon('chevron-left', 'ink')" mode="aspectFit" />
       </view>
       <text class="navbar__title text-main font-semibold">设备详情</text>
-      <text class="navbar__action font-medium" @tap="onRename">重命名</text>
+      <text v-if="!isMember" class="navbar__action font-medium" @tap="onRename">重命名</text>
     </view>
 
     <view class="flex flex-col flex-1 gap-3">
@@ -205,8 +249,8 @@ function onUnpair() {
         <image class="firmware-bar__chevron" :src="getIcon('chevron-right', 'amberInk')" mode="aspectFit" />
       </view>
 
-      <!-- ========= 监测设置卡（r16） ========= -->
-      <view class="group bg-card rounded-card">
+      <!-- ========= 监测设置卡（r16，成员只读整卡隐藏：P-02 不可改设置） ========= -->
+      <view v-if="!isMember" class="group bg-card rounded-card">
         <text class="group__title text-main font-bold block">监测设置</text>
         <view class="row">
           <text class="row-title text-main">哭声灵敏度</text>
@@ -227,12 +271,12 @@ function onUnpair() {
         </view>
       </view>
 
-      <!-- ========= 底部危险操作 ========= -->
+      <!-- ========= 底部危险操作（member → 退出共享；owner → 解除配对） ========= -->
       <view class="unpair flex flex-col items-center">
-        <AppButton variant="danger-outline" @tap="onUnpair">
-          解除配对
+        <AppButton variant="danger-outline" @tap="onLeaveTap">
+          {{ isMember ? '退出家庭共享' : '解除配对' }}
         </AppButton>
-        <text class="unpair__hint text-secondary block">解除后需重新扫描并配对设备</text>
+        <text class="unpair__hint text-secondary block">{{ isMember ? '退出后需家人重新邀请才能再查看' : '解除后需重新扫描并配对设备' }}</text>
       </view>
     </view>
   </view>

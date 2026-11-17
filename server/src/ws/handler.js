@@ -10,7 +10,7 @@ let lastInference = null;         // { label, ts } 设备最新识别结果, 附
 // 模型 label 的有效期: 推理 1s 一窗, 取 1.5s 覆盖两次 audio 间隔
 const LABEL_FRESH_MS = 1500;
 
-export function createWSServer(server, detector, dataStore) {
+export function createWSServer(server, detector, dataStore, familyStore) {
   const wss = new WebSocketServer({ server, path: '/ws' });
 
   wss.on('error', (err) => {
@@ -31,6 +31,15 @@ export function createWSServer(server, detector, dataStore) {
 
   wss.on('connection', (ws, req) => {
     const clientType = req.url?.includes('esp32') ? 'esp32' : 'app';
+    // 家庭角色（?ftoken=，S-07）：member 拒绝设备指令；owner/未加入(无 token 的旧客户端)保持原行为
+    let familyRole = 'guest';
+    if (clientType === 'app') {
+      try {
+        familyRole = familyStore.auth(new URL(req.url, 'http://localhost').searchParams.get('ftoken')).role;
+      } catch {
+        familyRole = 'guest';
+      }
+    }
     clients.add(ws);
     if (clientType === 'esp32') {
       esp32Client = ws;
@@ -100,6 +109,11 @@ export function createWSServer(server, detector, dataStore) {
         }
 
         if (msg.type === 'cmd' && clientType === 'app') {
+          if (familyRole === 'member') {
+            // P-02 成员只读：监听开关等指令都是设备控制，成员端只收广播
+            ws.send(JSON.stringify({ type: 'error', message: '成员仅可查看，无法控制设备' }));
+            return;
+          }
           // 监听指令走引用计数: 谁想听谁登记, 0→1 时开设备, 归 0 才关设备;
           // 单个 App 的开关不影响其他成员的监听意愿, App 断开自动退订
           if (msg.cmd === 'listen_on') {
@@ -176,4 +190,9 @@ function sendToEsp32(data) {
 
 export function getOnlineCount() {
   return clients.size;
+}
+
+/** 家庭变更广播（成员加入/移除/解散）：在线成员端据此实时收敛本地共享态（E-13） */
+export function notifyFamilyChanged(payload) {
+  broadcastToApps({ type: 'familyChanged', ...payload });
 }

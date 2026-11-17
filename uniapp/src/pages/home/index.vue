@@ -7,12 +7,21 @@ import type { IconKey } from '@/utils/icons';
 import { onShow } from '@dcloudio/uni-app';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fetchBabyHistory } from '@/api/baby';
+import { acceptFamilyInvite, joinFamily } from '@/api/family';
 import { EVENT_META, QUIET_HINT, STATUS_META, toCardState, VOLUME_MAX_DB, VOLUME_MIN_DB, VOLUME_ZONES } from '@/constants/babyStatus';
 import { CACHE_KEY } from '@/constants/cache';
 import { colors } from '@/constants/colors';
 import { useBabyMonitor } from '@/hooks/useBabyMonitor';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { fmtDateKey } from '@/utils/babyEvents';
+import {
+  familyErrorMessage,
+  getFamilyMember,
+  getFamilyOwner,
+  getFamilyRole,
+  parseJoinQr,
+  saveFamilyMember,
+} from '@/utils/family';
 import { getIcon } from '@/utils/icons';
 import { isValidServerUrl } from '@/utils/server';
 import { hasLocalPairing, storage } from '@/utils/storage';
@@ -272,66 +281,146 @@ function goPairing() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  家庭共享：家人手机加入为观众（2026-11-10 决策，方案一）              */
-/*  不碰设备、不走配网：拿到 server 地址即可观看，所有权由配网窗口兜底  */
+/*  家庭共享：家人手机加入（CR-01 成员制）                               */
+/*  扫码免确认 join / 受邀 accept（需确认）；payload 定义见 utils/family  */
 /* ------------------------------------------------------------------ */
 
-function promptJoinUrl() {
-  uni.showModal({
-    title: '加入家庭监护',
-    editable: true,
-    placeholderText: '粘贴服务器地址，如 ws://192.168.1.100:3001/ws',
-    success: ({ confirm, content }) => {
-      if (confirm && content)
-        confirmJoin(content);
-    },
-  });
-}
+/** 本机是否家庭成员：监听等设备控制入口对成员隐藏（P-02 只读） */
+const isMember = ref(false);
 
 function onJoinTap() {
   // #ifdef APP-PLUS
-  // 扫码/手填双入口：删除设备后本机二维码入口（设置页家庭共享节）已隐藏，
-  // 只有扫码会把本机逼进「必须重新配网才能回来」的死路
+  // 扫码/手填双入口：扫码最简（免确认），手填走 地址→邀请码→称呼 三步
   uni.showActionSheet({
-    itemList: ['扫码二维码加入', '手动输入服务器地址'],
+    itemList: ['扫码二维码加入', '手动输入加入信息'],
     success: ({ tapIndex }) => {
       if (tapIndex === 0) {
         uni.scanCode({
           onlyFromCamera: false,
-          success: ({ result }) => confirmJoin(result),
+          success: ({ result }) => handleJoinPayload(result),
         });
       }
       else {
-        promptJoinUrl();
+        promptManualJoin();
       }
     },
   });
   // #endif
   // #ifndef APP-PLUS
-  promptJoinUrl();
+  promptManualJoin();
   // #endif
 }
 
-function confirmJoin(raw: string) {
-  const url = raw.trim();
-  if (!isValidServerUrl(url)) {
-    uni.showToast({ title: '地址应以 ws:// 或 wss:// 开头', icon: 'none' });
-    return;
-  }
+/** 手动输入：地址 → 邀请码 → 称呼（邀请码/加入码见家人的分享页） */
+function promptManualJoin() {
   uni.showModal({
     title: '加入家庭监护',
-    content: `将连接 ${url}，与家人共同查看宝宝状态`,
+    editable: true,
+    placeholderText: '粘贴服务器地址，如 ws://192.168.1.100:3001/ws',
+    success: ({ confirm, content }) => {
+      if (!confirm)
+        return;
+      const server = (content || '').trim();
+      if (!isValidServerUrl(server)) {
+        uni.showToast({ title: '地址应以 ws:// 或 wss:// 开头', icon: 'none' });
+        return;
+      }
+      uni.showModal({
+        title: '输入邀请码',
+        editable: true,
+        placeholderText: '6 位加入码，见家人的分享页',
+        success: ({ confirm: ok, content: code }) => {
+          if (!ok)
+            return;
+          const joined = (code || '').trim().toUpperCase();
+          if (!joined) {
+            uni.showToast({ title: '请输入加入码', icon: 'none' });
+            return;
+          }
+          promptJoinName(server, joined);
+        },
+      });
+    },
+  });
+}
+
+/** 扫码入口：解析新 payload（join 免确认 / invite 需确认）；旧地址码已升级 */
+function handleJoinPayload(raw: string) {
+  const parsed = parseJoinQr(raw);
+  if (parsed.kind === 'invalid') {
+    uni.showToast({ title: '无法识别的二维码', icon: 'none' });
+    return;
+  }
+  if (parsed.kind === 'legacy') {
+    uni.showToast({ title: '二维码格式已升级，请让家人重新生成', icon: 'none' });
+    return;
+  }
+  if (getFamilyMember()) {
+    uni.showToast({ title: '已是家庭成员，退出共享后才能换绑', icon: 'none' });
+    return;
+  }
+  if (parsed.kind === 'join') {
+    promptJoinName(parsed.server, parsed.code);
+  }
+  else {
+    confirmInviteJoin(parsed);
+  }
+}
+
+/** 免确认加入：填称呼（成员列表展示用）→ 注册 → 落地成功页 */
+function promptJoinName(server: string, code: string) {
+  uni.showModal({
+    title: '加入家庭共享',
+    editable: true,
+    placeholderText: '怎么称呼你（如：妈妈）',
+    success: ({ confirm, content }) => {
+      if (!confirm)
+        return;
+      const name = (content || '').trim();
+      if (!name) {
+        uni.showToast({ title: '请输入称呼', icon: 'none' });
+        return;
+      }
+      joinAsMember(server, code, name);
+    },
+  });
+}
+
+/** 受邀加入（板④未出确认 UI，取通用确认弹框）：邀请码自带称呼，无需再填 */
+function confirmInviteJoin(parsed: { server: string; code: string; name?: string }) {
+  uni.showModal({
+    title: '接受邀请',
+    content: `接受${parsed.name ? `「${parsed.name}」的` : ''}邀请，加入家庭共享？加入后仅可只读查看`,
+    confirmText: '接受',
     success: ({ confirm }) => {
       if (!confirm)
         return;
-      storage.set(CACHE_KEY.PAIRED_SERVER_URL, url);
-      // 设备真名待 server 注册表（v1.2）落地后由 /api/device 回填
-      storage.set(CACHE_KEY.PAIRED_DEVICE, { name: '宝宝监护器' });
-      hasPairedDevice.value = true;
-      greeting.value = buildGreeting();
-      reconnect();
-      uni.showToast({ title: '已加入家庭监护', icon: 'success' });
+      joinAsMember(parsed.server, parsed.code);
     },
+  });
+}
+
+/** 统一落地：server 注册成员 → 写本机身份与配对记录 → 成功页（板④） */
+function joinAsMember(server: string, code: string, name?: string) {
+  const request = name
+    ? joinFamily(server, code, name)
+    : acceptFamilyInvite(server, code);
+  request.then((result) => {
+    saveFamilyMember({
+      token: result.token,
+      id: result.member.id,
+      name: result.member.name,
+      joinedAt: result.member.joinedAt,
+    });
+    storage.set(CACHE_KEY.PAIRED_SERVER_URL, server);
+    // 设备真名待 server 设备注册表（v1.2）落地后由 /api/device 回填
+    storage.set(CACHE_KEY.PAIRED_DEVICE, { name: '宝宝监护器' });
+    hasPairedDevice.value = true;
+    greeting.value = buildGreeting();
+    reconnect();
+    uni.navigateTo({ url: '/pages/family-join-success/index' });
+  }).catch((e) => {
+    uni.showToast({ title: familyErrorMessage(e), icon: 'none' });
   });
 }
 
@@ -376,6 +465,9 @@ onMounted(() => {
 onShow(() => {
   hasPairedDevice.value = hasLocalPairing();
   greeting.value = hasPairedDevice.value ? buildGreeting() : '你好'; // 空态无设备语境（规范 12.2）
+  // 家庭角色与称呼：成员加入/退出后回到首页即刷新
+  isMember.value = getFamilyRole() === 'member';
+  userName.value = getFamilyMember()?.name || getFamilyOwner()?.name || 'Sheldon';
 });
 
 onBeforeUnmount(() => {
@@ -569,9 +661,11 @@ onBeforeUnmount(() => {
           <text v-else class="events-empty text-secondary">今日暂无事件</text>
         </view>
 
-        <!-- 操作按钮：监听 / 静音提醒（离线禁用变体，规范 12.1） -->
+        <!-- 操作按钮：监听 / 静音提醒（离线禁用变体，规范 12.1）；
+             监听是设备控制，成员端隐藏（P-02 只读，server 也会拒绝成员 cmd） -->
         <view class="actions flex gap-3">
           <view
+            v-if="!isMember"
             class="action-btn action-btn--listen rounded-pill flex items-center justify-center gap-2"
             :class="{ 'action-btn--disabled': isDeviceOffline }"
             @tap="toggleListen"

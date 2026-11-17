@@ -24,6 +24,9 @@ dist
 .pio/
 /uniapp/dist/
 
+# server 本地持久化（家庭共享注册表，含各手机 token，勿提交）
+server/data/
+
 # PlatformIO 自动生成（每台机器各一份，勿提交）
 .vscode/c_cpp_properties.json
 .vscode/launch.json

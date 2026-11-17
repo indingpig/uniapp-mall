@@ -47,8 +47,16 @@
     {
       "path": "pages/device-detail/index",
       "type": "page"
-    }
+    },
     // #endif
+    {
+      "path": "pages/family-join-success/index",
+      "type": "page"
+    },
+    {
+      "path": "pages/family-share/index",
+      "type": "page"
+    }
   ],
   "subPackages": [],
   "tabBar": {

@@ -3,14 +3,16 @@ import { onBeforeUnmount, onMounted, readonly, ref, watch } from 'vue';
 import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
 import { STATUS_META, toCardState } from '@/constants/babyStatus';
 import { colors } from '@/constants/colors';
+import { clearFamilyIdentity, getFamilyMember, getFamilyOwner } from '@/utils/family';
 import { maybeNotifyCry } from '@/utils/notify';
 import { resolveServerUrl } from '@/utils/server';
+import { clearPairingRecords } from '@/utils/storage';
 
 const POLL_INTERVAL = 5000;
 const RECONNECT_DELAY = 3000;
 
 interface WsMessage {
-  type: 'init' | 'statusChange' | 'volume' | 'inference' | 'listenState';
+  type: 'init' | 'statusChange' | 'volume' | 'inference' | 'listenState' | 'familyChanged' | 'error';
   status?: string;
   durationSec?: number;
   rms?: number;
@@ -23,6 +25,11 @@ interface WsMessage {
   score?: number;
   // listenState 消息 (设备监听状态回执)
   listening?: boolean;
+  // familyChanged 消息 (成员加入/移除/解散广播)
+  action?: 'added' | 'removed' | 'dissolved';
+  memberId?: string;
+  // error 消息 (成员发设备指令被拒等)
+  message?: string;
 }
 
 export function useBabyMonitor() {
@@ -86,6 +93,27 @@ export function useBabyMonitor() {
       maybeNotifyCry();
   }
 
+  /**
+   * E-13/E-14：本机成员被移除或共享解散 → 立即收敛为未配对空态。
+   * 清身份与配对记录后主动断线（防 3s 重连循环），toast 后回首页空态；
+   * owner 收到自己触发的 dissolved 广播时本机无成员身份，自然跳过
+   */
+  function handleFamilyChanged(msg: WsMessage) {
+    if (msg.action !== 'removed' && msg.action !== 'dissolved')
+      return;
+    const me = getFamilyMember();
+    if (!me)
+      return;
+    if (msg.action === 'removed' && msg.memberId && msg.memberId !== me.id)
+      return;
+    clearFamilyIdentity();
+    clearPairingRecords();
+    closeWs();
+    stopPolling();
+    uni.showToast({ title: '已退出该设备的共享', icon: 'none' });
+    setTimeout(() => uni.reLaunch({ url: '/pages/home/index' }), 600);
+  }
+
   /* -------------------- WebSocket -------------------- */
 
   function connectWs() {
@@ -95,10 +123,13 @@ export function useBabyMonitor() {
       console.warn('[WS] 未配置服务器地址（配对或加入家庭监护后可用）');
       return;
     }
-    console.warn('[WS] connect', wsUrl);
+    // 家庭 token 上行（S-07）：server 据此判角色，成员端设备指令会被拒
+    const familyToken = getFamilyMember()?.token || getFamilyOwner()?.token;
+    const url = familyToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}ftoken=${familyToken}` : wsUrl;
+    console.warn('[WS] connect', url);
     // 必须传 complete 回调才返回 SocketTask（不传回调时返回 Promise，
     // success 回调里的 res 不是 SocketTask）
-    socket = uni.connectSocket({ url: wsUrl, complete: () => {} });
+    socket = uni.connectSocket({ url, complete: () => {} });
 
     socket.onOpen(() => {
       console.warn('[WS] Connected');
@@ -133,6 +164,12 @@ export function useBabyMonitor() {
             break;
           case 'listenState':
             listening.value = !!msg.listening;
+            break;
+          case 'familyChanged':
+            handleFamilyChanged(msg);
+            break;
+          case 'error':
+            console.warn('[WS] server error:', msg.message);
             break;
         }
       }

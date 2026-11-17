@@ -6,15 +6,15 @@
 import type { DeviceData } from '@/api/baby';
 import type { MonitorSettings } from '@/utils/monitorSettings';
 import { onShow } from '@dcloudio/uni-app';
-import UQRCode from 'uqrcodejs';
-import { computed, getCurrentInstance, nextTick, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { fetchDevice } from '@/api/baby';
+import { fetchFamilyOverview } from '@/api/family';
 import { colors } from '@/constants/colors';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
+import { getFamilyRole } from '@/utils/family';
 import { getIcon } from '@/utils/icons';
 import { loadMonitorSettings, persistMonitorSettings, SENSITIVITY_OPTIONS } from '@/utils/monitorSettings';
 import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAuthorized } from '@/utils/notify';
-import { resolveServerUrl } from '@/utils/server';
 import { hasLocalPairing } from '@/utils/storage';
 
 const { capsuleTopGap } = useCapsuleGap();
@@ -139,48 +139,27 @@ function goPairing() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  家庭共享（2026-11-10 决策）：家人手机无需配对，扫码/填地址即成为观众  */
+/*  家庭共享（设计板 19 / CR-01 成员制）：管理页 pages/family-share       */
 /* ------------------------------------------------------------------ */
 
-const QR_SIZE = 180; // px，须与 canvas 宽高一致
-const shareVisible = ref(false);
-const shareUrl = ref('');
+/** 行右值（板05）：owner 显示 N/6，member 显示「已加入」；未认领/拉取失败留空 */
+const familyQuotaText = ref('');
 
-function onShareTap() {
-  const url = resolveServerUrl();
-  if (!url) {
-    uni.showToast({ title: '尚未配置服务器地址', icon: 'none' });
+function refreshFamilyQuota() {
+  if (!hasPairedDevice.value || getFamilyRole() === 'none') {
+    familyQuotaText.value = '';
     return;
   }
-  shareUrl.value = url;
-  shareVisible.value = true;
-  // 等 v-if 弹框与 canvas 完成首帧布局后再绘制
-  nextTick(() => {
-    setTimeout(drawShareQr, 60);
+  fetchFamilyOverview().then((data) => {
+    familyQuotaText.value = data.role === 'owner' ? `${data.quota.used}/${data.quota.max}` : '已加入';
+  }).catch(() => {
+    familyQuotaText.value = '';
   });
 }
 
-function drawShareQr() {
-  try {
-    const qr = new UQRCode();
-    qr.data = shareUrl.value;
-    qr.size = QR_SIZE;
-    qr.make();
-    const instance = getCurrentInstance()?.proxy;
-    qr.canvasContext = uni.createCanvasContext('shareQrCanvas', instance);
-    qr.drawCanvas();
-  }
-  catch (e) {
-    console.warn('[ShareQR] draw failed', e);
-  }
-}
-
-function onShareCopy() {
-  uni.setClipboardData({ data: shareUrl.value });
-}
-
-function onShareClose() {
-  shareVisible.value = false;
+/** 分享给家人 → 成员管理页（owner 管理成员/出码/邀请；member 只读 + 退出） */
+function onShareTap() {
+  uni.navigateTo({ url: '/pages/family-share/index' });
 }
 
 function goBLETest() {
@@ -236,6 +215,8 @@ onShow(() => {
   loadDevice();
   // 从系统设置页返回时刷新通知授权（用户可能刚在系统里开了/关了通知）
   systemNotifyAuth.value = isNotificationAuthorized();
+  // 从分享管理页返回时刷新成员配额（板05 右值 N/6 / 已加入）
+  refreshFamilyQuota();
 });
 </script>
 
@@ -272,19 +253,16 @@ onShow(() => {
             </view>
             <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
-        </view>
-      </view>
-
-      <!-- ========= 家庭共享（2026-11-10 决策：单设备多观众） ========= -->
-      <!-- 未配对时整节隐藏：没有设备就没有可分享的对象，与设备卡占位态口径一致 -->
-      <view v-if="hasPairedDevice" class="section">
-        <text class="section__title block mb-2">家庭共享</text>
-        <view class="group bg-card rounded-lg">
+          <!-- 分享给家人（设计板 05/19：设备管理组第三行，右值 N/6；CR-01 成员制） -->
           <view class="row" @tap="onShareTap">
-            <view class="row-body flex-1">
-              <text class="row-title text-main">分享给家人</text>
-              <text class="row-desc text-secondary block">家人加入后可同步查看宝宝状态与告警，无需重复配对</text>
+            <view class="plus-chip rounded-full flex items-center justify-center shrink-0">
+              <image class="plus-chip__icon" :src="getIcon('users', 'primary')" mode="aspectFit" />
             </view>
+            <view class="row-body flex-1 ml-3">
+              <text class="row-title text-main">分享给家人</text>
+              <text class="row-desc text-secondary block">家人加入后可同步查看宝宝状态，仅可只读查看</text>
+            </view>
+            <text v-if="familyQuotaText" class="row-value text-secondary">{{ familyQuotaText }}</text>
             <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
         </view>
@@ -372,21 +350,7 @@ onShow(() => {
       </view>
     </view>
 
-    <!-- 家庭共享弹框（遮罩/白卡与配对页成功弹框同款：z-200 压暗吸顶顶栏） -->
-    <view v-if="shareVisible" class="share-mask" @tap="onShareClose">
-      <view class="share-modal" @tap.stop>
-        <text class="share-modal__title">分享给家人</text>
-        <text class="share-modal__desc text-secondary">家人在 App 首页点「加入家庭监护」扫码即可</text>
-        <view class="share-modal__qr rounded-md">
-          <canvas id="shareQrCanvas" canvas-id="shareQrCanvas" class="share-modal__canvas" :style="{ width: `${QR_SIZE}px`, height: `${QR_SIZE}px` }" />
-        </view>
-        <text class="share-modal__url text-secondary">{{ shareUrl }}</text>
-        <AppButton size="cta" class="share-modal__cta" @tap="onShareCopy">
-          复制地址
-        </AppButton>
-        <text class="share-modal__later" @tap="onShareClose">关闭</text>
-      </view>
-    </view>
+    <!-- 家庭共享弹框已移除（CR-01）：「分享给家人」行改跳 pages/family-share 成员管理页 -->
 
     <!-- 底部导航由 layouts/tabbar.vue 布局统一挂载 -->
   </view>
@@ -516,78 +480,5 @@ page {
   margin-top: 20rpx;
   padding: 0 4rpx;
   font-size: 24rpx;
-}
-
-/* ---------- 弹框（遮罩白卡，与配对页成功弹框同款；z-200 压暗吸顶顶栏） ---------- */
-
-@mixin modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 200; // 高于吸顶顶栏(.sticky-top z-100)：遮罩必须连顶栏一起压暗
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: $color-mask;
-}
-
-@mixin modal-card {
-  box-sizing: border-box;
-  width: 590rpx;
-  padding: 48rpx 40rpx 32rpx;
-  border-radius: 32rpx;
-  background-color: $color-card;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.share-mask {
-  @include modal-mask;
-}
-
-.share-modal {
-  @include modal-card;
-
-  &__title {
-    font-size: 40rpx; // 21px
-    font-weight: 700;
-    color: $color-primary-deep;
-  }
-
-  &__desc {
-    margin-top: 8rpx;
-    font-size: 25rpx;
-    text-align: center;
-  }
-
-  &__qr {
-    margin-top: 32rpx;
-    padding: 24rpx;
-    background-color: $color-white; // 二维码底必须纯白，深色主题下也不可透出卡片色
-  }
-
-  &__canvas {
-    display: block;
-  }
-
-  &__url {
-    width: 100%;
-    margin-top: 24rpx;
-    font-size: 22rpx;
-    text-align: center;
-    word-break: break-all;
-  }
-
-  &__cta {
-    width: 100%;
-    margin-top: 32rpx;
-  }
-
-  &__later {
-    margin-top: 24rpx;
-    padding: 8rpx;
-    font-size: 25rpx;
-    color: $color-text-muted;
-  }
 }
 </style>

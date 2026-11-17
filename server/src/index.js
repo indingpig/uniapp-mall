@@ -5,10 +5,12 @@ import cors from 'cors';
 import { Detector } from './services/detector.js';
 import { dataStore } from './services/dataStore.js';
 import { startSimulator } from './services/simulator.js';
-import { createWSServer, getOnlineCount } from './ws/handler.js';
+import { familyStore } from './services/familyStore.js';
+import { createWSServer, getOnlineCount, notifyFamilyChanged } from './ws/handler.js';
 import { createBabyRoutes } from './routes/baby.js';
 import { createHistoryRoutes } from './routes/history.js';
 import { createStatsRoutes } from './routes/stats.js';
+import { createFamilyRoutes } from './routes/family.js';
 
 const PORT = process.env.PORT || 8080;
 
@@ -25,6 +27,7 @@ detector.on('statusChange', ({ from, to }) => {
 app.use('/api/baby', createBabyRoutes(detector, dataStore));
 app.use('/api/history', createHistoryRoutes(dataStore));
 app.use('/api/stats', createStatsRoutes());
+app.use('/api/family', createFamilyRoutes(familyStore, notifyFamilyChanged));
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, onlineClients: getOnlineCount() });
 });
@@ -32,7 +35,7 @@ app.get('/api/health', (_req, res) => {
 const server = createServer(app);
 
 // WebSocket
-const wss = createWSServer(server, detector, dataStore);
+const wss = createWSServer(server, detector, dataStore, familyStore);
 
 // 模拟器
 const useSimulator = process.env.NO_SIMULATOR !== 'true';

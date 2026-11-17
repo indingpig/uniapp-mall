@@ -49,6 +49,7 @@ export type IconKey
     | 'signal-off'
     | 'spinner'
     | 'stop'
+    | 'users'
     | 'wifi-off'
     | 'wifi-signal'
     | 'wifi';
@@ -155,6 +156,9 @@ const ICONS: Record<IconKey, string> = {
 
   'stop':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg>',
+
+  'users':
+    '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="9.2" cy="7.6" r="3.6" stroke="currentColor" stroke-width="2"/><path d="M2.6 20.4v-1.4a4.6 4.6 0 0 1 4.6-4.6h4a4.6 4.6 0 0 1 4.6 4.6v1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M16.2 4.2a3.6 3.6 0 0 1 0 6.8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18.4 14.6a4.6 4.6 0 0 1 3 4.4v1.4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
 
   'wifi-off':
     '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 12.55a11 11 0 0 1 14.08 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M1.42 9a16 16 0 0 1 21.16 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><line x1="1" y1="1" x2="23" y2="23" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
