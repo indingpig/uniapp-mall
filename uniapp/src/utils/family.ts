@@ -126,7 +126,7 @@ export function parseJoinQr(text: string): ParsedJoinQr {
 
 /** ws(s) 服务器地址 → REST 同源 base（与 resolveApiBaseUrl 同规则，但针对任意扫码来的地址） */
 export function toApiBase(wsUrl: string): string {
-  return wsUrl.replace(/^ws(s):\/\//i, 'http$1://').replace(/\/ws\/?$/i, '');
+  return wsUrl.replace(/^ws(s)?:\/\//i, 'http$1://').replace(/\/ws\/?$/i, '');
 }
 
 /** 拼出指向目标 server 的绝对 API 地址（加入方尚未持有服务器地址，必须显式指向） */

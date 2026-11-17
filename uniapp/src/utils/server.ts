@@ -16,7 +16,7 @@ export function resolveApiBaseUrl(): string {
   const url = resolveServerUrl();
   if (!url)
     return '';
-  return url.replace(/^ws(s):\/\//i, 'http$1://').replace(/\/ws\/?$/i, '');
+  return url.replace(/^ws(s)?:\/\//i, 'http$1://').replace(/\/ws\/?$/i, '');
 }
 
 /** server 地址格式校验（与固件改进点 3 的校验口径对齐：前缀 + 长度） */
