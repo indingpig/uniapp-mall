@@ -1,6 +1,7 @@
 #include "ble_provision.h"
 #include "config.h"
 #include "server_url.h"
+#include "wifi_connect.h"
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -18,6 +19,8 @@
 static BLEServer*          s_server      = nullptr;
 static BLECharacteristic*  s_charStatus  = nullptr;
 static BLECharacteristic*  s_charWifiList = nullptr;
+static BLECharacteristic*  s_charDevInfo = nullptr;
+static String s_deviceName;   // 广播名, 刷新 DeviceInfo JSON 时复用
 
 static BleCredentialsCallback s_credsCb  = nullptr;
 static bool    s_bleConnected = false;
@@ -403,6 +406,24 @@ bool bleProvisionIsEnabled() {
 /*  初始化                                                              */
 /* ================================================================== */
 
+/**
+ * 刷新 DeviceInfo 特征值内容 (name/version/ip/has_wifi)
+ *
+ * WiFi 每次连上/重连都由主固件回调刷新 (onWifiStatus 的 wifi_connected 分支),
+ * App 连接后读 26ac 即得当前局域网 IP —— 采集页自动寻址的数据源。
+ * 该特征值无加密权限, 读取不触发配对。
+ */
+void bleProvisionRefreshDeviceInfo() {
+  if (!s_charDevInfo) return;
+  String ip = wifiGetIP();
+  bool hasWifi = (ip.length() > 0 && ip != "0.0.0.0");
+  String info = "{\"name\":\"" + s_deviceName + "\","
+                "\"version\":\"1.0\","
+                "\"ip\":\"" + ip + "\","
+                "\"has_wifi\":" + (hasWifi ? "true" : "false") + "}";
+  s_charDevInfo->setValue(info.c_str());
+}
+
 void bleProvisionInit(const char* deviceName) {
   BLEDevice::init(deviceName);
   BLEDevice::setMTU(256);
@@ -455,13 +476,11 @@ void bleProvisionInit(const char* deviceName) {
   s_charWifiList->addDescriptor(new BLE2902());
   s_charWifiList->setCallbacks(new WifiListWriteCallback());
 
-  // Device Info (Read)
-  BLECharacteristic* cDevInfo = service->createCharacteristic(
+  // Device Info (Read, 无加密权限: 任何连接可读, 采集页靠它自动获取板子 IP)
+  s_deviceName = deviceName;
+  s_charDevInfo = service->createCharacteristic(
     BLE_CHAR_DEVICE_INFO_UUID, BLECharacteristic::PROPERTY_READ);
-  String info = "{\"name\":\"" + String(deviceName) + "\","
-    "\"version\":\"1.0\","
-    "\"has_wifi\":false}";
-  cDevInfo->setValue(info.c_str());
+  bleProvisionRefreshDeviceInfo();   // init 时 WiFi 未连, ip 为 0.0.0.0; 连上后由 onWifiStatus 刷新
 
   service->start();
 

@@ -314,6 +314,14 @@ static bool serveHttp(WiFiClient& c) {
     s_wsClient = c;
     // 新连接: 重置采集状态, 避免继承上次卡住/未结束的会话
     audioPipelineCollectReset();
+    // 已配网设备: 采集客户端连上即 IP 已交付, 立即关闭配网窗口 —— 推流期间
+    // 广播/BLE 活动会与推流争抢堆 (2026-11-16 实测: 窗口开着录音, 堆 23KB 起
+    // 步整机挂死断网), 关窗后回到旧纯 WS 流程的运行条件。出厂态(无凭据)不关,
+    // 保留配网与采集共用窗口的语义
+    if (wifiHasSavedCredentials() && bleProvisionIsEnabled()) {
+      bleProvisionSetEnabled(false);
+      Serial.println("[WS] 配网窗口已自动关闭 (采集会话开始)");
+    }
     Serial.println("[WS] collect client connected (state reset)");
     return true;
   }
@@ -338,6 +346,9 @@ static bool serveHttp(WiFiClient& c) {
 void collectServerStart() {
   s_server.begin();
   if (MDNS.begin(MDNS_NAME)) {
+    // 广播服务类型: 桌面 mDNS 浏览工具可按服务发现 (Android App 原生 socket
+    // 不走 mDNS 解析, 不受影响 —— App 端寻址走 BLE 读 DeviceInfo)
+    MDNS.addService("http", "tcp", 80);
     Serial.printf("[mDNS] http://%s.local\n", MDNS_NAME);
   }
   Serial.printf("[Collect] server on %s:80\n", WiFi.localIP().toString().c_str());

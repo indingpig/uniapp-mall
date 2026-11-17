@@ -53,6 +53,13 @@ void bleProvisionSetCredentialsCallback(BleCredentialsCallback cb);
 void bleProvisionUpdateStatus(const char* status);
 
 /**
+ * 刷新 DeviceInfo 特征值内容 (name/version/ip/has_wifi)
+ * WiFi 连上(含重连)后由主固件调用, App 读 26ac 即得当前局域网 IP
+ * (采集页自动寻址依赖; 读取无需加密/配对)
+ */
+void bleProvisionRefreshDeviceInfo();
+
+/**
  * 当前是否有 App 通过 BLE 连接
  */
 bool bleProvisionIsConnected();

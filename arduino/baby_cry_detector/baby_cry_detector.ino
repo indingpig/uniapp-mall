@@ -187,6 +187,11 @@ static void bootButtonLoop() {
 
 // WiFi 状态变化 → BLE 通知 App; 连上后启动采集服务与 server 链接
 void onWifiStatus(const char* status) {
+  // WiFi 连上(含重连)即刷新 DeviceInfo 里的 IP —— 采集页 BLE 读 26ac 自动取址的
+  // 数据源; 先刷新再 notify, App 收到 wifi_connected 后立读即得最新值
+  if (strcmp(status, BLE_STATUS_WIFI_CONNECTED) == 0) {
+    bleProvisionRefreshDeviceInfo();
+  }
   bleProvisionUpdateStatus(status);
   if (strcmp(status, BLE_STATUS_WIFI_CONNECTED) == 0) {
     led_off();   // 凭据已生效: 结束待配网/窗口闪烁, 之后由 server_connected 收尾
