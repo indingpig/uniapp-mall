@@ -205,7 +205,7 @@ export function useBLE() {
 
   /* ===================== 连接 ===================== */
 
-  async function connectDevice(device: BLEDevice): Promise<BLEDevice> {
+  async function connectDevice(device: BLEDevice, opts?: { skipNotify?: boolean }): Promise<BLEDevice> {
     statusText.value = `正在连接 ${device.name}...`;
     stopScan();
 
@@ -248,12 +248,17 @@ export function useBLE() {
       throw new Error('未找到状态特征值, 请确认固件已正确烧录');
     }
 
-    // 启用 Status 通知 (会写 CCCD 描述符)
-    try {
-      await enableNotify();
-    }
-    catch (e) {
-      console.warn('[BLE] Observe failed:', e);
+    // 启用 Status 通知 (会写 CCCD 描述符)。observe 是 fire-and-forget, 描述符
+    // 写在途时 Android「同一时刻只允许一个 GATT 操作」—— 紧跟的 read 会直接
+    // return false (2026-11-16 真机 9020007)。采集页读 DeviceInfo 前先跳过订阅,
+    // 见 opts.skipNotify; 配对流程无 read, 不受影响
+    if (!opts?.skipNotify) {
+      try {
+        await enableNotify();
+      }
+      catch (e) {
+        console.warn('[BLE] Observe failed:', e);
+      }
     }
 
     // 不读取设备信息 (避免 Android BLE 底层 read 失败导致崩溃)
@@ -288,6 +293,32 @@ export function useBLE() {
         console.warn('[BLE] Observe error:', err.errMsg);
       },
     });
+  }
+
+  /* ===================== 读设备信息 (采集页自动寻址) ===================== */
+
+  /**
+   * 读取 DeviceInfo 特征值 (name/version/ip/has_wifi)。
+   * 特征值无加密权限, 读取不触发配对; 需在 connectDevice 之后调用。
+   * 固件在 WiFi 每次连上/重连时刷新 ip 字段, 采集页据此自动填直连地址
+   * (Android 原生 socket 解析不了 babycry.local, IP 是唯一可靠的直连地址)。
+   * 注意: 配对流程刻意不调它 —— 历史上 Android 底层 read 有崩溃案例, 只在
+   * 采集页按需读取并经真机回归。
+   */
+  async function readDeviceInfo(): Promise<Record<string, unknown>> {
+    if (!peripheral || !platformCharUuids.deviceInfo) {
+      throw new Error('设备未连接或固件不含设备信息特征值');
+    }
+    try {
+      const hex = await peripheral.read(characteristicOf(platformServiceUuid, platformCharUuids.deviceInfo));
+      const info = JSON.parse(bytesToUtf8(hexToBytes(hex))) as Record<string, unknown>;
+      deviceInfo.value = info;
+      return info;
+    }
+    catch (e) {
+      console.warn('[BLE] readDeviceInfo failed:', e);
+      throw new Error('设备信息读取失败');
+    }
   }
 
   /* ===================== WiFi 列表 (免手输 SSID) ===================== */
@@ -489,6 +520,7 @@ export function useBLE() {
     startScan,
     stopScan,
     connectDevice,
+    readDeviceInfo,
     startWifiScan,
     pair,
     close,

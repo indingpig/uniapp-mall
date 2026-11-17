@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue';
+import type { BLEDevice } from '@/hooks/useBLE';
+import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { CACHE_KEY } from '@/constants/cache';
+import { useBLE } from '@/hooks/useBLE';
 import {
   agcWindowize,
   buildWav,
   calcRms,
   SAMPLE_RATE,
 } from '@/utils/audioData';
+import { AUTO_BLE_ON_MOUNT } from '@/utils/bleEnv';
 import { getIcon } from '@/utils/icons';
 import { saveWavFile } from '@/utils/saveWav';
 import { storage } from '@/utils/storage';
@@ -18,6 +21,11 @@ import { storage } from '@/utils/storage';
  * PCM (16kHz/16bit/单声道), 手机端分窗 AGC + 封 WAV 存本地, 用于
  * Edge Impulse 重训。协议与 audio_app/README.md 一致:
  *   App→板 {"cmd":"start"/"stop"}; 板→App 二进制 PCM + {"cmd":"done",...}
+ *
+ * 寻址: 进页面先用已存地址直连, 连不上自动转 BLE 读板子 DeviceInfo 里的
+ * IP 并直连 (广播仅窗口期可见, 扫不到时按住板子 BOOT 3 秒使其可被发现——
+ * 注意这不是重新配对, 读取 IP 全程无配对/无写入); Android 原生 socket
+ * 解析不了 babycry.local, IP 是唯一可靠的直连地址。
  *
  * 坑位 (参考 audio_app_uni/pages/index/index.vue):
  *   - uni.connectSocket 必须传 complete 回调才返回 SocketTask
@@ -81,7 +89,7 @@ function wsUrl(): string {
   return `${u.replace(/^http/i, 'ws')}/ws`;
 }
 
-function setupSocket(task: UniApp.SocketTask) {
+function setupSocket(task: UniApp.SocketTask, onSettled?: (ok: boolean) => void) {
   socketTask = task;
   task.onOpen(() => {
     connected.value = true;
@@ -89,6 +97,7 @@ function setupSocket(task: UniApp.SocketTask) {
     statusOk.value = true;
     addLog(`已连接 ${wsUrl()}`);
     startMeter();
+    onSettled?.(true);
   });
   task.onMessage((res) => {
     const data = res.data as string | ArrayBuffer;
@@ -122,6 +131,7 @@ function setupSocket(task: UniApp.SocketTask) {
     connected.value = false;
     statusText.value = `连接错误: ${e.errMsg || 'unknown'}`;
     statusOk.value = false;
+    onSettled?.(false);
   });
 }
 
@@ -140,7 +150,7 @@ function handleCmdText(text: string) {
   }
 }
 
-function doConnect() {
+function doConnect(onSettled?: (ok: boolean) => void) {
   if (connected.value) {
     socketTask?.close({});
     return;
@@ -157,31 +167,153 @@ function doConnect() {
   }
   catch (e) {
     statusText.value = `连接失败: ${e}`;
+    onSettled?.(false);
     return;
   }
 
   if (task && typeof task.onOpen === 'function') {
-    setupSocket(task);
+    setupSocket(task, onSettled);
     return;
   }
 
   // 兼容: 部分版本不传回调返回 Promise
   if (task && typeof (task as unknown as Promise<UniApp.SocketTask>).then === 'function') {
     (task as unknown as Promise<UniApp.SocketTask>).then((t2) => {
-      if (t2 && typeof t2.onOpen === 'function')
-        setupSocket(t2);
-      else
+      if (t2 && typeof t2.onOpen === 'function') {
+        setupSocket(t2, onSettled);
+      }
+      else {
         statusText.value = '连接失败: SocketTask 解析失败';
+        onSettled?.(false);
+      }
     });
     return;
   }
 
   statusText.value = '连接失败: 未获取到 SocketTask';
+  onSettled?.(false);
 }
 
 function persistBaseUrl() {
   storage.set(CACHE_KEY.COLLECT_BASE_URL, baseUrl.value.trim());
 }
+
+/* ==================== BLE 自动寻址 (扫描板子读 IP) ==================== */
+
+const ble = useBLE();
+const scanningBoard = ref(false);
+
+/** 用当前地址发起一次连接, 8s 内未连上视为失败 (仅自动寻址流程的探测用) */
+function probeConnect(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      socketTask?.close({});
+      resolve(false);
+    }, 8000);
+    doConnect((ok) => {
+      clearTimeout(timer);
+      resolve(ok);
+    });
+  });
+}
+
+function pickDevice(devices: BLEDevice[]): Promise<BLEDevice> {
+  return new Promise((resolve, reject) => {
+    uni.showActionSheet({
+      itemList: devices.slice(0, 6).map(d => d.name),
+      success: ({ tapIndex }) => resolve(devices[tapIndex]),
+      fail: () => reject(new Error('已取消选择设备')),
+    });
+  });
+}
+
+/**
+ * BLE 扫描 → 连接 → 读 DeviceInfo 拿板子 IP → 填地址并直连。
+ * 前提: 板子广播可见 (出厂态常开; 已配网设备按住 BOOT 3 秒打开 5 分钟可见
+ * 窗口) —— 注意这不是重新配对: 只读特征值, 无写入、全程无配对弹窗。
+ * 地址取到即持久化, 下次进页走快路径。
+ */
+async function scanBoardIp(): Promise<boolean> {
+  if (scanningBoard.value) {
+    return false;
+  }
+  scanningBoard.value = true;
+  statusText.value = '正在扫描板子...';
+  statusOk.value = false;
+  addLog('BLE 扫描开始 (扫不到时按住板子 BOOT 3 秒使其可被发现)');
+  try {
+    await ble.startScan();
+    // startScan 自身 30s 超时, 这里 12s 就放弃, 把时间留给引导文案
+    const deadline = Date.now() + 12_000;
+    while (ble.devices.value.length === 0 && ble.scanning.value && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 400));
+    }
+    ble.stopScan();
+    const found = ble.devices.value;
+    if (found.length === 0) {
+      statusText.value = '未发现板子：按住板子 BOOT 3 秒使其可被发现, 再点「扫描」重试';
+      addLog(`扫描无结果 (蓝牙: ${ble.statusText.value})`);
+      return false;
+    }
+    const target = found.length === 1 ? found[0] : await pickDevice(found);
+    addLog(`发现 ${target.name}, 连接读取设备信息...`);
+    // skipNotify: 不订阅 Status (collect 用不到) —— CCCD 描述符写在途会让紧随
+    // 其后的 read 撞上 Android 单 GATT 操作限制而失败 (真机日志 9020007)
+    await ble.connectDevice(target, { skipNotify: true });
+    // GATT 偶发繁忙时单次读可能失败, 重试兜底
+    let info: Record<string, unknown> | null = null;
+    for (let attempt = 1; attempt <= 3 && !info; attempt++) {
+      try {
+        info = await ble.readDeviceInfo();
+      }
+      catch (e) {
+        if (attempt === 3)
+          throw e;
+        addLog(`读取设备信息失败, 重试 (${attempt}/2)...`);
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+    const ip = typeof info?.ip === 'string' ? info.ip : '';
+    if (!ip || ip === '0.0.0.0') {
+      statusText.value = '板子尚未连上 WiFi, 无法获取 IP';
+      addLog(`DeviceInfo 无有效 IP: ${JSON.stringify(info)}`);
+      return false;
+    }
+    baseUrl.value = `http://${ip}`;
+    persistBaseUrl();
+    addLog(`已获取板子 IP: ${ip}, 直连...`);
+    doConnect();
+    return true;
+  }
+  catch (e) {
+    statusText.value = `自动寻址失败: ${(e as Error).message}`;
+    addLog(`自动寻址失败: ${(e as Error).message}`);
+    return false;
+  }
+  finally {
+    ble.close(); // 兜底断 BLE (幂等), 不影响 WS 长连接
+    scanningBoard.value = false;
+  }
+}
+
+/* ==================== 进页自动寻址 ==================== */
+
+onMounted(async () => {
+  // 1) 已存地址先直连 (快路径, 不跑 BLE); 2) 连不上/没存过 → BLE 自动寻址;
+  // 3) H5 真实蓝牙的扫描必须由用户手势触发, 只提示手动点「扫描」
+  const stored = storage.get<string>(CACHE_KEY.COLLECT_BASE_URL);
+  if (stored) {
+    addLog(`尝试已存地址: ${stored}`);
+    if (await probeConnect())
+      return;
+    addLog('已存地址连不上, 转 BLE 自动寻址');
+  }
+  if (AUTO_BLE_ON_MOUNT) {
+    await scanBoardIp();
+    return;
+  }
+  statusText.value = stored ? '已存地址连不上, 点「扫描」重试' : '点「扫描」自动获取板子地址';
+});
 
 /* ==================== 实时电平 (/rms 轮询) ==================== */
 
@@ -382,9 +514,16 @@ onBeforeUnmount(() => {
           @blur="persistBaseUrl"
         >
         <button
+          class="btn btn--secondary font-semibold border-none flex items-center justify-center shrink-0"
+          :disabled="scanningBoard"
+          @tap="scanBoardIp()"
+        >
+          {{ scanningBoard ? '扫描中' : '扫描' }}
+        </button>
+        <button
           class="btn font-semibold border-none flex items-center justify-center shrink-0"
           :class="connected ? 'btn--secondary' : 'btn--primary'"
-          @tap="doConnect"
+          @tap="doConnect()"
         >
           {{ connected ? '断开' : '连接' }}
         </button>
@@ -455,7 +594,7 @@ onBeforeUnmount(() => {
         录音中… {{ recSecs }}s（按「停止并保存」结束）
       </text>
       <text v-else class="hint block mt-2 text-muted">
-        文件名: {{ selectedCat }}_NNN.wav；保存位置: Android 下载目录/BabyCry/，iOS App 沙盒 audio/
+        文件名: {{ selectedCat }}_NNN.wav；保存路径以保存后状态行为准（写入后回读校验，EMUI 映射到应用目录属正常）
       </text>
     </view>
 

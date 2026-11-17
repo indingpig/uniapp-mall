@@ -159,6 +159,14 @@ export function createPeripheral(_deviceId: string) {
       statusHandler = handlers.onValue;
       void handlers.onError;
     },
+    // 仅 DeviceInfo 有读语义: 假数据带局域网 IP, 采集页自动寻址流程可在浏览器走通
+    read: (ref: MockCharRef) => new Promise<string>((resolve) => {
+      if (ref.characterUuid === BLE_CHAR_DEVICE_INFO_UUID) {
+        resolve(strToHex(JSON.stringify({ name: 'BabyMonitor-A3F2', version: '1.0', ip: '192.168.1.231', has_wifi: true })));
+        return;
+      }
+      resolve('');
+    }),
     write: (ref: MockCharRef, value: string, _type: number) => new Promise<void>((resolve) => {
       const text = hexToStr(value);
       if (ref.characterUuid === BLE_CHAR_WIFI_SSID_UUID)

@@ -30,6 +30,7 @@ interface WBCharacteristic extends EventTarget {
   uuid: string;
   properties: WBCharacteristicProperties;
   startNotifications: () => Promise<WBCharacteristic>;
+  readValue: () => Promise<DataView>;
   writeValue: (value: BufferSource) => Promise<void>;
   writeValueWithResponse?: (value: BufferSource) => Promise<void>;
   writeValueWithoutResponse?: (value: BufferSource) => Promise<void>;
@@ -239,6 +240,14 @@ export function createPeripheral(deviceId: string) {
           });
         })
         .catch((err: Error) => handlers.onError({ errMsg: err.message }));
+    },
+
+    /** 读特征值 (返回 hex, 与 bin-bluetooth 的 IPeripheral.read 对齐) */
+    async read(ref: WBCharRef) {
+      const c = charOf(ref);
+      if (!c)
+        throw new Error('特征值不存在');
+      return dataViewToHex(await c.readValue());
     },
 
     async write(ref: WBCharRef, value: string, type: number) {
