@@ -31,7 +31,7 @@ import { hasLocalPairing, storage } from '@/utils/storage';
 /*  服务端数据                                                          */
 /* ------------------------------------------------------------------ */
 
-const { status, volume, device, durationSec, listening, sendCmd, refresh, reconnect } = useBabyMonitor();
+const { status, volume, device, durationSec, listening, refresh, reconnect } = useBabyMonitor();
 
 /* ------------------------------------------------------------------ */
 /*  本地数据                                                            */
@@ -256,16 +256,14 @@ function onBellTap() {
   goHistory();
 }
 
-function toggleListen() {
+function onListenTap() {
+  // 推理常开 (2026-11-19): 监听不再随 App 启停, 按钮只读展示监护状态;
+  // 远程听声（设备音频流到手机）立项后这里才恢复真实开关
   if (!device.value.isOnline) {
-    uni.showToast({ title: '设备离线，无法监听', icon: 'none' });
+    uni.showToast({ title: '设备离线，恢复后自动继续监护', icon: 'none' });
     return;
   }
-  // 指令经 server 中继下发设备；hook 内乐观置位，设备回传 listenState 驱动 UI
-  const next = !listening.value;
-  if (!sendCmd(next ? 'listen_on' : 'listen_off')) {
-    uni.showToast({ title: '连接服务端失败，无法监听', icon: 'none' });
-  }
+  uni.showToast({ title: '设备端持续监护中，哭声会自动推送提醒', icon: 'none' });
 }
 
 // （监听态随设备离线自动退出，已移入 useBabyMonitor 的 offline watch）
@@ -637,8 +635,10 @@ onBeforeUnmount(() => {
             />
           </view>
           <text class="vol-hint block" :class="volumeOffline ? 'text-muted' : 'text-secondary'">{{ volumeHint }}</text>
-          <!-- 播放路由说明（规范 12.3）；路由切换为蓝牙耳机时文案联动，v1.1 固定扬声器文案 -->
-          <text v-if="listening" class="vol-live-hint block">正在通过手机扬声器播放宝宝的声音</text>
+          <!-- 推理常开 (2026-11-19)：原文案「正在通过手机扬声器播放宝宝的声音」
+               描述的播放路由尚未落地，常开后恒显示会构成误导，先改为真实状态；
+               「远程听声」上线后恢复播放路由文案（规范 12.3） -->
+          <text v-if="listening" class="vol-live-hint block">设备端持续识别哭声中，触发将推送提醒</text>
         </view>
 
         <!-- 今日事件卡片 -->
@@ -678,12 +678,10 @@ onBeforeUnmount(() => {
             v-if="!isMember"
             class="action-btn action-btn--listen rounded-pill flex items-center justify-center gap-2"
             :class="{ 'action-btn--disabled': isDeviceOffline }"
-            @tap="toggleListen"
+            @tap="onListenTap"
           >
-            <image v-if="!listening" class="action-btn__icon" :src="getIcon('mic', isDeviceOffline ? 'disabled' : 'white')" mode="aspectFit" />
-            <!-- 白色方形停止符 12×12（规范 12.3） -->
-            <view v-else class="action-btn__stop" />
-            <text class="action-btn__text text-white">{{ listening ? '停止监听' : '监听' }}</text>
+            <image class="action-btn__icon" :src="getIcon('mic', 'white')" mode="aspectFit" />
+            <text class="action-btn__text text-white">{{ listening ? '监护中' : '监护启动中' }}</text>
           </view>
           <view
             class="action-btn rounded-pill flex items-center justify-center gap-2"

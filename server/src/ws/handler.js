@@ -1,11 +1,11 @@
 import { WebSocketServer } from 'ws';
 import { STATUS } from '../services/detector.js';
-import { pushCry } from '../services/notify.js';
+import { deviceCameBack, deviceWentOffline, pushCry } from '../services/notify.js';
 
 const clients = new Set();
 let esp32Client = null;           // 设备连接 (单设备)
 let deviceListening = false;      // 设备真实监听状态 (listenState 回执驱动)
-const listenWanters = new Set();  // 想监听的 app 连接集合 (引用计数: 0→1 开, 归 0 关)
+const listenWanters = new Set();  // 监听意愿登记 (引用计数; 推理常开后不驱动指令, 留给「远程听声」)
 let lastInference = null;         // { label, ts } 设备最新识别结果, 附到 audio 上喂 detector
 
 // 模型 label 的有效期: 推理 1s 一窗, 取 1.5s 覆盖两次 audio 间隔
@@ -25,6 +25,12 @@ export function createWSServer(server, detector, dataStore, familyStore) {
     // ntfy 兜底推送（App 被杀后仍能收到系统通知）；App 内本地通知由 App 进程
     // 自己在收到广播后触发，两条链路互不依赖
     if (to === STATUS.CRYING) pushCry();
+    // 失联看门狗: 持续离线超过确认窗口才推（瞬断不打扰），恢复补发一次
+    if (to === STATUS.OFFLINE) {
+      deviceWentOffline(() => detector.status === STATUS.OFFLINE);
+    } else if (from === STATUS.OFFLINE) {
+      deviceCameBack();
+    }
   });
 
   // 事件层「有动静」(规范 6/T-07): 睡眠中的短暂声响, 不改主状态——
@@ -51,12 +57,8 @@ export function createWSServer(server, detector, dataStore, familyStore) {
     ws.on('pong', () => { ws.isAlive = true; });
     if (clientType === 'esp32') {
       esp32Client = ws;
-      // 设备 (重)连后按当前意愿恢复监听: 设备重启后 s_listening 归零, 而网络
-      // 抖动重连时设备仍保持监听并自行补发 listenState (server_link.cpp) ——
-      // 两侧最终都以设备回执为准, 这里只负责「有意愿就发一次 listen_on」
-      if (listenWanters.size > 0) {
-        sendToEsp32({ type: 'cmd', cmd: 'listen_on' });
-      }
+      // 推理常开 (2026-11-19): 监听状态不再由 App 意愿驱动, 设备 (重)连后
+      // 自行补发 listenState (server_link.cpp), 两侧都以设备回执为准
     }
     console.log(`[WS] ${clientType} connected (total: ${clients.size})`);
 
@@ -122,18 +124,12 @@ export function createWSServer(server, detector, dataStore, familyStore) {
             ws.send(JSON.stringify({ type: 'error', message: '成员仅可查看，无法控制设备' }));
             return;
           }
-          // 监听指令走引用计数: 谁想听谁登记, 0→1 时开设备, 归 0 才关设备;
-          // 单个 App 的开关不影响其他成员的监听意愿, App 断开自动退订
+          // 监听指令引用计数保留（将来「远程听声」复用）: 推理常开后不再驱动
+          // 设备指令, 仅作意愿登记, App 断开自动退订
           if (msg.cmd === 'listen_on') {
             listenWanters.add(ws);
-            if (!deviceListening) {
-              sendToEsp32({ type: 'cmd', cmd: 'listen_on' });
-            }
           } else if (msg.cmd === 'listen_off') {
             listenWanters.delete(ws);
-            if (deviceListening && listenWanters.size === 0) {
-              sendToEsp32({ type: 'cmd', cmd: 'listen_off' });
-            }
           } else {
             // 其他指令原样透传给设备
             sendToEsp32({ type: 'cmd', cmd: msg.cmd });
@@ -153,10 +149,7 @@ export function createWSServer(server, detector, dataStore, familyStore) {
         deviceListening = false;
         lastInference = null;
       }
-      else if (clientType === 'app' && deviceListening && listenWanters.size === 0) {
-        // 最后一个想听的 App 离开 (含杀进程/断网) → 停设备监听
-        sendToEsp32({ type: 'cmd', cmd: 'listen_off' });
-      }
+      // 推理常开: App 离开不再停设备监听（旧逻辑在此向设备发 listen_off）
       console.log(`[WS] ${clientType} disconnected (total: ${clients.size})`);
     });
 

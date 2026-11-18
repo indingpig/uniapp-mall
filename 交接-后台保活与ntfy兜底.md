@@ -2,8 +2,11 @@
 
 2026-11-19 实现。解决「App 装在手机上有很大概率被系统杀掉，哭声提醒收不到」。
 
-## 1. 根因
+> **第二轮（同日，评审跟进）**：`report.md` 评审指出 P0——「推理随观众在线启停」是存量设计，
+> 但 ntfy 让误报第一次真的能推到手机（App 全灭后设备退化为纯 RMS 阈值判哭）。已修：
+> **推理常开** + **失联看门狗** + 白名单 fail-safe，见 §7。
 
+## 1. 根因
 旧链路：ESP32 → server detector → WS 广播 → **App 进程内** `useBabyMonitor` 收 `statusChange` → `maybeNotifyCry()` → `uni.createPushMessage` 本地通知（`uniapp/src/utils/notify.ts`）。整条链依赖 App 进程存活 + WS 连接；国产 ROM（锁屏省电/一键清理/划卡片）杀进程后链路全断，5s 轮询兜底同样死在进程里。
 
 修复 = 双管齐下（用户已确认方案）：
@@ -81,3 +84,42 @@
 ## 6. 与家庭共享交接的关系
 
 《交接-家庭共享.md》§7 将「服务端推送通道」列为本期不做——本工作是其前身落地：ntfy 兜底已实现 server 主动推送，但仍是「全客户端同一主题」广播（无按成员定向）；按成员定向推送（推送目标注册表，照 familyStore JSON 持久化模式）留待推送通道正式立项。
+
+## 7. 第二轮：推理常开 + 失联看门狗（评审 P0 修复，2026-11-19）
+
+`report.md` 评审（§四 P0/P1/P2）指出：保活修好了「通知送不出去」，但没修「没有通知可送」——
+推理随最后一个 App 断开被 `listen_off` 关掉，设备退化到纯 RMS 阈值判哭（RMS≥200，空调外机/洗衣机
+都触发），而 ntfy 会把这些误报真的推到手机。三个修复已落地：
+
+### 7.1 推理常开（固件 + server + App）
+
+| 层 | 改动 |
+|---|---|
+| 固件 `baby_cry_detector.ino` | `setup()` 在 `audioPipelineStart()` 后调 `startListening()`；失败（内存不足）由 loop 30s 重试；`onServerCmd` 对 listen_on/off 只打日志置空（保留协议，等「远程听声」立项赋新义）；`stopListening()` 删除 |
+| server `handler.js` | 删两处自动指令：设备重连补发 `listen_on`、末位 App 断开发 `listen_off`；`listenWanters` 引用计数保留（将来远程听声的注册表），监听状态一律以设备 listenState 回执为准 |
+| App `home/index.vue` | 监听按钮改只读展示「监护中/监护启动中」（tap 只出提示，不下发指令）；音量卡的「正在通过手机扬声器播放宝宝的声音」改为真实文案——播放路由本就没落地，常开后恒显示构成误导 |
+
+⚠️ 真机验证点：推理常开的内存可持续性。`inferStart` 是 32KB `malloc` 采样 buffer + EI tensor
+arena，全走内部堆（未用 PSRAM）。固件本有 30s 一次的 `[Heap] min` 巡检日志——烧录后跑数小时，
+min free heap 不持续下降即通过；持续下降再考虑迁 PSRAM 或 arena 优化。
+
+### 7.2 失联看门狗（notify.js + handler.js）
+
+- `to === OFFLINE` 开确认窗口（`NTFY_OFFLINE_CONFIRM_MS`，默认 60s）：窗口结束**仍离线才推**
+  「监护器失联」，期间恢复静默取消——detector 15s 无数据即转 offline，WiFi 瞬断很常见，直接推会误报；
+- 恢复（`from === OFFLINE`）时取消未确认看门狗；仅当失联推送真发过才补发「监护已恢复」，瞬断不打扰。
+
+### 7.3 白名单 fail-safe（keepalive.ts）
+
+`isIgnoringBatteryOptimizations` 查询失败由「按已豁免」改为**按未豁免**返回（评审 P2-1）：
+监护场景下假「已豁免」比多一次引导更危险；重复申请无害（已豁免时系统弹窗直接返回）。
+
+### 7.4 第二轮验证状态
+
+| 项 | 状态 |
+|---|---|
+| uniapp lint / type-check | ✅ |
+| 固件 `pio run` 编译 | ✅（真机烧录与内存观测 ⏳ 未做） |
+| server e2e 5 项 | ✅ 哭声推送回归 / 失联确认推送 / 恢复推送 / 瞬断抑制 / App 断开不下发 listen_off |
+| episode 聚合（评审 P1-1，按「段」推送防刷屏） | ⏳ 未做，依赖推理常开已就位，下轮可加 |
+| APK targetSdkVersion 核实（评审 P1-2，Android 15 dataSync 6h 限制） | ⏳ 打包后核实，超限则换 specialUse 类型 |

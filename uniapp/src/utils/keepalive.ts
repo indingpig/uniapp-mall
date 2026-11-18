@@ -177,8 +177,10 @@ export function stopKeepAlive(): void {
 /* ------------------------------------------------------------------ */
 
 /**
- * 是否已豁免电池优化。桥接实例方法不保证可用，尽力查询：失败按「已豁免」
- * 返回，避免设置页状态行误导用户去重复设置。
+ * 是否已豁免电池优化。桥接实例方法不保证可用，尽力查询。
+ * 失败按「未豁免」返回（监护场景 fail-safe：查询失败显示已豁免会让用户误以为
+ * 设置完成，实际锁屏即被杀）——设置页会引导用户点行重新检查，重复申请无害
+ * （已豁免时系统弹窗直接返回）。
  */
 export function isIgnoringBatteryOptimizations(): boolean {
   // #ifdef APP-PLUS
@@ -192,13 +194,13 @@ export function isIgnoringBatteryOptimizations(): boolean {
     return !!powerManager.isIgnoringBatteryOptimizations(main.getPackageName());
   }
   catch (e) {
-    console.warn('[keepalive] 电池优化状态查询失败（按已豁免处理）:', e);
-    return true;
+    console.warn('[keepalive] 电池优化状态查询失败（按未豁免处理）:', e);
+    return false;
   }
   // #endif
 
   // #ifndef APP-PLUS
-  return true;
+  return false;
   // #endif
 }
 

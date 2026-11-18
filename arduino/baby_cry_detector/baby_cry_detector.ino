@@ -50,7 +50,7 @@
 /* ================================================================== */
 
 static char deviceName[32] = "BabyMonitor-0000";
-static bool s_listening = false;      // 设备是否在跑推理 (由 App 指令控制)
+static bool s_listening = false;      // 推理是否在跑 (2026-11-19 起常开, 见 startListening)
 static bool s_collectStarted = false; // 采集服务是否已启动 (WiFi 连上后一次)
 static bool s_serverStarted = false;  // server_link 是否已启动
 static uint32_t s_lastHeapLog = 0;
@@ -59,7 +59,6 @@ static uint32_t s_lastHeapLog = 0;
 void onServerCmd(const char* cmd);
 void onServerLinkState(bool connected);
 void startListening();
-void stopListening();
 
 /* ================================================================== */
 /*  恢复出厂                                                            */
@@ -213,12 +212,12 @@ void onCredentialsReceived(const String& ssid, const String& pass) {
   wifiConnectBegin(ssid, pass);
 }
 
-// server 下发指令 (目前只有监听开关)
+// server 下发指令。listen_on/off 保留协议但不再启停推理 —— 推理已常开
+// (2026-11-19), 旧语义「随观众在线启停」会让检测退化为纯 RMS 阈值判哭;
+// 指令留给将来「远程听声」立项后赋予新语义, 回执只反映真实推理状态
 void onServerCmd(const char* cmd) {
-  if (strcmp(cmd, "listen_on") == 0) {
-    startListening();
-  } else if (strcmp(cmd, "listen_off") == 0) {
-    stopListening();
+  if (strcmp(cmd, "listen_on") == 0 || strcmp(cmd, "listen_off") == 0) {
+    Serial.printf("[Cmd] 监听指令忽略 (推理常开): %s\n", cmd);
   } else {
     Serial.printf("[Cmd] 未知指令: %s\n", cmd);
   }
@@ -234,27 +233,25 @@ void onServerLinkState(bool connected) {
 }
 
 /* ================================================================== */
-/*  监听开关                                                            */
+/*  监听（推理常开）                                                     */
 /* ================================================================== */
 
+/**
+ * 启动推理并置监听态。2026-11-19 起在 setup() 调用一次并常开 —— 监护检测
+ * 不能依赖任何 App 在线。inferStart 需要一块较大的连续内部堆（32KB 采样
+ * buffer + EI tensor arena，未走 PSRAM），启动早期被 WiFi/BLE 碎片挤占会
+ * 失败：不放弃，loop 里 30s 重试。
+ */
 void startListening() {
   if (s_listening) return;
   if (!inferStart()) {
-    Serial.println("[Listen] ERR: 推理启动失败 (内存不足)");
+    Serial.println("[Listen] ERR: 推理启动失败 (内存不足), 30s 后重试");
     serverLinkSetListening(false);   // 把失败状态同步给 App
     return;
   }
   s_listening = true;
   serverLinkSetListening(true);
-  Serial.println("[Listen] ON");
-}
-
-void stopListening() {
-  if (!s_listening) return;
-  inferStop();
-  s_listening = false;
-  serverLinkSetListening(false);
-  Serial.println("[Listen] OFF");
+  Serial.println("[Listen] ON (常开)");
 }
 
 /* ================================================================== */
@@ -306,6 +303,10 @@ void setup() {
   // 音频采集链 (Core 0): I2S + 高通滤波, 常开
   audioPipelineStart();
 
+  // 推理常开: 失败 (内存不足) 由 loop 30s 重试, 上线后观察 [Heap] min 值
+  // 确认常开内存在真机上可持续
+  startListening();
+
   inferPrintInfo();
   printHeap("ready");
 }
@@ -348,6 +349,13 @@ void loop() {
   if (now - s_lastHeapLog >= 30000) {
     s_lastHeapLog = now;
     printHeap(s_listening ? "listening" : "idle");
+  }
+
+  // 推理常开失败重试: 30s 一试直到成功 (启动早期内存被占用的场景)
+  static uint32_t s_lastInferRetry = 0;
+  if (!s_listening && now - s_lastInferRetry >= 30000) {
+    s_lastInferRetry = now;
+    startListening();
   }
 
   delay(1);
