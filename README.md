@@ -16,17 +16,20 @@ babycryMonitor/
 │   │   │   ├── stats/               # 数据统计
 │   │   │   ├── settings/            # 设置
 │   │   │   ├── pairing/             # 设备配对（BLE 扫描 + WiFi 配网 + 失败分级）
-│   │   │   ├── collect/             # 哭声数据采集页（开发者工具：录音→WAV）
+│   │   │   ├── device-detail/       # 设备详情
+│   │   │   ├── family-share/        # 家庭共享管理（成员/邀请/解散）
+│   │   │   ├── family-join-success/ # 加入家庭成功页
+│   │   │   ├── collect/             # 哭声数据采集页（开发者工具：BLE 自动寻址 + 录音→WAV）
 │   │   │   └── ble-test/            # BLE 串口调试工具
 │   │   ├── components/              # AppButton / AppSwitch / CustomTabBar（页面均自绘布局）
 │   │   ├── hooks/                   # useBabyMonitor / useBLE / useCapsuleGap
 │   │   ├── constants/               # babyStatus（状态语义/音量分区）/ ble / cache / colors（TS 色源）
-│   │   ├── utils/                   # icons（getIcon）、request 封装、storage 封装
-│   │   ├── types/                   # 手写 d.ts（bin-bluetooth UTS 插件类型声明）
+│   │   ├── utils/                   # icons（getIcon）、request/storage 封装、family、saveWav、keepalive（保活/白名单）等
+│   │   ├── types/                   # 手写 d.ts（bin-bluetooth / uts-keepalive UTS 插件类型声明）
 │   │   ├── api/                     # REST API 封装
 │   │   ├── mock/                    # H5 蓝牙模拟器（ble-adapter，配对流程浏览器可走通）
 │   │   └── styles/                  # 全局 SCSS（主题 token + 原子类 utilities.scss）
-│   ├── scripts/gen-icons.mjs        # 图标构建（SVG → getIcon 字体/映射，改图标逻辑改这里后重跑）
+│   ├── scripts/                     # 图标/字体构建（gen-icons / gen-iconfont / gen-tabbar-icons，改逻辑改脚本后重跑）
 │   ├── pages.config.ts              # 页面/tabBar 配置（生成 src/pages.json，勿手改）
 │   ├── manifest.config.ts           # 多端配置（生成 src/manifest.json，勿手改；含小程序真实 AppID）
 │   └── disign/                      # UI 设计稿导出 + 图标库（设计源文件，勿改名）
@@ -34,10 +37,12 @@ babycryMonitor/
 ├── server/                          # Node.js 后端（Express + ws，ESM）
 │   └── src/
 │       ├── index.js                 # 入口（HTTP + WebSocket 同端口）
-│       ├── routes/                  # REST：baby / history / stats
+│       ├── routes/                  # REST：baby / history / stats / family
 │       ├── services/
 │       │   ├── detector.js          # 状态机（RMS 滑动窗口 + 设备端 EI 推理标签）
 │       │   ├── simulator.js         # 内置状态模拟器（无硬件时联调用）
+│       │   ├── familyStore.js       # 家庭共享存储（成员/邀请/角色鉴权，持久化 data/family.json）
+│       │   ├── notify.js            # ntfy 兜底推送（哭声/失联告警，配置见 .env.example）
 │       │   └── dataStore.js         # 历史数据存储
 │       └── ws/handler.js            # WebSocket 广播与 ESP32 上报处理
 │
@@ -84,12 +89,12 @@ pnpm run dev app-plus  # App
 
 ```bash
 pio run               # 编译默认环境 baby_cry_detector
-pio run -e audio_app  # 编译其他子工程（另有 ble_test / ble_echo_test 环境）
+pio run -e audio_app  # 编译其他子工程（另有 ble_test / ble_echo_test / i2s_recorder 麦克风排障环境）
 pio run -t upload     # 烧录
 pio device monitor    # 串口监视器（115200）
 ```
 
-> 注意：必须使用 arduino-esp32 2.0.x（platform espressif32@6.x），代码依赖旧版 I2S 驱动 `driver/i2s.h`，不要随手升级 platform。主固件依赖 Edge Impulse 库 `babyCry_inferencing`（`lib_extra_dirs` 按开发机路径二选一自动跳过）。I2S 麦克风默认引脚：WS=4, SCK=5, SD=6。
+> 注意：必须使用 arduino-esp32 2.0.x（platform espressif32@6.x），代码依赖旧版 I2S 驱动 `driver/i2s.h`，不要随手升级 platform。主固件依赖 Edge Impulse 库 `babyCry_inferencing`（`lib_extra_dirs` 列各开发机路径，缺失的自动跳过）。I2S 麦克风默认引脚：WS=4, SCK=5, SD=6。PSRAM 已启用（板载 N16R8 为 Octal，需 `memory_type=qio_opi` + `BOARD_HAS_PSRAM`，推理窗已迁外部内存）。
 
 ---
 
@@ -98,24 +103,37 @@ pio device monitor    # 串口监视器（115200）
 ESP32 与 App 共用同一个 WebSocket 端点，ESP32 客户端的 URL 需带 `esp32` 参数：
 
 ```
-ws://localhost:3001/ws?esp32        # ESP32 上报端
-ws://localhost:3001/ws              # App 订阅端
+ws://localhost:3001/ws?esp32          # ESP32 上报端
+ws://localhost:3001/ws                # App 订阅端（所有者/访客）
+ws://localhost:3001/ws?ftoken=<令牌>   # App 订阅端（家庭成员，携带家庭令牌鉴权角色）
 ```
 
 | 消息类型 | 方向 | 说明 |
 |----------|------|------|
 | `init` | 服务端 → App | 连接后推送当前状态与持续时长 |
 | `audio` | ESP32 → 服务端 | `{ type, rms, peak }` 音频采样 |
-| `inference` | ESP32 → 服务端 | Edge Impulse 端侧推理结果（如 `label: 'babycry'`） |
+| `inference` | ESP32 → 服务端 | Edge Impulse 端侧推理结果（如 `label: 'babycry'`），服务端转发广播给 App |
 | `volume` | 服务端 → App | 音量广播（附带当时状态） |
 | `statusChange` | 服务端 → App | 状态机切换事件 |
-| `listenState` | 服务端 → App | 监听（音频流播放）状态同步 |
-| `cmd` | 服务端 → ESP32 | 下行指令 |
+| `listenState` | 服务端 → App | 监听状态回执（设备端推理已常开、恒为 true；音频流播放待接入） |
+| `familyChanged` | 服务端 → App | 家庭成员变动广播（加入/移除/解散） |
+| `cmd` | 服务端 → ESP32 | 下行指令（`listen_on/off` 已随推理常开置空、保留协议；member 角色下发会被拒并回 `error`） |
+| `error` | 服务端 → App | 越权等业务错误提示 |
 | `pong` | 双向 | 心跳保活 |
 
-REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/history`、`/api/stats/*`。
+REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/history`、`/api/stats/*`、`/api/family/*`（认领/概览/加入码/邀请/成员管理/解散）。
 
 **状态判定逻辑**（`server/src/services/detector.js`）：输入是实时音量（RMS）+ 设备端 EI 推理标签（有 `label` 时以模型为准）。基于最近 10 个采样（约 5 秒）滑动窗口推断 —— 哭闹需窗口内 ≥6 个样本命中（`label==='babycry'` 或 RMS≥200，约 46 dB）且触发后 5 秒冷却；持续 10 秒安静（RMS≤80 ≈ 38 dB）切换到安睡；15 秒无数据判离线。前端三段变色音量条的分区（60/80/100 分档）见 `uniapp/src/constants/babyStatus.ts` 的 `VOLUME_ZONES`。
+
+### 🔔 推送与保活（2026-11-19）
+
+解决「手机锁屏后 App 被系统杀掉、哭声提醒收不到」，双层结构（详见 [交接-后台保活与ntfy兜底.md](交接-后台保活与ntfy兜底.md)）：
+
+- **设备端推理常开** — 检测不再依赖任何 App 在线（推理随观众启停会退化成纯音量阈值，空调外机也能触发误报）；`listen_on/off` 指令保留协议待「远程听声」立项
+- **App 内前台服务保活** — uts-keepalive UTS 插件（常驻通知 + WakeLock + START_STICKY）+ 电池优化白名单 + 厂商自启动引导；首页返回键退后台不杀进程。改插件需重打自定义基座
+- **server ntfy 兜底推送** — 哭声 / 失联（离线持续 60s 确认后才推，防瞬断误报）/ 恢复三类通知直达手机系统通知栏，本 App 死活不影响；配置项见 [server/.env.example](server/.env.example)，家人手机装 ntfy App 订阅同一主题即可
+
+
 
 ---
 
@@ -130,7 +148,7 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 | **TypeScript** | 类型安全（vue-tsc 已清零历史错误） |
 | **SCSS** | 主题 token + Tailwind 风格原子类（`styles/utilities.scss`） |
 | **Vite 5** | 构建工具（@uni-helper/unh 工具链） |
-| **UTS 插件** | `bin-bluetooth` 跨平台 BLE（App/小程序/H5-mock 三端） |
+| **UTS 插件** | `bin-bluetooth` 跨平台 BLE（App/小程序/H5-mock 三端）；`uts-keepalive` Android 前台服务保活（App 端） |
 
 ### 后端
 
@@ -138,7 +156,8 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 |------|------|
 | **Node.js + Express** | REST API（ESM） |
 | **ws** | WebSocket 实时推送 |
-| **无数据库** | 内存数据存储（重启即清空） |
+| **ntfy（可选）** | server 直发系统级兜底推送（哭声/失联/恢复），App 被杀也能送达 |
+| **无数据库** | 状态/历史内存存储（重启即清空）；家庭成员/邀请持久化 `server/data/family.json` |
 
 ### 硬件
 
@@ -157,7 +176,9 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 - 🔊 **实时音量** — dB 数值 + 三段变色音量条（分区阈值见 `VOLUME_ZONES`）
 - 📝 **今日事件** — 从历史记录推导的状态切换时间线（哭声提醒/有动静/开始安睡）
 - 📶 **配对** — BLE 扫描（RSSI 四档信号条）+ WiFi 配网（扫码填入、失败分级提示、成功弹窗）
-- 🔋 **设备信息** — 连接状态、供电方式（充电宝供电）、信号
+- 👨‍👩‍👧 **家庭共享** — 所有者分享管理页（扫码免确认加入 / 邀请需确认），成员只读查看、无设备控制权，成员变动实时推送
+- 🔕 **后台推送与保活** — Android 前台服务常驻监护 + 电池白名单引导；ntfy 兜底推送在 App 被杀时仍能送达哭声/失联告警（配置见「推送与保活」一节）
+- 🔋 **设备信息** — 设备详情页：连接状态、供电方式（充电宝供电）、信号
 - 🛡️ **自定义胶囊 TabBar** — `CustomTabBar` 组件 + `pages.config.ts` tabBar `custom: true`（小程序端如遇异常需迁移至微信 `custom-tab-bar/` 官方机制）
 - 🌓 **深色模式** — `theme.json` 已按宝宝监护器色板配置 light/dark 两套原生底色（页面内主题切换尚未实现，见 todolist）
 
@@ -167,8 +188,8 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 
 `uniapp/disign/` 目录是 UI 设计的唯一样式来源（勿改名）：
 
-- `宝宝监控App设计稿导出/` — 页面设计稿（首页、配对三态、设置、状态图例）
-- `宝宝监控App图标库/` — SVG 图标，统一 `currentColor`（多端可换色），经 `uniapp/scripts/gen-icons.mjs` 构建进 `src/utils/icons.ts` 的 `getIcon()` 体系（改图标逻辑改脚本后重跑，勿手改生成物）
+- `v1.1-设计稿导出/` — 页面设计稿导出，配套《设计规范 v1.1》《设计定义补全 v1.0》文档与 HTML 设计源文件
+- `宝宝监控App-图标库/` — SVG 图标，统一 `currentColor`（多端可换色），经 `uniapp/scripts/gen-icons.mjs` 构建进 `src/utils/icons.ts` 的 `getIcon()` 体系（改图标逻辑改脚本后重跑，勿手改生成物）
 
 ---
 
