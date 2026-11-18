@@ -13,6 +13,14 @@ import { colors } from '@/constants/colors';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getFamilyRole } from '@/utils/family';
 import { getIcon } from '@/utils/icons';
+import {
+  isIgnoringBatteryOptimizations,
+  isKeepAliveAvailable,
+  openAutoStartSettings,
+  requestIgnoreBatteryOptimizations,
+  startKeepAlive,
+  stopKeepAlive,
+} from '@/utils/keepalive';
 import { loadMonitorSettings, persistMonitorSettings, SENSITIVITY_OPTIONS } from '@/utils/monitorSettings';
 import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAuthorized } from '@/utils/notify';
 import { hasLocalPairing } from '@/utils/storage';
@@ -86,6 +94,58 @@ async function onPushNotifyChange() {
   settings.value.pushNotify = false;
   persistSettings();
   uni.showToast({ title: '需在系统设置中允许通知后再开启', icon: 'none' });
+}
+
+/* ------------------------------------------------------------------ */
+/*  后台保活（App 端分区；工具层内部已做平台隔离，H5 为空实现）            */
+/* ------------------------------------------------------------------ */
+
+/** 后台保活分区仅 App 端显示（前台服务/白名单概念只存在于 Android/iOS 系统） */
+const keepAliveAvailable = isKeepAliveAvailable();
+
+/** 电池优化白名单状态：进入页面/onShow 重查（用户可能刚在系统弹窗里点了允许） */
+const batteryWhitelisted = ref(true);
+
+/**
+ * 后台保活开关：启动/停止前台服务并持久化偏好。
+ * 关闭立即停服务（通知栏常驻消失）；开启时若系统通知未授权，前台服务照启——
+ * 它只保活不弹通知，与「推送通知」开关互不干扰。
+ */
+function onKeepAliveChange() {
+  persistSettings();
+  if (settings.value.keepAlive) {
+    startKeepAlive();
+    uni.showToast({ title: '后台保活已开启', icon: 'none' });
+  }
+  else {
+    stopKeepAlive();
+    uni.showToast({ title: '后台保活已关闭', icon: 'none' });
+  }
+}
+
+/** 电池优化白名单行：发起系统确认框（已豁免时系统无弹窗），onShow 回来后重查 */
+function onBatteryWhitelistTap() {
+  if (batteryWhitelisted.value) {
+    uni.showToast({ title: '已豁免电池优化，无需设置', icon: 'none' });
+    return;
+  }
+  const fired = requestIgnoreBatteryOptimizations();
+  if (!fired)
+    uni.showToast({ title: '请在系统设置的电池页面手动允许', icon: 'none' });
+}
+
+/** 自启动引导：确认后按机型跳转（ROM 版本差异大，失败自动降级应用详情页） */
+function onAutoStartTap() {
+  uni.showModal({
+    title: '允许自启动',
+    content: '将跳转到系统自启动管理页，允许本应用自启动并关闭省电限制，可大幅降低锁屏后被杀概率',
+    confirmText: '去设置',
+    cancelText: '暂不',
+    success: ({ confirm }) => {
+      if (confirm)
+        openAutoStartSettings();
+    },
+  });
 }
 
 function pickSensitivity() {
@@ -217,6 +277,8 @@ onShow(() => {
   systemNotifyAuth.value = isNotificationAuthorized();
   // 从分享管理页返回时刷新成员配额（板05 右值 N/6 / 已加入）
   refreshFamilyQuota();
+  // 从系统弹窗/设置页返回时重查电池优化白名单状态
+  batteryWhitelisted.value = isIgnoringBatteryOptimizations();
 });
 </script>
 
@@ -305,6 +367,36 @@ onShow(() => {
             <AppSwitch v-model="settings.offlinePushEnabled" @change="persistSettings" />
           </view>
         </view>
+      </view>
+
+      <!-- ========= 后台保活（App 端）========= -->
+      <view v-if="keepAliveAvailable" class="section">
+        <text class="section__title block mb-2">后台保活</text>
+        <view class="group bg-card rounded-lg">
+          <view class="row">
+            <view class="row-body flex-1">
+              <text class="row-title text-main block">后台保活</text>
+              <text class="row-desc text-secondary block">常驻通知运行监护，锁屏后仍能收到哭声提醒</text>
+            </view>
+            <AppSwitch v-model="settings.keepAlive" @change="onKeepAliveChange" />
+          </view>
+          <view class="row" @tap="onBatteryWhitelistTap">
+            <text class="row-title text-main">电池优化白名单</text>
+            <view class="flex-1" />
+            <text class="row-value" :class="batteryWhitelisted ? 'text-secondary' : 'text-danger'">
+              {{ batteryWhitelisted ? '已豁免' : '未豁免，点击设置' }}
+            </text>
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
+          </view>
+          <view class="row" @tap="onAutoStartTap">
+            <view class="row-body flex-1">
+              <text class="row-title text-main block">允许自启动</text>
+              <text class="row-desc text-secondary block">跳转系统自启动管理，降低清理后被杀概率</text>
+            </view>
+            <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
+          </view>
+        </view>
+        <text class="footnote text-secondary block">被一键清理/划掉卡片后，哭声提醒由 ntfy 兜底推送送达（需订阅配置）</text>
       </view>
 
       <!-- ========= 通用 ========= -->

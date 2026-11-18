@@ -1,0 +1,152 @@
+/**
+ * uts-keepalive Android 实现
+ *
+ * KeepAliveService 前台服务：常驻通知 + WakeLock，锁屏/切后台时保住进程与
+ * webview 的 JS 运行，使 useBabyMonitor 的 WebSocket 与本地哭声通知在后台
+ * 持续工作（这是「被杀收不到推送」的主修复）。
+ *
+ * service 声明在插件的 AndroidManifest.xml（云打包合并），类名固定为
+ * uts.sdk.modules.utsKeepalive.KeepAliveService（uni_modules 插件 ID 转驼峰规则），
+ * Intent 用 setClassName 指定，避免在 UTS 里取 Class 对象。
+ */
+
+import Service from 'android.app.Service';
+import Intent from 'android.content.Intent';
+import Context from 'android.content.Context';
+import IBinder from 'android.os.IBinder';
+import Build from 'android.os.Build';
+import PowerManager from 'android.os.PowerManager';
+/* 若本行编译报错，改为二进制名 'android.os.PowerManager$WakeLock' */
+import WakeLock from 'android.os.PowerManager.WakeLock';
+import Notification from 'android.app.Notification';
+import NotificationChannel from 'android.app.NotificationChannel';
+import NotificationManager from 'android.app.NotificationManager';
+import PendingIntent from 'android.app.PendingIntent';
+import ServiceInfo from 'android.content.pm.ServiceInfo';
+
+const NOTIFICATION_ID : Int = 1001;
+const CHANNEL_ID = 'baby_keepalive';
+const CHANNEL_NAME = '后台保活';
+const NOTIFY_TITLE = '宝宝监护器运行中';
+const NOTIFY_TEXT = '后台监护已开启，锁屏也能收到哭声提醒';
+
+/* 服务运行标记（同进程内 service 与本模块共享）；服务被系统强杀后不会自动回落 */
+let running : boolean = false;
+
+class KeepAliveService extends Service {
+  private wakeLock : WakeLock | null = null;
+
+  constructor() {
+    super();
+  }
+
+  override onCreate() {
+    super.onCreate();
+    this.startForegroundWithNotification();
+    this.acquireWakeLock();
+    running = true;
+  }
+
+  override onStartCommand(intent : Intent, flags : Int, startId : Int) : Int {
+    // START_STICKY：极端场景进程被回收后系统尽量重建服务。重建只恢复常驻通知，
+    // JS 运行时不会自动恢复——用户点通知回到 App 时 onLaunch 重新拉起全链路
+    return Service.START_STICKY;
+  }
+
+  override onBind(intent : Intent | null) : IBinder | null {
+    return null;
+  }
+
+  override onDestroy() {
+    this.releaseWakeLock();
+    running = false;
+    super.onDestroy();
+  }
+
+  private startForegroundWithNotification() {
+    const manager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager;
+    if (Build.VERSION.SDK_INT >= 26) {
+      // IMPORTANCE_MIN：不响铃不弹横幅，仅静默占据通知栏一行（监护常驻的可见性）
+      const channel = new NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_MIN);
+      channel.setShowBadge(false);
+      manager.createNotificationChannel(channel);
+    }
+
+    // 点击常驻通知回到 App（不传 extras，仅恢复前台）
+    const launchIntent = this.getPackageManager().getLaunchIntentForPackage(this.getPackageName());
+    const pendingFlags : Int = Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0;
+    const pendingIntent = PendingIntent.getActivity(this, 0, launchIntent, pendingFlags);
+
+    let builder : Notification.Builder;
+    if (Build.VERSION.SDK_INT >= 26) {
+      builder = new Notification.Builder(this, CHANNEL_ID);
+    }
+    else {
+      builder = new Notification.Builder(this);
+    }
+    builder.setContentTitle(NOTIFY_TITLE);
+    builder.setContentText(NOTIFY_TEXT);
+    builder.setSmallIcon(this.getApplicationInfo().icon);
+    builder.setContentIntent(pendingIntent);
+    builder.setOngoing(true);
+    const notification = builder.build();
+
+    if (Build.VERSION.SDK_INT >= 29) {
+      // API 29+ 用三参重载显式声明类型，与 manifest 的 foregroundServiceType 一致
+      this.startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
+    }
+    else {
+      this.startForeground(NOTIFICATION_ID, notification);
+    }
+  }
+
+  private acquireWakeLock() {
+    const pm = this.getSystemService(Context.POWER_SERVICE) as PowerManager;
+    this.wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, 'babycry:keepalive');
+    if (this.wakeLock != null) {
+      this.wakeLock!.setReferenceCounted(false);
+      this.wakeLock!.acquire();
+    }
+  }
+
+  private releaseWakeLock() {
+    if (this.wakeLock != null) {
+      this.wakeLock!.release();
+      this.wakeLock = null;
+    }
+  }
+}
+
+export function start() {
+  if (running) {
+    return;
+  }
+  const ctx = UTSAndroid.getAppContext();
+  if (ctx == null) {
+    return;
+  }
+  const intent = new Intent();
+  intent.setClassName(ctx.getPackageName(), 'uts.sdk.modules.utsKeepalive.KeepAliveService');
+  // 前台启动场景（onLaunch/设置开关），两种 API 都合规；26+ 必须 startForegroundService
+  if (Build.VERSION.SDK_INT >= 26) {
+    ctx.startForegroundService(intent);
+  }
+  else {
+    ctx.startService(intent);
+  }
+}
+
+export function stop() {
+  const ctx = UTSAndroid.getAppContext();
+  if (ctx == null) {
+    return;
+  }
+  const intent = new Intent();
+  intent.setClassName(ctx.getPackageName(), 'uts.sdk.modules.utsKeepalive.KeepAliveService');
+  ctx.stopService(intent);
+  running = false;
+}
+
+export function isRunning() : boolean {
+  return running;
+}

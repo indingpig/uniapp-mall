@@ -7,6 +7,7 @@ import { dataStore } from './services/dataStore.js';
 import { startSimulator } from './services/simulator.js';
 import { familyStore } from './services/familyStore.js';
 import { createWSServer, getOnlineCount, notifyFamilyChanged } from './ws/handler.js';
+import { logNotifyConfig } from './services/notify.js';
 import { createBabyRoutes } from './routes/baby.js';
 import { createHistoryRoutes } from './routes/history.js';
 import { createStatsRoutes } from './routes/stats.js';
@@ -43,6 +44,9 @@ if (useSimulator) {
   startSimulator(detector, dataStore);
   console.log('[Simulator] Started (set NO_SIMULATOR=true to disable)');
 }
+
+// ntfy 兜底推送配置状态（未启用时不打印）
+logNotifyConfig();
 
 server.listen(PORT, () => {
   console.log(`[Server] Baby Cry Monitor API listening on http://localhost:${PORT}`);

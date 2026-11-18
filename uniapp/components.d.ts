@@ -10,5 +10,6 @@ declare module 'vue' {
     AppButton: typeof import('./src/components/AppButton.vue')['default']
     AppSwitch: typeof import('./src/components/AppSwitch.vue')['default']
     CustomTabBar: typeof import('./src/components/CustomTabBar.vue')['default']
+    UniLoadMore: typeof import('@dcloudio/uni-ui/lib/uni-load-more/uni-load-more.vue')['default']
   }
 }

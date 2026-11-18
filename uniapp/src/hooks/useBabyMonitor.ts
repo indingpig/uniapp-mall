@@ -10,6 +10,8 @@ import { clearPairingRecords } from '@/utils/storage';
 
 const POLL_INTERVAL = 5000;
 const RECONNECT_DELAY = 3000;
+/** WS 应用层心跳间隔：锁屏/doze 下 NAT 网关会掐掉静默连接，25s 一帧 ping 保持活性 */
+const WS_PING_INTERVAL = 25_000;
 
 interface WsMessage {
   type: 'init' | 'statusChange' | 'volume' | 'inference' | 'listenState' | 'familyChanged' | 'error';
@@ -58,6 +60,7 @@ export function useBabyMonitor() {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let localTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
   let wsActive = false;
 
   function applyStatus(s: string) {
@@ -135,6 +138,7 @@ export function useBabyMonitor() {
       console.warn('[WS] Connected');
       wsActive = true;
       stopPolling();
+      startPing();
     });
 
     socket.onMessage((res: { data: string | ArrayBuffer }) => {
@@ -179,6 +183,7 @@ export function useBabyMonitor() {
     socket.onClose(() => {
       console.warn('[WS] Disconnected, falling back to polling');
       wsActive = false;
+      stopPing();
       startPolling();
       scheduleReconnect();
     });
@@ -187,6 +192,30 @@ export function useBabyMonitor() {
       console.error('[WS] Error', err);
       socket?.close();
     });
+  }
+
+  /**
+   * 应用层心跳（server handler 已有 ping→pong 回执）：静默连接会被 NAT/doze
+   * 掐断且不发 FIN，App 收不到 onClose——定时发 ping 触发底层错误让断线尽快
+   * 显形，走既有重连逻辑。与 server 端 30s isAlive 清扫互为补充
+   */
+  function startPing() {
+    stopPing();
+    pingTimer = setInterval(() => {
+      if (!wsActive)
+        return;
+      try {
+        socket?.send({ data: JSON.stringify({ type: 'ping' }) });
+      }
+      catch { /* 发送失败由 onClose/onError 驱动重连 */ }
+    }, WS_PING_INTERVAL);
+  }
+
+  function stopPing() {
+    if (pingTimer) {
+      clearInterval(pingTimer);
+      pingTimer = null;
+    }
   }
 
   function scheduleReconnect() {
@@ -203,6 +232,7 @@ export function useBabyMonitor() {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    stopPing();
     if (socket) {
       try {
         socket.close();

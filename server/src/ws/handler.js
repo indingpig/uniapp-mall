@@ -1,5 +1,6 @@
 import { WebSocketServer } from 'ws';
 import { STATUS } from '../services/detector.js';
+import { pushCry } from '../services/notify.js';
 
 const clients = new Set();
 let esp32Client = null;           // 设备连接 (单设备)
@@ -21,6 +22,9 @@ export function createWSServer(server, detector, dataStore, familyStore) {
 
   detector.on('statusChange', ({ from, to, timestamp }) => {
     broadcast({ type: 'statusChange', from, to, timestamp });
+    // ntfy 兜底推送（App 被杀后仍能收到系统通知）；App 内本地通知由 App 进程
+    // 自己在收到广播后触发，两条链路互不依赖
+    if (to === STATUS.CRYING) pushCry();
   });
 
   // 事件层「有动静」(规范 6/T-07): 睡眠中的短暂声响, 不改主状态——
@@ -41,6 +45,10 @@ export function createWSServer(server, detector, dataStore, familyStore) {
       }
     }
     clients.add(ws);
+    // 心跳存活标记：ws 库协议层自动回 pong（ESP32 固件 server_link.cpp 手写了
+    // ping→pong 回执），清扫循环据此识别死连接
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
     if (clientType === 'esp32') {
       esp32Client = ws;
       // 设备 (重)连后按当前意愿恢复监听: 设备重启后 s_listening 归零, 而网络
@@ -156,6 +164,23 @@ export function createWSServer(server, detector, dataStore, familyStore) {
       console.error('[WS] Error:', err.message);
     });
   });
+
+  // 死连接清扫：30s 一轮协议层 ping，下一轮仍无 pong 即 terminate。
+  // doze/NAT 造成的半开连接不发 FIN，客户端永远收不到 close 事件，
+  // App 侧既有的 3s 重连逻辑无从触发——主动清扫让双方尽快感知断线。
+  // App 自身另有 25s 应用层 ping（useBabyMonitor），两层互为补充。
+  const HEARTBEAT_SWEEP_MS = 30_000;
+  const heartbeatTimer = setInterval(() => {
+    for (const ws of clients) {
+      if (ws.isAlive === false) {
+        ws.terminate();
+        continue;
+      }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }, HEARTBEAT_SWEEP_MS);
+  wss.on('close', () => clearInterval(heartbeatTimer));
 
   return wss;
 }

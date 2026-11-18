@@ -1,0 +1,21 @@
+/**
+ * uts-keepalive iOS 空桩
+ *
+ * iOS 无前台服务保活概念：App 切后台由系统统一挂起（数分钟内冻结），
+ * 任何形式的本地保活都不可行。被挂起/杀掉后的哭声提醒由 server 端
+ * 系统级推送兜底（server/src/services/notify.js → ntfy / APNs）。
+ *
+ * 本文件仅为 iOS 构建提供合法入口，不做任何事。
+ */
+
+export function start() {
+  // 空实现：iOS 不支持前台服务保活
+}
+
+export function stop() {
+  // 空实现
+}
+
+export function isRunning() : boolean {
+  return false;
+}

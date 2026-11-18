@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- uts-keepalive 插件内置清单：云打包/自定义基座构建时随插件合并进 APK。
+     package 按规范填插件包名（非应用包名）；service 类名由 uni_modules
+     插件 ID 转驼峰规则决定：uts-keepalive → uts.sdk.modules.utsKeepalive -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.dcloud.uni_modules.utsKeepalive">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- targetSdk 34+ 要求前台服务声明类型权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application>
+        <service
+            android:name="uts.sdk.modules.utsKeepalive.KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>

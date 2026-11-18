@@ -1,9 +1,17 @@
 <script setup>
 import { onHide, onLaunch, onShow } from '@dcloudio/uni-app';
+import { isKeepAliveEnabled, startKeepAlive } from '@/utils/keepalive';
 import { setAppForeground } from '@/utils/notify';
+import { hasLocalPairing } from '@/utils/storage';
 
 onLaunch(() => {
   console.warn('App Launch');
+  // 后台保活（Android 前台服务）：开关打开且已配对时随启动拉起。
+  // START_STICKY 重建进程后 JS 运行时不会自动恢复——用户点常驻通知回到 App，
+  // 这里负责把服务与 WebSocket 全链路重新拉起
+  if (isKeepAliveEnabled() && hasLocalPairing()) {
+    startKeepAlive();
+  }
 });
 
 // 前后台标记：哭声通知只在后台发（前台由页面内铃声/状态卡承担提醒）

@@ -25,6 +25,13 @@ export interface MonitorSettings {
    * 本开关仅持久化偏好，接线点在通知发送侧。
    */
   offlinePushEnabled: boolean;
+  /**
+   * 后台保活（Android 前台服务，uts-keepalive 插件）：默认开——监护 App
+   * 常驻是产品本意，锁屏/切后台后保住 WebSocket 与哭声本地通知；常驻通知
+   * 低优先级可见可关。iOS 无前台服务概念（切后台由系统挂起），本开关在
+   * iOS/H5 端不生效，仅持久化偏好。
+   */
+  keepAlive: boolean;
 }
 
 export const SENSITIVITY_OPTIONS = ['低', '中等', '高'];
@@ -36,6 +43,7 @@ export const DEFAULT_MONITOR_SETTINGS: MonitorSettings = {
   alertVolume: '70%',
   pushNotify: true,
   offlinePushEnabled: true,
+  keepAlive: true,
 };
 
 /** 读取监控设置：损坏数据/首启回默认值；旧记录缺新键（如 stateChangeAlert）自动补默认 */

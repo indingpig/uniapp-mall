@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import type { IconKey } from '@/utils/icons';
-import { onShow } from '@dcloudio/uni-app';
+import { onBackPress, onShow } from '@dcloudio/uni-app';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fetchBabyHistory } from '@/api/baby';
 import { acceptFamilyInvite, joinFamily } from '@/api/family';
@@ -23,6 +23,7 @@ import {
   saveFamilyMember,
 } from '@/utils/family';
 import { getIcon } from '@/utils/icons';
+import { isKeepAliveEnabled, moveTaskToBack } from '@/utils/keepalive';
 import { isValidServerUrl } from '@/utils/server';
 import { hasLocalPairing, storage } from '@/utils/storage';
 
@@ -458,6 +459,15 @@ function goDeviceDetail() {
 onMounted(() => {
   loadEvents();
   eventTimer = setInterval(loadEvents, 30_000);
+});
+
+// 返回键拦截（仅 Android 硬件返回键触发）：后台保活开启时把任务退到后台而非
+// 退出 App——默认返回会 finish 主 Activity，webview/JS 随之死亡，前台服务也
+// 保不住 WebSocket。保活关闭时不拦截，行为与从前一致
+onBackPress((options) => {
+  if (options.from !== 'backbutton' || !isKeepAliveEnabled())
+    return false;
+  return moveTaskToBack();
 });
 
 // 空态判定放 onShow：从配对页 navigateBack 返回时页面不会重新 mounted，

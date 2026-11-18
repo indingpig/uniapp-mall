@@ -1,0 +1,100 @@
+{
+  "id": "uts-keepalive",
+  "displayName": "宝宝监护器后台保活（Android 前台服务）",
+  "version": "1.0.0",
+  "description": "Android 前台服务保活：常驻低优先级通知 + WakeLock + START_STICKY，锁屏/切后台时保住进程与 JS 运行时，使 WebSocket 与哭声本地通知持续工作",
+  "repository": "",
+  "keywords": [
+    "keepalive",
+    "foreground-service",
+    "保活"
+  ],
+  "engines": {
+    "HBuilderX": "^3.95"
+  },
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": {
+        "price": "0.00"
+      },
+      "sourcecode": {
+        "price": "0.00"
+      }
+    },
+    "contact": {},
+    "declaration": {
+      "ads": "无",
+      "data": "插件不采集任何数据",
+      "permissions": "Android: FOREGROUND_SERVICE / FOREGROUND_SERVICE_DATA_SYNC / WAKE_LOCK（由插件内置 AndroidManifest.xml 声明）"
+    },
+    "npmurl": "",
+    "darkmode": "x",
+    "i18n": "x",
+    "widescreen": "x"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": {
+        "tcb": "x",
+        "aliyun": "x",
+        "alipay": "x"
+      },
+      "client": {
+        "uni-app": {
+          "vue": {
+            "vue2": "-",
+            "vue3": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            }
+          },
+          "web": {
+            "safari": "x",
+            "chrome": "x"
+          },
+          "app": {
+            "vue": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            },
+            "nvue": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            },
+            "android": {
+              "extVersion": "1.0.0",
+              "minVersion": "21"
+            },
+            "ios": {
+              "extVersion": "1.0.0",
+              "minVersion": "12"
+            },
+            "harmony": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            }
+          },
+          "mp": {
+            "weixin": "x",
+            "alipay": "x",
+            "toutiao": "x",
+            "baidu": "x",
+            "kuaishou": "x",
+            "jd": "x",
+            "harmony": "x",
+            "qq": "x",
+            "lark": "x",
+            "xhs": "x"
+          },
+          "quickapp": {
+            "huawei": "x",
+            "union": "x"
+          }
+        }
+      }
+    }
+  }
+}

@@ -59,6 +59,12 @@ export default defineManifestConfig({
           '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>',
           // 通知运行时权限（Android 13+ 弹通知必需）
           '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
+          // 后台保活（uts-keepalive 前台服务 + 电池优化白名单）
+          '<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>',
+          // Android 14+ 要求前台服务声明类型权限（插件 manifest 亦声明，双保险）
+          '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>',
+          // 电池优化白名单申请弹窗（REQUEST_IGNORE_BATTERY_OPTIMIZATIONS intent）
+          '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>',
           // 扫码填入 WiFi（uni.scanCode）
           '<uses-permission android:name="android.permission.CAMERA"/>',
           // 声明使用 BLE 功能（Google Play 要求，普通 BLE 设备不需要硬件过滤）
