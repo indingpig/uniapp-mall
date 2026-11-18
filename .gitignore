@@ -27,6 +27,14 @@ dist
 # server 本地持久化（家庭共享注册表，含各手机 token，勿提交）
 server/data/
 
+# 本地环境配置（真实内网 IP / ntfy 主题等敏感参数，勿提交；占位模板见 .env.example）
+.env
+.env.*
+!.env.example
+!.env.development.example
+!.env.production.example
+!.env.staging.example
+
 # PlatformIO 自动生成（每台机器各一份，勿提交）
 .vscode/c_cpp_properties.json
 .vscode/launch.json
