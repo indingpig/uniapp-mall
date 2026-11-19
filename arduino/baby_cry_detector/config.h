@@ -14,6 +14,7 @@
 #define NVS_KEY_WIFI_SSID      "wifi_ssid"
 #define NVS_KEY_WIFI_PASS      "wifi_pass"
 #define NVS_KEY_SERVER_URL     "server_url"
+#define NVS_KEY_INFER_ON       "infer_on"   // 监听偏好 (bool, 默认 true): App listen_on/off 持久化于此
 #define SERVER_URL_MAX_LEN     96      // 服务器地址上限 (写入口校验, 见 server_url.h)
 // 已废弃: NVS_KEY_RST_SEQ / NVS_KEY_LAST_RST (RST 连击方案, 2026-11-08 移除;
 // 残留键值留在 NVS 里无害, 恢复出厂时会一并擦除)

@@ -12,8 +12,9 @@
  *   - collect_server: WS 服务端 (App 采集页局域网直连录音) + mDNS babycry.local
  *
  * 交互流程:
- *   App 开启监听 → server 中继 {"cmd":"listen_on"} → 设备跑模型,
- *   识别结果回传 server 广播给 App; App 停止监听 → {"cmd":"listen_off"}。
+ *   监听偏好持久化 (2026-11-19 语义调整): 出厂态不开推理 (结果无处上报且
+ *   挤占配网内存); 配网成功默认开 (NVS 固化); App 开关 listen_on/off 是
+ *   持久偏好, 设备重启仍生效, 不随 App 在线启停。
  *   App 采集页连 ws://babycry.local/ws 采集训练数据 (与推理同一条滤波链)。
  *
  * 配网安全 (BOOT 双手势; RST 连击已废弃, 见下方「恢复出厂」节):
@@ -50,7 +51,10 @@
 /* ================================================================== */
 
 static char deviceName[32] = "BabyMonitor-0000";
-static bool s_listening = false;      // 推理是否在跑 (2026-11-19 起常开, 见 startListening)
+static bool s_listening = false;      // 推理是否在跑 (开关语义见 onServerCmd)
+static bool s_bleSession = false;     // BLE 会话活跃 (配网/采集): 期间暂停推理, 见 loop
+static bool s_inferWanted = true;     // 监听偏好 (NVS 持久化): 配网成功默认开, App 可关
+static bool s_provisioned = false;    // 是否已配网 (出厂态不开推理)
 static bool s_collectStarted = false; // 采集服务是否已启动 (WiFi 连上后一次)
 static bool s_serverStarted = false;  // server_link 是否已启动
 static uint32_t s_lastHeapLog = 0;
@@ -59,6 +63,8 @@ static uint32_t s_lastHeapLog = 0;
 void onServerCmd(const char* cmd);
 void onServerLinkState(bool connected);
 void startListening();
+void stopListening();
+static void persistInferWanted();
 
 /* ================================================================== */
 /*  恢复出厂                                                            */
@@ -70,6 +76,14 @@ void startListening();
 
 static bool isFactoryState() {
   return !wifiHasSavedCredentials();
+}
+
+// 监听偏好落盘 (NVS)。调用点都在指令/配网回调里, 不在音频热路径
+static void persistInferWanted() {
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, false);
+  prefs.putBool(NVS_KEY_INFER_ON, s_inferWanted);
+  prefs.end();
 }
 
 // 擦 NVS 并重启。由 BOOT 长按触发, 此时 GPIO0 仍被手指按住 —— 立即重启会因
@@ -194,6 +208,9 @@ void onWifiStatus(const char* status) {
   bleProvisionUpdateStatus(status);
   if (strcmp(status, BLE_STATUS_WIFI_CONNECTED) == 0) {
     led_off();   // 凭据已生效: 结束待配网/窗口闪烁, 之后由 server_connected 收尾
+    // WiFi 连上 (含配网成功/掉线重连) 按偏好自动开推理: startListening 内部
+    // 有偏好/出厂态门禁, 重连时已在跑则空操作
+    startListening();
     if (!s_collectStarted) {
       s_collectStarted = true;
       collectServerStart();
@@ -209,15 +226,24 @@ void onWifiStatus(const char* status) {
 
 // BLE 收到完整 WiFi 凭据 → 交给 WiFi 模块连接
 void onCredentialsReceived(const String& ssid, const String& pass) {
+  // 配网成功即置「监听开」偏好并持久化 (用户确认的产品策略: 新配网设备默认监护)
+  s_provisioned = true;
+  s_inferWanted = true;
+  persistInferWanted();
   wifiConnectBegin(ssid, pass);
 }
 
-// server 下发指令。listen_on/off 保留协议但不再启停推理 —— 推理已常开
-// (2026-11-19), 旧语义「随观众在线启停」会让检测退化为纯 RMS 阈值判哭;
-// 指令留给将来「远程听声」立项后赋予新语义, 回执只反映真实推理状态
+// server 下发指令。listen_on/off = 监听偏好开关: 写 NVS 持久化, 设备重启仍
+// 生效, 不随 App 在线启停 (2026-11-19 语义: 旧「随观众在线启停」在末位 App
+// 离开时停推理, 设备退化纯 RMS 阈值判哭, ntfy 兜底推误报 —— P0 已修)。
+// 用户主动关闭视为自愿放弃检测, 推理停后不再有哭声上报
 void onServerCmd(const char* cmd) {
   if (strcmp(cmd, "listen_on") == 0 || strcmp(cmd, "listen_off") == 0) {
-    Serial.printf("[Cmd] 监听指令忽略 (推理常开): %s\n", cmd);
+    s_inferWanted = (strcmp(cmd, "listen_on") == 0);
+    persistInferWanted();
+    Serial.printf("[Cmd] 监听偏好持久化: %s\n", s_inferWanted ? "开" : "关");
+    if (s_inferWanted) startListening();
+    else stopListening();
   } else {
     Serial.printf("[Cmd] 未知指令: %s\n", cmd);
   }
@@ -229,21 +255,27 @@ void onServerLinkState(bool connected) {
                                      : BLE_STATUS_WIFI_CONNECTED);
   if (connected) {
     closeProvisionWindow();
+    startListening();   // 配网闭环即恢复推理, 不等 App 断开 BLE (常开)
   }
 }
 
 /* ================================================================== */
-/*  监听（推理常开）                                                     */
+/*  监听（偏好持久化 + 出厂态不开）                                      */
 /* ================================================================== */
 
 /**
- * 启动推理并置监听态。2026-11-19 起在 setup() 调用一次并常开 —— 监护检测
- * 不能依赖任何 App 在线。inferStart 需要一块较大的连续内部堆（32KB 采样
- * buffer + EI tensor arena，未走 PSRAM），启动早期被 WiFi/BLE 碎片挤占会
- * 失败：不放弃，loop 里 30s 重试。
+ * 启动推理并置监听态。实际能否启动由两道门禁决定:
+ *   - s_inferWanted: App 的持久偏好 (listen_off 后拒绝启动)
+ *   - s_provisioned: 出厂态不开 (推理结果无处上报, 且挤占配网内存)
+ * inferStart 需要一块较大的连续内部堆（32KB 采样 buffer + EI tensor arena，
+ * 未走 PSRAM），启动早期被 WiFi/BLE 碎片挤占会失败：不放弃，loop 里 30s
+ * 重试 (同样过门禁)。
+ * BLE 会话（配网/采集）期间由 loop 主动暂停推理让内存，会话结束/配网闭环
+ * （onServerLinkState）即按偏好恢复。
  */
 void startListening() {
   if (s_listening) return;
+  if (!s_inferWanted || !s_provisioned) return;   // 偏好关闭 / 出厂态: 不启动
   if (!inferStart()) {
     Serial.println("[Listen] ERR: 推理启动失败 (内存不足), 30s 后重试");
     serverLinkSetListening(false);   // 把失败状态同步给 App
@@ -251,7 +283,15 @@ void startListening() {
   }
   s_listening = true;
   serverLinkSetListening(true);
-  Serial.println("[Listen] ON (常开)");
+  Serial.println("[Listen] ON");
+}
+
+void stopListening() {
+  if (!s_listening) return;
+  inferStop();
+  s_listening = false;
+  serverLinkSetListening(false);
+  Serial.println("[Listen] OFF");
 }
 
 /* ================================================================== */
@@ -259,8 +299,10 @@ void startListening() {
 /* ================================================================== */
 
 static void printHeap(const char* tag) {
-  Serial.printf("[Heap] %-14s free=%u min=%u\n",
-                tag, ESP.getFreeHeap(), ESP.getMinFreeHeap());
+  // max = 最大可分配连续块: 32KB 推理缓冲 / EI arena 这类大块 malloc 成败
+  // 看它最准 —— free 充足但碎片化时大块照样分配失败 (整合固件最大风险点)
+  Serial.printf("[Heap] %-14s free=%u max=%u min=%u\n",
+                tag, ESP.getFreeHeap(), ESP.getMaxAllocHeap(), ESP.getMinFreeHeap());
 }
 
 void setup() {
@@ -303,8 +345,16 @@ void setup() {
   // 音频采集链 (Core 0): I2S + 高通滤波, 常开
   audioPipelineStart();
 
-  // 推理常开: 失败 (内存不足) 由 loop 30s 重试, 上线后观察 [Heap] min 值
-  // 确认常开内存在真机上可持续
+  // 监听偏好 (NVS): 配网成功默认开, App listen_on/off 持久化于此。
+  // 出厂态 (无凭据) 不开推理 —— 结果无处上报且挤占配网内存 (2026-11-19
+  // 真机: 常开推理 + BLE + 首次 WiFi 扫描内存不足, 中断看门狗复位)
+  Preferences prefs;
+  prefs.begin(NVS_NAMESPACE, true);
+  s_inferWanted = prefs.getBool(NVS_KEY_INFER_ON, true);
+  prefs.end();
+  s_provisioned = !isFactoryState();
+
+  // 已配网设备按偏好启动推理; 出厂态由 onWifiStatus (WiFi 连上) 自动开
   startListening();
 
   inferPrintInfo();
@@ -344,6 +394,27 @@ void loop() {
     }
   }
 
+  // BLE 会话 (配网/采集) 期间暂停推理: inferStart 的 32KB 采样 buffer + EI
+  // tensor arena 占内部堆, 已配网设备重开配网窗口时, 首次 WiFi start + 列表
+  // 扫描要做 RF 校准与大块分配, 同活时内存不足触发中断看门狗静默复位
+  // (2026-11-19 真机 TG1WDT, 复现: 配网页点「刷新列表」必崩)。收到凭据后的
+  // wifiConnectBegin 同样吃内存, 故暂停范围取整个 BLE 会话而非仅扫描窗口。
+  // 恢复走 startListening (偏好/出厂态门禁在内部), 用户已关监护则不自动重开
+  bool bleConnected = bleProvisionIsConnected();
+  if (bleConnected != s_bleSession) {
+    s_bleSession = bleConnected;
+    if (bleConnected) {
+      if (s_listening) {
+        inferStop();
+        s_listening = false;
+        serverLinkSetListening(false);
+        Serial.println("[Listen] PAUSED (BLE 会话, 为配网让出内存)");
+      }
+    } else {
+      startListening();   // 会话结束恢复常开; 内存不足由下方 30s 重试兜底
+    }
+  }
+
   // 堆内存巡检 (整合后内存是最大风险点)
   uint32_t now = millis();
   if (now - s_lastHeapLog >= 30000) {
@@ -351,9 +422,11 @@ void loop() {
     printHeap(s_listening ? "listening" : "idle");
   }
 
-  // 推理常开失败重试: 30s 一试直到成功 (启动早期内存被占用的场景)
+  // 推理启动失败重试: 30s 一试 (启动早期内存被占用的场景)。门禁与
+  // startListening 一致; BLE 会话期间不重试 —— 会话内暂停是有意为之
   static uint32_t s_lastInferRetry = 0;
-  if (!s_listening && now - s_lastInferRetry >= 30000) {
+  if (!s_listening && s_inferWanted && s_provisioned && !s_bleSession
+      && now - s_lastInferRetry >= 30000) {
     s_lastInferRetry = now;
     startListening();
   }

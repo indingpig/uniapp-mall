@@ -54,7 +54,7 @@ export function useBabyMonitor() {
   });
 
   const durationSec = ref(0);
-  /** 设备是否在跑推理监听（由 App 指令触发，设备回执驱动） */
+  /** 设备是否在跑推理监听（设备端持久偏好, listenState 回执/init 驱动） */
   const listening = ref(false);
 
   let socket: ReturnType<typeof uni.connectSocket> | null = null;
@@ -175,6 +175,8 @@ export function useBabyMonitor() {
             break;
           case 'error':
             console.warn('[WS] server error:', msg.message);
+            // server 拒绝（成员无权限）或设备离线丢指令时明确告知，别静默无效
+            uni.showToast({ title: msg.message || '指令执行失败', icon: 'none' });
             break;
         }
       }
@@ -259,19 +261,17 @@ export function useBabyMonitor() {
   /* -------------------- 指令下发（App → server 中继 → 设备） -------------------- */
 
   /**
-   * 发送监听指令（引用计数模型：开关的是「自己想不想听」，设备是否真的
-   * 停取决于是否还有其他成员在监听）。listen_on 设备多半会由关转开，乐观
-   * 置 true 给即时反馈；listen_off 不做乐观置 false —— 其他成员仍在监听时
-   * 设备保持开启，显示一律以设备 listenState 回执 / init 为准。
+   * 发送监听开关指令。2026-11-19 语义：监听是设备端 NVS 持久偏好，开关写
+   * 设备闪存，重启仍生效，不随 App 在线启停（server 原样透传给设备）。
+   * 乐观置位给即时反馈，最终以设备 listenState 回执 / init 为准。
    */
   function sendCmd(cmd: 'listen_on' | 'listen_off') {
     if (!socket || !wsActive) {
-      console.warn('[WS] sendCmd skipped: not connected');
+      uni.showToast({ title: '连接未建立，请稍后再试', icon: 'none' });
       return false;
     }
     socket.send({ data: JSON.stringify({ type: 'cmd', cmd }) });
-    if (cmd === 'listen_on')
-      listening.value = true;
+    listening.value = cmd === 'listen_on';
     return true;
   }
 

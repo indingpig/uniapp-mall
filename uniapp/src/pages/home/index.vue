@@ -32,7 +32,7 @@ import { hasLocalPairing, storage } from '@/utils/storage';
 /*  服务端数据                                                          */
 /* ------------------------------------------------------------------ */
 
-const { status, volume, device, durationSec, listening, refresh, reconnect } = useBabyMonitor();
+const { status, volume, device, durationSec, listening, refresh, reconnect, sendCmd } = useBabyMonitor();
 
 /* ------------------------------------------------------------------ */
 /*  本地数据                                                            */
@@ -258,13 +258,28 @@ function onBellTap() {
 }
 
 function onListenTap() {
-  // 推理常开 (2026-11-19): 监听不再随 App 启停, 按钮只读展示监护状态;
-  // 远程听声（设备音频流到手机）立项后这里才恢复真实开关
+  // 监听 = 设备端持久偏好 (2026-11-19 语义): 开关写设备 NVS, 不随 App 在线
+  // 启停, 状态以 listenState 回执为准。关闭监护会停掉哭声识别与提醒推送,
+  // 二次确认防误触
   if (!device.value.isOnline) {
-    uni.showToast({ title: '设备离线，恢复后自动继续监护', icon: 'none' });
+    uni.showToast({ title: '设备离线，恢复后按设备开关状态继续', icon: 'none' });
     return;
   }
-  uni.showToast({ title: '设备端持续监护中，哭声会自动推送提醒', icon: 'none' });
+  if (listening.value) {
+    uni.showModal({
+      title: '关闭监护',
+      content: '关闭后设备不再识别哭声，也不会推送提醒。确定关闭？',
+      confirmText: '关闭监护',
+      cancelText: '再想想',
+      success: (res) => {
+        if (res.confirm)
+          sendCmd('listen_off');
+      },
+    });
+    return;
+  }
+  sendCmd('listen_on');
+  uni.showToast({ title: '监护已开启', icon: 'none' });
 }
 
 // （监听态随设备离线自动退出，已移入 useBabyMonitor 的 offline watch）
@@ -635,10 +650,11 @@ onBeforeUnmount(() => {
             />
           </view>
           <text class="vol-hint block" :class="volumeOffline ? 'text-muted' : 'text-secondary'">{{ volumeHint }}</text>
-          <!-- 推理常开 (2026-11-19)：原文案「正在通过手机扬声器播放宝宝的声音」
-               描述的播放路由尚未落地，常开后恒显示会构成误导，先改为真实状态；
-               「远程听声」上线后恢复播放路由文案（规范 12.3） -->
+          <!-- 监听偏好持久化 (2026-11-19)：原文案「正在通过手机扬声器播放宝宝的声音」
+               描述的播放路由尚未落地，改为真实状态；「远程听声」上线后恢复播放
+               路由文案（规范 12.3） -->
           <text v-if="listening" class="vol-live-hint block">设备端持续识别哭声中，触发将推送提醒</text>
+          <text v-else class="vol-live-hint block">监护已关闭，设备不识别哭声，点下方按钮开启</text>
         </view>
 
         <!-- 今日事件卡片 -->
@@ -681,7 +697,7 @@ onBeforeUnmount(() => {
             @tap="onListenTap"
           >
             <image class="action-btn__icon" :src="getIcon('mic', 'white')" mode="aspectFit" />
-            <text class="action-btn__text text-white">{{ listening ? '监护中' : '监护启动中' }}</text>
+            <text class="action-btn__text text-white">{{ listening ? '监护中' : '监护已关闭' }}</text>
           </view>
           <view
             class="action-btn rounded-pill flex items-center justify-center gap-2"

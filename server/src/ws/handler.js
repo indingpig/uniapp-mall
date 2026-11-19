@@ -5,7 +5,6 @@ import { deviceCameBack, deviceWentOffline, pushCry } from '../services/notify.j
 const clients = new Set();
 let esp32Client = null;           // 设备连接 (单设备)
 let deviceListening = false;      // 设备真实监听状态 (listenState 回执驱动)
-const listenWanters = new Set();  // 监听意愿登记 (引用计数; 推理常开后不驱动指令, 留给「远程听声」)
 let lastInference = null;         // { label, ts } 设备最新识别结果, 附到 audio 上喂 detector
 
 // 模型 label 的有效期: 推理 1s 一窗, 取 1.5s 覆盖两次 audio 间隔
@@ -57,8 +56,8 @@ export function createWSServer(server, detector, dataStore, familyStore) {
     ws.on('pong', () => { ws.isAlive = true; });
     if (clientType === 'esp32') {
       esp32Client = ws;
-      // 推理常开 (2026-11-19): 监听状态不再由 App 意愿驱动, 设备 (重)连后
-      // 自行补发 listenState (server_link.cpp), 两侧都以设备回执为准
+      // 监听偏好持久化 (2026-11-19 语义调整): 设备 (重)连后自行补发当前
+      // listenState (server_link.cpp), 两侧都以设备回执为准
     }
     console.log(`[WS] ${clientType} connected (total: ${clients.size})`);
 
@@ -124,15 +123,13 @@ export function createWSServer(server, detector, dataStore, familyStore) {
             ws.send(JSON.stringify({ type: 'error', message: '成员仅可查看，无法控制设备' }));
             return;
           }
-          // 监听指令引用计数保留（将来「远程听声」复用）: 推理常开后不再驱动
-          // 设备指令, 仅作意愿登记, App 断开自动退订
-          if (msg.cmd === 'listen_on') {
-            listenWanters.add(ws);
-          } else if (msg.cmd === 'listen_off') {
-            listenWanters.delete(ws);
-          } else {
-            // 其他指令原样透传给设备
+          // listen_on/off = 监听偏好开关（设备端 NVS 持久化, 不随 App 在线启停,
+          // 2026-11-19 语义调整）, 与其他指令一样原样透传, 以设备回执为准。
+          // 设备离线时明确回执错误, 别让 App 开关静默无效
+          if (esp32Client && esp32Client.readyState === esp32Client.OPEN) {
             sendToEsp32({ type: 'cmd', cmd: msg.cmd });
+          } else {
+            ws.send(JSON.stringify({ type: 'error', message: '设备离线，指令未送达' }));
           }
           return;
         }
@@ -143,13 +140,12 @@ export function createWSServer(server, detector, dataStore, familyStore) {
 
     ws.on('close', () => {
       clients.delete(ws);
-      listenWanters.delete(ws);
       if (clientType === 'esp32' && esp32Client === ws) {
         esp32Client = null;
         deviceListening = false;
         lastInference = null;
       }
-      // 推理常开: App 离开不再停设备监听（旧逻辑在此向设备发 listen_off）
+      // 监听是设备端持久偏好, App 离开不改变设备状态（旧逻辑在此向设备发 listen_off）
       console.log(`[WS] ${clientType} disconnected (total: ${clients.size})`);
     });
 
