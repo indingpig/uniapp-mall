@@ -92,7 +92,13 @@ static void wsSendText(WiFiClient& c, const char* text) {
 }
 
 static void startRecording() {
-  audioPipelineCollectStart();
+  if (!audioPipelineCollectStart()) {
+    // wsRing 分配失败 (内部堆不足): 明确告知客户端, 别让 App 干等
+    char msg[80];
+    snprintf(msg, sizeof(msg), "{\"cmd\":\"error\",\"message\":\"ring_alloc_failed\"}");
+    wsSendText(s_wsClient, msg);
+    return;
+  }
 }
 
 static void stopRecording() {
@@ -107,6 +113,7 @@ static void stopRecording() {
   wsSendText(s_wsClient, msg);
   Serial.printf("[REC] stop: %u samples, lost=%s\n",
                 audioPipelineCollectSamples(), audioPipelineCollectLost() ? "yes" : "no");
+  audioPipelineCollectFree();   // 64KB 还给推理 (监护模式是常态)
 }
 
 /* 处理客户端帧: 文本命令 (start/stop), ping→pong, close→断开 */
@@ -372,6 +379,7 @@ void collectServerLoop() {
   if (s_wsClient && s_wsClient.connected()) {
     if (!wsHandleIncoming(s_wsClient)) {
       s_wsClient.stop();
+      audioPipelineCollectReset();   // 含释放 wsRing, 防会话中断后 64KB 悬挂
       Serial.println("[WS] collect client disconnected");
     }
     if (s_wsClient && s_wsClient.connected() && collectServerIsRecording()) {

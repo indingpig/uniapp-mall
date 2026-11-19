@@ -3,6 +3,8 @@
 #include <babyCry_inferencing.h>
 #include <math.h>
 
+#include <esp_heap_caps.h>
+
 #include "audio_pipeline.h"
 #include "config.h"
 
@@ -42,10 +44,17 @@ static int inferSignalGetData(size_t offset, size_t length, float* out_ptr) {
 
 bool inferStart() {
   if (s_running) return true;
-  s_inferBuffer = (int16_t*)malloc(EI_CLASSIFIER_RAW_SAMPLE_COUNT * sizeof(int16_t));
+  // AGC 输出缓冲 (32KB): PSRAM 优先 —— 内部堆留给 run_classifier 每次调用
+  // 内部分配的 EI tensor arena (瞬时大块, 2026-11-19 TG1WDT 复盘的主战场)。
+  // 读写量每秒一次 32KB, PSRAM 带宽绰绰有余
+  const size_t bufferBytes = (size_t)EI_CLASSIFIER_RAW_SAMPLE_COUNT * sizeof(int16_t);
+  s_inferBuffer = (int16_t*)heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM);
+  if (s_inferBuffer == nullptr) {
+    s_inferBuffer = (int16_t*)heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  }
   if (s_inferBuffer == nullptr) {
     Serial.printf("[Infer] ERR: malloc inference buffer failed (%u bytes), free=%u\n",
-                  EI_CLASSIFIER_RAW_SAMPLE_COUNT * 2, ESP.getFreeHeap());
+                  (unsigned)bufferBytes, ESP.getFreeHeap());
     return false;
   }
   audioPipelineSetListenEnabled(true);

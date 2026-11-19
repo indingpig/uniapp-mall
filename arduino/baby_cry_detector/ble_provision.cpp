@@ -361,7 +361,7 @@ void bleProvisionLoop() {
     }
     s_scanStarted = true;
     s_scanRetryAt = 0;
-    Serial.printf("[BLE] WiFi scan started (retries=%u)\n", s_scanRetries);
+    Serial.printf("[BLE] WiFi scan started (retries=%u, free=%u)\n", s_scanRetries, ESP.getFreeHeap());
     return;
   }
 

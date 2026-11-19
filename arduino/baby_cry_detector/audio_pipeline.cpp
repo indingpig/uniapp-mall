@@ -46,15 +46,36 @@ static int16_t hpProcessI16(HighPassState* st, int16_t x) {
 
 static const uint32_t WINDOW_SAMPLES = INFER_WINDOW_SAMPLES;
 
-static int16_t rmsRing[RMS_RING_SAMPLES];          // 电平表环形缓冲
+/* 环形缓冲内存策略 (2026-11-19 复盘): 内部堆是配网 WiFi start、推理 32KB
+ * 缓冲 + EI arena 的主战场, 大缓冲一律让路 ——
+ *   - rmsRing (16KB): 电平表核心 UX, 常驻 (audioPipelineStart 分配)
+ *   - wsRing (64KB): 仅采集录音用, 99% 时间闲置 → 按需分配 (CollectStart
+ *     分配 / CollectFree 释放)。采集会话期间推理被 BLE 门禁暂停, 推理的
+ *     32KB 正好腾出 —— 两块大内存互斥使用, 互不挤占 */
+static int16_t* rmsRing = nullptr;                 // 电平表环形缓冲
 static volatile uint32_t rmsHead = 0;
 
-static int16_t wsRing[WS_RING_SAMPLES];            // 采集推流环形缓冲
+static int16_t* wsRing = nullptr;                  // 采集推流环形缓冲 (按需分配, 见上)
 static volatile uint32_t wsRingHead = 0;           // 生产 (采集任务)
 static volatile uint32_t wsRingTail = 0;           // 消费 (loop 推 WS)
 static volatile bool wsCollecting = false;
 static volatile uint32_t wsSamples = 0;
 static volatile bool wsLost = false;
+
+/* 环形缓冲分配: PSRAM 优先, 失败回落内部堆 (行为兜底, 与 windowRaw 同策略) */
+static int16_t* allocRingBuffer(size_t samples, const char* tag) {
+  const size_t bytes = samples * sizeof(int16_t);
+  int16_t* p = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
+  if (p != nullptr) {
+    Serial.printf("[AudioPipe] %s %u B @ PSRAM\n", tag, (unsigned)bytes);
+    return p;
+  }
+  p = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (p != nullptr) {
+    Serial.printf("[AudioPipe] %s %u B @ INTERNAL (PSRAM 分配失败回落)\n", tag, (unsigned)bytes);
+  }
+  return p;
+}
 
 /* 推理窗状态机: 0=填充中 1=待消费 2=消费中
  *
@@ -130,7 +151,7 @@ static void audioPipeTask(void* param) {
       rmsRing[rmsHead % RMS_RING_SAMPLES] = sf;
       rmsHead++;
 
-      if (wsCollecting) {
+      if (wsCollecting && wsRing != nullptr) {
         if (wsRingHead - wsRingTail >= WS_RING_SAMPLES) {
           wsLost = true;                 // 消费不及时, 覆盖最旧
           wsRingTail++;
@@ -166,8 +187,14 @@ static void audioPipeTask(void* param) {
 /* ================================================================== */
 
 void audioPipelineStart() {
-  memset((void*)rmsRing, 0, sizeof(rmsRing));
-  memset((void*)wsRing, 0, sizeof(wsRing));
+  // 只常驻 rmsRing; wsRing 按需分配 (见上方内存策略注释)
+  rmsRing = allocRingBuffer(RMS_RING_SAMPLES, "rmsRing");
+  if (rmsRing == nullptr) {
+    // PSRAM + 内部堆都拿不到 (理论上仅灾难场景): 不起采集任务, 保 BLE 配网可用
+    Serial.println("[AudioPipe] ERR: 环形缓冲分配失败, 音频链未启动");
+    return;
+  }
+  memset((void*)rmsRing, 0, (size_t)RMS_RING_SAMPLES * sizeof(int16_t));
 
   /* 推理窗优先放 PSRAM；失败则退回内部堆，保证功能可用 */
   if (windowRaw == nullptr) {
@@ -246,21 +273,46 @@ uint32_t audioPipelineDroppedWindows() {
 
 /* ---- 采集推流 ---- */
 
-void audioPipelineCollectStart() {
+bool audioPipelineCollectStart() {
+  if (wsCollecting) return true;
+  // 按需分配 64KB 推流缓冲 (PSRAM 优先)。失败则拒绝会话 —— 比静默丢样本好
+  if (wsRing == nullptr) {
+    wsRing = allocRingBuffer(WS_RING_SAMPLES, "wsRing");
+    if (wsRing == nullptr) {
+      Serial.println("[AudioPipe] ERR: wsRing 分配失败 (内部堆不足), 采集会话拒绝");
+      return false;
+    }
+  }
   wsRingHead = 0;
   wsRingTail = 0;
   wsSamples = 0;
   wsLost = false;
   wsCollecting = true;
   Serial.println("[REC] start (WS stream)");
+  return true;
 }
 
 void audioPipelineCollectStop() {
   wsCollecting = false;   // 生产者停, ring 里的剩余数据仍可 pop 排干
 }
 
-void audioPipelineCollectReset() {
+/**
+ * 释放 wsRing, 把 64KB 还给推理 (inferBuffer + EI arena)。
+ * 必须在 stop + 排干之后调用; 内部等 120ms 再释放 —— 生产任务以 64ms 为周期
+ * (1024 样本 @16kHz) 轮询 wsCollecting, 延迟能兜住「flag 已读、写入在途」
+ * 的最后一块, 避免释放后写入 (use-after-free)。
+ */
+void audioPipelineCollectFree() {
   wsCollecting = false;
+  if (wsRing == nullptr) return;
+  vTaskDelay(pdMS_TO_TICKS(120));
+  heap_caps_free(wsRing);
+  wsRing = nullptr;
+  Serial.println("[AudioPipe] wsRing 已释放 (内存还给推理)");
+}
+
+void audioPipelineCollectReset() {
+  audioPipelineCollectFree();
   wsRingHead = 0;
   wsRingTail = 0;
   wsSamples = 0;
@@ -272,7 +324,7 @@ bool audioPipelineCollectActive() {
 }
 
 size_t audioPipelinePopChunk(int16_t* out) {
-  if (wsRingHead - wsRingTail < AUDIO_CHUNK_SAMPLES) return 0;
+  if (wsRing == nullptr || wsRingHead - wsRingTail < AUDIO_CHUNK_SAMPLES) return 0;
   for (int i = 0; i < AUDIO_CHUNK_SAMPLES; i++) {
     out[i] = wsRing[wsRingTail % WS_RING_SAMPLES];
     wsRingTail++;

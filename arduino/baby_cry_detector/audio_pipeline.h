@@ -53,12 +53,18 @@ uint32_t audioPipelineDroppedWindows();
 /*  采集推流 (collect_server 使用)                                       */
 /* ------------------------------------------------------------------ */
 
-void audioPipelineCollectStart();
+/* 开始采集。wsRing (64KB) 在此按需分配 (PSRAM 优先), 监护模式下不存在,
+ * 把内部堆让给推理缓冲/EI arena。分配失败返回 false (内部堆不足) */
+bool audioPipelineCollectStart();
 
 /* 停止采集 (保留 ring 中未推完的数据供 drain, samples/lost 计数保留) */
 void audioPipelineCollectStop();
 
-/* 复位状态 (新采集客户端接入时调用, 避免继承上次会话) */
+/* 释放 wsRing (64KB 还给推理)。必须在 stop + drain 完成后调用;
+ * 内部带 120ms 静默期, 兜住生产任务最后一笔在途写入 */
+void audioPipelineCollectFree();
+
+/* 复位状态 (新采集客户端接入时调用, 避免继承上次会话; 含释放 wsRing) */
 void audioPipelineCollectReset();
 
 /* 当前是否在采集 */

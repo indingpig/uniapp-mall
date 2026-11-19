@@ -288,7 +288,7 @@ pio device monitor           # 串口监视器（115200）
 - 分区表 `partitions_n16r8.csv`（仓库根）铺满 16MB：`app0`/`app1` 各 3MB OTA 双槽 + `spiffs` 数据区 9.875MB + coredump
   - **CSV 必须纯 ASCII**：PlatformIO 按系统默认编码（Windows GBK）解析，中文注释会让 `_parse_partitions` 抛 `UnicodeDecodeError` 构建失败
   - `upload.maximum_size` 不用手写，PlatformIO 会按 `app0` 的 3MB 自动覆盖
-  - **PSRAM 当前是关闭的**：`build_flags` 无 `BOARD_HAS_PSRAM` → `esp32-hal-psram.h` 会 `#undef CONFIG_SPIRAM`，`ps_malloc()` 恒返回 NULL，`psramInit/psramFound` 编成 7 字节空桩。启用需同时上 `board_build.arduino.memory_type = qio_opi`（R8 是 OCTAL，默认的 `qio_qspi` 是 QUAD）+ `-DBOARD_HAS_PSRAM`
+  - **PSRAM 禁用（2026-11-19 真机定论，别再启用）**：板子 N16R8 是 OCTAL PSRAM，但 arduino-esp32 2.0.x 预编译库的 sdkconfig 是 `CONFIG_SPIRAM_MODE_QUAD`（OCT 未编入）且 `SPIRAM_USE_MALLOC=y`（malloc>4KB 可落 PSRAM、不预留内部内存）。QUAD 编译配置对 OCTAL 实际硬件，数据读写能用，但 **WiFi/lwIP 启动会间歇性堆损坏**——配网页点「刷新列表」必崩（TG1WDT 复位 / lwIP `sys_arch_unprotect` 空指针，两次崩点不同 = 损坏非确定性），PSRAM 纯数据用途（推理窗、环形缓冲）则完全正常。曾于 11-16 启用、11-19 回退。**重新启用条件：迁移 arduino-esp32 3.x**（预编译库含 OCTAL 支持；但 3.x 需整体迁移 `ESP_I2S.h`）。代码侧所有大缓冲已是「PSRAM 优先 + 内部堆回落」，将来启用无需改代码；`i2s_recorder` 等**无 WiFi 子工程**保留 `qio_opi` 不受影响
 - 主固件 `baby_cry_detector` 的编译组成：`baby_cry_detector.ino` + `ble_provision.*` + `wifi_connect.*` + `led.*` + `config.h`
 
 ### 其他
