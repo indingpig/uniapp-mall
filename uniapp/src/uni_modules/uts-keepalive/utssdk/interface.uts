@@ -2,12 +2,16 @@
  * interface.uts
  * uts-keepalive 后台保活插件接口契约（与 src/types/uts-keepalive.d.ts 保持一致）
  *
- * API 极简：start / stop / isRunning，无参数无回调。
+ * API：start / stop / heartbeat / isRunning，无参数无回调。
  *
  * Android 实现（utssdk/app-android/）：
- * - KeepAliveService 前台服务：IMPORTANCE_MIN 常驻通知 + PARTIAL_WAKE_LOCK + START_STICKY
- * - AndroidManifest.xml 声明 service（foregroundServiceType="dataSync"）与所需权限，
- *   云打包/自定义基座时随插件合并进 APK
+ * - KeepAliveService 前台服务：IMPORTANCE_MIN 常驻通知 + PARTIAL_WAKE_LOCK +
+ *   START_STICKY，类型为 connectedDevice（不受 Android 15 dataSync 6 小时超时限制，
+ *   且允许从 BOOT_COMPLETED 启动）
+ * - BootReceiver：开机/应用更新后拉起服务（受 SharedPreferences 里的开关门控）
+ * - heartbeat()：JS 活性上报，90s 无心跳则常驻通知改写为「监护已中断」，
+ *   避免服务被 START_STICKY 重建而 JS 未恢复时的「幽灵通知」
+ * - AndroidManifest.xml 声明 service/receiver 与所需权限，云打包/自定义基座时合并进 APK
  * iOS（utssdk/app-ios/）：无前台服务概念，空桩——App 切后台自然挂起，
  *   系统级提醒由 server 端 ntfy 兜底推送承担（server/src/services/notify.js）。
  *

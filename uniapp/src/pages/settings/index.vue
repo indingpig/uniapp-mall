@@ -10,12 +10,14 @@ import { computed, onMounted, ref } from 'vue';
 import { fetchDevice } from '@/api/baby';
 import { fetchFamilyOverview } from '@/api/family';
 import { colors } from '@/constants/colors';
+import { useBackToBackground } from '@/hooks/useBackToBackground';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { getFamilyRole } from '@/utils/family';
 import { getIcon } from '@/utils/icons';
 import {
   isIgnoringBatteryOptimizations,
   isKeepAliveAvailable,
+  isKeepAliveRunning,
   openAutoStartSettings,
   requestIgnoreBatteryOptimizations,
   startKeepAlive,
@@ -26,6 +28,9 @@ import { ensureNotificationEnabled, guideOffSystemNotification, isNotificationAu
 import { hasLocalPairing } from '@/utils/storage';
 
 const { capsuleTopGap } = useCapsuleGap();
+
+// tab 页返回键拦截：后台保活开启时退到后台而非退出 App（见 hook 注释）
+useBackToBackground();
 
 /* ------------------------------------------------------------------ */
 /*  设备信息                                                            */
@@ -100,11 +105,19 @@ async function onPushNotifyChange() {
 /*  后台保活（App 端分区；工具层内部已做平台隔离，H5 为空实现）            */
 /* ------------------------------------------------------------------ */
 
-/** 后台保活分区仅 App 端显示（前台服务/白名单概念只存在于 Android/iOS 系统） */
+/** 后台保活分区仅 Android 显示（本期只发布 Android；iOS 无前台服务概念，也未打包） */
 const keepAliveAvailable = isKeepAliveAvailable();
 
 /** 电池优化白名单状态：进入页面/onShow 重查（用户可能刚在系统弹窗里点了允许） */
 const batteryWhitelisted = ref(true);
+
+/**
+ * 前台服务实时状态：onShow 重查。
+ * 此前 isKeepAliveRunning() 是无人调用的死抽象（评审 P2 提过 running 是纯内存态，
+ * 进程重建后失真）。这里如实展示，并把失真风险写进界面文案——监护场景下
+ * 「以为在跑、实际没跑」比「明确显示异常」危险得多。
+ */
+const keepAliveRunning = ref(false);
 
 /**
  * 后台保活开关：启动/停止前台服务并持久化偏好。
@@ -279,6 +292,8 @@ onShow(() => {
   refreshFamilyQuota();
   // 从系统弹窗/设置页返回时重查电池优化白名单状态
   batteryWhitelisted.value = isIgnoringBatteryOptimizations();
+  // 前台服务运行状态同样重查（用户可能刚在系统里强停过本应用）
+  keepAliveRunning.value = isKeepAliveRunning();
 });
 </script>
 
@@ -388,6 +403,15 @@ onShow(() => {
             </text>
             <image class="row-arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
           </view>
+          <view class="row">
+            <view class="row-body flex-1">
+              <text class="row-title text-main block">常驻服务状态</text>
+              <text class="row-desc text-secondary block">被系统清理后显示「未运行」，点开应用会自动恢复</text>
+            </view>
+            <text class="row-value" :class="keepAliveRunning ? 'text-secondary' : 'text-danger'">
+              {{ keepAliveRunning ? '运行中' : '未运行' }}
+            </text>
+          </view>
           <view class="row" @tap="onAutoStartTap">
             <view class="row-body flex-1">
               <text class="row-title text-main block">允许自启动</text>
@@ -397,6 +421,7 @@ onShow(() => {
           </view>
         </view>
         <text class="footnote text-secondary block">被一键清理/划掉卡片后，哭声提醒由 ntfy 兜底推送送达（需订阅配置）</text>
+        <text class="footnote text-secondary block">手机重启后常驻服务会自动恢复，但监护连接需点开应用才重建；常驻通知显示「监护已中断」即表示当前没在监护</text>
       </view>
 
       <!-- ========= 通用 ========= -->

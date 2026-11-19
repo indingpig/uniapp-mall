@@ -23,4 +23,6 @@ export const CACHE_KEY = {
   FAMILY_OWNER: 'BABY_FAMILY_OWNER',
   /** 家庭共享·成员身份（扫码/受邀加入成功后由 server 签发） */
   FAMILY_MEMBER: 'BABY_FAMILY_MEMBER',
+  /** 电池优化白名单是否已自动引导过（一次性，避免每次开 App 都弹系统授权） */
+  BATTERY_PROMPT_DONE: 'BABY_BATTERY_PROMPT_DONE',
 } as const;

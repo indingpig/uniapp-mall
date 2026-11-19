@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import type { IconKey } from '@/utils/icons';
-import { onBackPress, onShow } from '@dcloudio/uni-app';
+import { onShow } from '@dcloudio/uni-app';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { fetchBabyHistory } from '@/api/baby';
 import { acceptFamilyInvite, joinFamily } from '@/api/family';
@@ -12,6 +12,8 @@ import { EVENT_META, QUIET_HINT, STATUS_META, toCardState, VOLUME_MAX_DB, VOLUME
 import { CACHE_KEY } from '@/constants/cache';
 import { colors } from '@/constants/colors';
 import { useBabyMonitor } from '@/hooks/useBabyMonitor';
+import { useBackToBackground } from '@/hooks/useBackToBackground';
+import { useBatteryWhitelistPrompt } from '@/hooks/useBatteryWhitelistPrompt';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { fmtDateKey } from '@/utils/babyEvents';
 import {
@@ -23,7 +25,6 @@ import {
   saveFamilyMember,
 } from '@/utils/family';
 import { getIcon } from '@/utils/icons';
-import { isKeepAliveEnabled, moveTaskToBack } from '@/utils/keepalive';
 import { isValidServerUrl } from '@/utils/server';
 import { hasLocalPairing, storage } from '@/utils/storage';
 
@@ -462,11 +463,10 @@ onMounted(() => {
 // 返回键拦截（仅 Android 硬件返回键触发）：后台保活开启时把任务退到后台而非
 // 退出 App——默认返回会 finish 主 Activity，webview/JS 随之死亡，前台服务也
 // 保不住 WebSocket。保活关闭时不拦截，行为与从前一致
-onBackPress((options) => {
-  if (options.from !== 'backbutton' || !isKeepAliveEnabled())
-    return false;
-  return moveTaskToBack();
-});
+useBackToBackground();
+
+// 电池优化白名单首次自动引导（一次性；未豁免时这是后台存活率的最大杠杆）
+useBatteryWhitelistPrompt();
 
 // 空态判定放 onShow：从配对页 navigateBack 返回时页面不会重新 mounted，
 // 每次可见时重读配对标记，才能从空态切回正常态

@@ -54,9 +54,15 @@ export function createRequest(config?: RequestFactoryConfig): RequestInstance {
       }
     }
 
+    // 拦截器可能已把相对路径补成绝对地址（见 interceptor.ts 的 resolveApiBaseUrl）。
+    // 此处必须跳过 baseURL，否则会拼成 http://<baseURL>/http://<真实地址>/api/...
+    // ——H5 dev 的 VITE_API_BASE_URL 为空所以看不出来，打包进 App 才暴露（2026-11-19 实踩）
+    const isAbsolute = /^https?:\/\//i.test(finalOptions.url);
+    const targetUrl = isAbsolute ? finalOptions.url : joinURL(baseURL, finalOptions.url);
+
     return new Promise((resolve, reject) => {
       uni.request({
-        url: joinURL(baseURL, finalOptions.url),
+        url: targetUrl,
         method: finalOptions.method || 'GET',
         header: finalOptions.headers,
         timeout: finalOptions.timeout,

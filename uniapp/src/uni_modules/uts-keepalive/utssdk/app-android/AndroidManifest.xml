@@ -1,19 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- uts-keepalive 插件内置清单：云打包/自定义基座构建时随插件合并进 APK。
-     package 按规范填插件包名（非应用包名）；service 类名由 uni_modules
+     package 按规范填插件包名（非应用包名）；service/receiver 类名由 uni_modules
      插件 ID 转驼峰规则决定：uts-keepalive → uts.sdk.modules.utsKeepalive -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.dcloud.uni_modules.utsKeepalive">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <!-- targetSdk 34+ 要求前台服务声明类型权限 -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 前台服务类型 connectedDevice 对应的类型权限（targetSdk 34+ 必需）。
+         不用 dataSync：它受 Android 15 的 6 小时超时限制，且禁止从 BOOT_COMPLETED
+         启动，开机自启会失败（详见 index.uts 头注释） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- 开机自启：重启后把前台服务拉回来（JS 不会自启，通知文案会如实显示中断态） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application>
         <service
             android:name="uts.sdk.modules.utsKeepalive.KeepAliveService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="connectedDevice" />
+
+        <!-- 只收开机完成与应用更新两条系统广播；exported 必须为 true 才能收到系统广播 -->
+        <receiver
+            android:name="uts.sdk.modules.utsKeepalive.BootReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

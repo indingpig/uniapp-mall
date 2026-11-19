@@ -50,6 +50,14 @@
   （`WL_WRONG_PASSWORD` → `error:wifi_password` 等）
 - [ ] **App 服务器地址烘焙问题** — `.env.production` 固化 IP（现为 192.168.3.5），
   换网络即失效；方向：运行时可配置
+- [x] **REST 地址被拼接两遍（App「设备离线」真因）** — 完成（2026-11-19，已过 lint/type-check，**待重打包真机验证**）：
+  拦截器把相对路径补成绝对地址后，`createRequest.ts` 又拿 `VITE_API_BASE_URL` 拼了一次，
+  请求实际变成 `http://<烘焙IP>/http://<真实IP>/api/...`，打包后全部 REST 失效、WS 断线轮询兜底形同虚设。
+  H5 dev 因 `VITE_API_BASE_URL` 为空而长期掩盖。已在 `createRequest.ts` 对绝对地址跳过 baseURL。
+  排查全过程见 `交接-设备离线排障.md`
+- [ ] **WS 断线后重连链静默死掉** — 2026-11-19 实测复现：WiFi 断开 15s 恢复后 App 对 server
+  零次连接尝试，界面还停留在「在线」（假在线，durationSec 是本地自增）。方向：握手超时 + onError
+  也走重连 + 断线 N 秒置 isOnline=false + onShow 主动 reconnect。**下轮优先**，详见同一交接文档 §4
 - [x] **App 扫描按 Service UUID 过滤** — 完成（2026-11-11，已过 lint/type-check，待真机）：
   `useBLE.ts` `services: [BLE_SERVICE_UUID]`；固件广播确认带该 UUID（addServiceUUID + scan response）
 - [x] **Server URL 校验收敛** — 完成（2026-11-11，已烧录，待真机）：`server_url.h` 两处共用

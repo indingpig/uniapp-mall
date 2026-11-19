@@ -130,7 +130,8 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 解决「手机锁屏后 App 被系统杀掉、哭声提醒收不到」，双层结构（详见 [交接-后台保活与ntfy兜底.md](交接-后台保活与ntfy兜底.md)）：
 
 - **设备端推理常开** — 检测不再依赖任何 App 在线（推理随观众启停会退化成纯音量阈值，空调外机也能触发误报）；`listen_on/off` 指令保留协议待「远程听声」立项
-- **App 内前台服务保活** — uts-keepalive UTS 插件（常驻通知 + WakeLock + START_STICKY）+ 电池优化白名单 + 厂商自启动引导；首页返回键退后台不杀进程。改插件需重打自定义基座
+- **App 内前台服务保活** — uts-keepalive UTS 插件（常驻通知 + WakeLock + START_STICKY，类型 `connectedDevice`）+ 电池优化白名单（首启自动引导一次）+ 厂商自启动引导 + 开机自启；四个 tab 页返回键统一退后台不杀进程。改插件需重打自定义基座
+- **「假活」防护** — JS 侧每 25s 上报活性心跳，服务侧 90s 收不到就把常驻通知改写为「监护已中断」。服务被 START_STICKY 重建而 JS 未恢复时不会假装正常：监护 App「以为在跑、实际没跑」比明确显示异常危险得多
 - **server ntfy 兜底推送** — 哭声 / 失联（离线持续 60s 确认后才推，防瞬断误报）/ 恢复三类通知直达手机系统通知栏，本 App 死活不影响；配置项见 [server/.env.example](server/.env.example)，家人手机装 ntfy App 订阅同一主题即可
 
 
@@ -143,7 +144,7 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 
 | 技术 | 说明 |
 |------|------|
-| **uni-app 3.x** | 跨平台框架（H5 / 微信小程序 / App iOS·Android·鸿蒙） |
+| **uni-app 3.x** | 跨平台框架（H5 / 微信小程序 / App Android·鸿蒙） |
 | **Vue 3.4** | Composition API + `<script setup>` |
 | **TypeScript** | 类型安全（vue-tsc 已清零历史错误） |
 | **SCSS** | 主题 token + Tailwind 风格原子类（`styles/utilities.scss`） |

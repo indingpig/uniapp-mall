@@ -10,11 +10,15 @@ import { computed, ref } from 'vue';
 import { fetchHistoryRange } from '@/api/baby';
 import { EVENT_META } from '@/constants/babyStatus';
 import { CACHE_KEY } from '@/constants/cache';
+import { useBackToBackground } from '@/hooks/useBackToBackground';
 import { useCapsuleGap } from '@/hooks/useCapsuleGap';
 import { deriveTimeline, fmtDuration } from '@/utils/babyEvents';
 import { getIcon } from '@/utils/icons';
 
 const { capsuleTopGap } = useCapsuleGap();
+
+// tab 页返回键拦截：后台保活开启时退到后台而非退出 App（见 hook 注释）
+useBackToBackground();
 
 /* ------------------------------------------------------------------ */
 /*  首次空态门控（与首页一致：未配对设备显示空壳）                        */

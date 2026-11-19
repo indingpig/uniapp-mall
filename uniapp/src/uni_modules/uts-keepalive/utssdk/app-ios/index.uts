@@ -16,6 +16,10 @@ export function stop() {
   // 空实现
 }
 
+export function heartbeat() {
+  // 空实现：无前台服务可报活
+}
+
 export function isRunning() : boolean {
   return false;
 }

@@ -61,8 +61,14 @@ export default defineManifestConfig({
           '<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>',
           // 后台保活（uts-keepalive 前台服务 + 电池优化白名单）
           '<uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>',
-          // Android 14+ 要求前台服务声明类型权限（插件 manifest 亦声明，双保险）
-          '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>',
+          // Android 14+ 要求前台服务声明类型权限（插件 manifest 亦声明，双保险）。
+          // 类型是 connectedDevice 而非 dataSync：后者受 Android 15 的 24h 内 6 小时
+          // 超时限制，且禁止从 BOOT_COMPLETED 启动（开机自启会失败）
+          '<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>',
+          // connectedDevice 类型的前置权限（需声明 CHANGE_NETWORK_STATE 或
+          // CHANGE_WIFI_STATE 之一，本文件上方两条已声明，此处留注释说明依赖关系）
+          // 开机自启：重启后把前台服务拉回来（常驻通知会显示「监护已中断」，需点开应用恢复连接）
+          '<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>',
           // 电池优化白名单申请弹窗（REQUEST_IGNORE_BATTERY_OPTIMIZATIONS intent）
           '<uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>',
           // 扫码填入 WiFi（uni.scanCode）
@@ -72,9 +78,12 @@ export default defineManifestConfig({
         ],
         // <uses-permission android:name="android.permission.BLUETOOTH"/> <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/> <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" /> <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/> <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
       },
-      /* ios打包配置 */
+      /* ios打包配置
+         本期不打包 iOS：Apple Developer 账号 + 证书/描述文件维护成本高于收益。
+         appid 留空即表示不启用 iOS 打包（原值 com.sheldon.babycry 已移除）。
+         注意：代码层面仍保持跨平台兼容（uni.xxx API + 条件编译），将来要上 iOS
+         时只需回填 appid 与证书，不需要改业务代码。 */
       ios: {
-        // Apple Developer 后台创建的 Bundle ID，如 com.sheldon.babycry
         appid: '',
         // 证书密码（创建 .p12 时设置的）
         password: '',

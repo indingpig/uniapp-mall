@@ -27,3 +27,8 @@ arduino/**/build/
 *.njsproj
 *.sln
 *.sw?
+
+# iOS 签名材料（真实凭据，勿提交；manifest.config.ts 只留占位路径）
+*.p12
+*.mobileprovision
+*.cer

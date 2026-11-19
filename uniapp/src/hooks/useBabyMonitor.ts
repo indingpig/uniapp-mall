@@ -4,6 +4,7 @@ import { fetchBabyStatus, fetchDevice, fetchVolume } from '@/api/baby';
 import { STATUS_META, toCardState } from '@/constants/babyStatus';
 import { colors } from '@/constants/colors';
 import { clearFamilyIdentity, getFamilyMember, getFamilyOwner } from '@/utils/family';
+import { pingKeepAlive } from '@/utils/keepalive';
 import { maybeNotifyCry } from '@/utils/notify';
 import { resolveServerUrl } from '@/utils/server';
 import { clearPairingRecords } from '@/utils/storage';
@@ -197,10 +198,14 @@ export function useBabyMonitor() {
   /**
    * 应用层心跳（server handler 已有 ping→pong 回执）：静默连接会被 NAT/doze
    * 掐断且不发 FIN，App 收不到 onClose——定时发 ping 触发底层错误让断线尽快
-   * 显形，走既有重连逻辑。与 server 端 30s isAlive 清扫互为补充
+   * 显形，走既有重连逻辑。与 server 端 30s isAlive 清扫互为补充。
+   *
+   * 同一定时器顺带上报保活活性（pingKeepAlive）：前台服务据此判断 JS 是否真的
+   * 还在跑，断线时停止上报 → 90s 后常驻通知改写为「监护已中断」，杜绝幽灵态。
    */
   function startPing() {
     stopPing();
+    pingKeepAlive();
     pingTimer = setInterval(() => {
       if (!wsActive)
         return;
@@ -208,6 +213,7 @@ export function useBabyMonitor() {
         socket?.send({ data: JSON.stringify({ type: 'ping' }) });
       }
       catch { /* 发送失败由 onClose/onError 驱动重连 */ }
+      pingKeepAlive();
     }, WS_PING_INTERVAL);
   }
 

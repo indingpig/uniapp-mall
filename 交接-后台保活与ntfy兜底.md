@@ -59,7 +59,7 @@
    NTFY_TOPIC=<足够长的随机串>     # 公共 ntfy.sh 上主题名等同密码
    NTFY_TOKEN=                    # 自托管+开启鉴权时才需要
    ```
-3. **家人手机装 ntfy App**（GitHub release / F-Droid / Play）订阅同一 topic；ntfy App 自己也开电池白名单。iOS 用 ntfy iOS App（APNs 通道）或 Bark。
+3. **家人手机装 ntfy App**（GitHub release / F-Droid / Play）订阅同一 topic；ntfy App 自己也开电池白名单。本期只发 Android，家人同用 Android 即可（若日后有 iOS 家人，装 ntfy iOS App 走 APNs 通道或 Bark，与本 App 是否上 iOS 无关）。
 4. **本 App 内授予**：设置页「后台保活」→ 电池优化白名单弹窗点允许 + 「允许自启动」跳转设置。
 
 ## 4. 真机验证清单
@@ -74,7 +74,7 @@
 - **START_STICKY 重建进程后 JS 运行时不会自动恢复**：常驻通知回来了但 WS 是死的，用户点通知回 App 后 onLaunch 重新拉起全链路。不做后台自动拉起 Activity（Android 10+ 限制 + 体验差）。
 - **划掉最近任务**：部分 ROM 连前台服务一起杀——这正是 ntfy 兜底存在的意义。
 - **自启动组件名随 ROM 版本漂移**：跳转失败自动降级应用详情页，设置页文案已引导手动路径。
-- **iOS 完全不适用**：无前台服务概念，挂起/被杀后同样依赖 server 系统级推送（本期 ntfy 兜底已覆盖；将来若要「来自本 App 的 iOS 通知」再上 uni-push APNs）。
+- **iOS 本期不打包**（2026-11-19 决策）：Apple Developer 账号 + 证书/描述文件维护成本高于收益，`manifest.config.ts` 的 `ios.appid` 已置空。代码仍保持跨平台兼容（uni.xxx API + 条件编译），将来要上 iOS 时回填 appid 与证书即可，业务代码不用动。即便日后上 iOS，前台服务保活也**完全不适用**（无此概念），挂起/被杀后同样只能依赖 server 系统级推送。
 - UTS 插件编译（Mac HBuilderX 首次构建基座时如报错）：
   - service 类名命名空间按 uni_modules 插件 ID 转驼峰：`uts-keepalive` → `uts.sdk.modules.utsKeepalive.KeepAliveService`（AndroidManifest.xml 里已按此写）；
   - `WakeLock` 嵌套类 import 写的是 `android.os.PowerManager.WakeLock`，若报错改二进制名 `android.os.PowerManager$WakeLock`（index.uts 内有注释标注）；
@@ -123,3 +123,175 @@ min free heap 不持续下降即通过；持续下降再考虑迁 PSRAM 或 aren
 | server e2e 5 项 | ✅ 哭声推送回归 / 失联确认推送 / 恢复推送 / 瞬断抑制 / App 断开不下发 listen_off |
 | episode 聚合（评审 P1-1，按「段」推送防刷屏） | ⏳ 未做，依赖推理常开已就位，下轮可加 |
 | APK targetSdkVersion 核实（评审 P1-2，Android 15 dataSync 6h 限制） | ⏳ 打包后核实，超限则换 specialUse 类型 |
+
+## 8. 第三轮：幽灵通知 / 前台服务类型 / 开机自启 / 白名单引导（2026-11-19）
+
+上一轮评审留下的 P2 与两个新发现的硬伤一并处理。核心认知：**保活真正危险的失败模式不是
+「被杀」，而是「假活」**——服务还在、通知还写着「后台监护已开启」，实际 WS 已断、哭声通知
+永远不会发。监护场景下用户看到通知会安心睡觉，这比明确失败危害大得多。
+
+### 8.1 幽灵通知：活性心跳（P0）
+
+| 层 | 改动 |
+|---|---|
+| 插件 `index.uts` | 新增 `heartbeat()`；`KeepAliveService` 实现 `Runnable`，主线程 `Handler` 每 30s 检查一次 JS 心跳时间戳，超过 90s 无心跳（`BEAT_TIMEOUT_MS`）就把常驻通知改写为「监护已中断 / 与设备失联或 App 被系统回收，点开恢复监护」 |
+| 心跳载体 | `SharedPreferences('baby_keepalive')`：进程被 `START_STICKY` 重建后服务仍能读到上一份心跳，判断依据不依赖内存态 |
+| `utils/keepalive.ts` | 新增 `pingKeepAlive()` 封装（APP-PLUS 条件编译内，失败只 warn） |
+| `hooks/useBabyMonitor.ts` | 复用既有 25s WS 心跳定时器顺带上报，不额外开 interval；`startPing()` 首次连接即打一次 |
+
+选择「服务主动检查」而非「JS 定时写 — 服务定时读」两套定时器，是因为服务侧必须有独立
+判断能力：JS 进程已被回收时，任何 JS 侧的定时器都不存在了。
+
+### 8.2 前台服务类型：`dataSync` → `connectedDevice`（P1，评审 P1-2 闭环）
+
+`dataSync` 有两个致命属性：
+
+1. **Android 15 起 24 小时内累计 6 小时上限**，到点回调 `Service.onTimeout()`，不 `stopSelf()`
+   就抛 `RemoteServiceException` 崩溃。本服务设计为常驻不退出，targetSdk 升到 35 后会每天崩一次。
+2. **Android 15 起禁止从 `BOOT_COMPLETED` 启动 `dataSync` 类型前台服务**，直接抛
+   `ForegroundServiceStartNotAllowedException`——开机自启根本做不成。
+
+`connectedDevice` 无时长限制、不在 BOOT 受限名单，语义也更贴切（与局域网内的监护设备保持连接）。
+前置条件 `CHANGE_NETWORK_STATE` / `CHANGE_WIFI_STATE` 应用 manifest 早已声明。
+
+> 当前仓库里的 APK 仍是 `targetSdkVersion=28`（`aapt2 dump badging` 实测），所以上述两项限制
+> 尚未生效；本次改类型是**为将来升 targetSdk 预留通路**，不是修现存 bug。
+
+### 8.3 开机自启（P2）
+
+- `BootReceiver`：收 `BOOT_COMPLETED` / `LOCKED_BOOT_COMPLETED` / `MY_PACKAGE_REPLACED`；
+- `RECEIVE_BOOT_COMPLETED` 权限（插件 manifest 与应用 manifest 双声明）；
+- **受 SharedPreferences 门控**：`start()` 写 `enabled=true`，`stop()` 写 `false`——用户手动关掉
+  后台保活后，重启不该把服务又拉起来；
+- **只拉起服务，不试图拉起 JS**（Android 10+ 限制后台启动 Activity，且体验极差）。JS 起不来时
+  心跳早已过期，通知会如实显示「监护已中断」，点击通知回到 App 才恢复全链路。
+
+### 8.4 电池白名单首次自动引导 + 常驻服务状态展示
+
+- `hooks/useBatteryWhitelistPrompt.ts`（新）：首页 `onShow` 时，若「Android + 已配对 + 保活开着 +
+  未豁免 + 本次安装没提示过」则弹一次引导。**点「暂不」也记为已提示**（`CACHE_KEY.BATTERY_PROMPT_DONE`），
+  监护 App 反复弹系统级授权会招人烦，设置页入口一直都在。
+- 设置页「后台保活」分区新增**常驻服务状态**行（运行中 / 未运行），顺带把此前无人调用的
+  `isKeepAliveRunning()` 死抽象接上；文案明确写了「被系统清理后显示未运行，点开应用会自动恢复」。
+- 分区底部补一行脚注说明重启后服务自动恢复、但连接需点开应用重建。
+
+### 8.5 四个 tab 页统一返回键拦截
+
+`onBackPress` 此前只有首页挂，其他三个 tab（历史/统计/设置）按返回会 finish 主 Activity →
+webview/JS 死亡 → 前台服务还在、通知还在的幽灵态。抽成 `hooks/useBackToBackground.ts`，
+首页 + history/stats/settings 四处统一调用。非 tab 页（配对/详情等）不挂：那里的返回是页面栈
+语义，不该劫持。
+
+### 8.6 本轮验证（重要：UTS 首次真正过编译）
+
+上一轮的 `uts-keepalive` **从未被编译过**——`dist/cache/` 下只有 `bin-bluetooth` 的 Kotlin 产物，
+没有本插件的。本轮补上了完整验证链：
+
+| 步骤 | 工具 | 结果 |
+|---|---|---|
+| UTS → Kotlin 转译 | HBuilderX 自带 `@dcloudio/uts` 的 `toKotlin()` | ✅ 产出 `index.kt`（8.2KB） |
+| Kotlin → class 编译 | HBuilderX 自带 `kotlinc` + `android-35/android.jar` + `uts-runtime-release.jar` | ✅ exit 0，产出 `KeepAliveService.class` / `BootReceiver.class` |
+| 类名与 manifest 一致性 | 比对 class 路径 | ✅ 均为 `uts/sdk/modules/utsKeepalive/*` |
+| uniapp lint / type-check | `pnpm run lint` / `type-check` | ✅ |
+| H5 build（确认插件未混入产物） | `pnpm run build` + grep | ✅ 产物中无 `uts-keepalive`/`KeepAliveService` |
+
+> 复现方式：`toKotlin()` 的 options 必须是 `{ input: {...}, output: {...} }` 两层嵌套，
+> 且 `output.imports` 要补 `DEFAULT_IMPORTS`（`io.dcloud.uts.*` 等，见 `uni-uts-v1/dist/kotlin.js:340`），
+> 否则生成代码缺 import、`console` 与 `UTSAndroid` 全部无法解析。
+
+### 8.7 仍未做的（真机验证，需重打基座）
+
+| 项 | 状态 |
+|---|---|
+| **重打自定义基座**（插件改动必做，现有 APK 里没有保活代码） | ⏳ 未做 |
+| 断网/杀 JS 后通知是否真的变「监护已中断」（90s 内） | ⏳ 需真机 |
+| 重启手机后服务是否自动恢复 + 通知是否如实显示中断态 | ⏳ 需真机 |
+| 白名单引导弹窗只在首次出现 | ⏳ 需真机 |
+| 四个 tab 按返回均退后台不退出 | ⏳ 需真机 |
+| `server/.env` 的 `NTFY_ENABLED` 仍缺失（兜底推送实际未开） | ⚠️ 待用户配置 |
+
+### 8.8 iOS 打包下线（2026-11-19 决策）
+
+**决定：本期不打包 iOS。**
+
+- `uniapp/manifest.config.ts` 的 `distribute.ios.appid` 置空（原 `com.sheldon.babycry` 已移除）
+- 理由：Apple Developer 账号年费 + 证书/描述文件维护，对当前使用场景（家人内部用）成本高于收益；
+  且 iOS 侧本就无法实现前台服务保活，功能上天然残缺
+- **代码层面不降级**：仍保持跨平台兼容（`uni.xxx` API + 条件编译，见 AGENTS.md「约定与注意事项」），
+  将来要上 iOS 时回填 `appid` + 证书即可，业务代码不需要改
+- `uts-keepalive` 的 `app-ios` 空桩保留（占位，不影响 Android 构建）
+- README 平台表述同步改为「App Android·鸿蒙」
+
+### 8.9 编译过程中发现的两个致命 bug（2026-11-19 实机编译暴露）
+
+本轮真机编译把两个「静态检查发现不了、重打基座才会炸」的问题暴露了出来，都已修复。
+
+#### bug 1：UTS tree-shaking 把 service/receiver 类整个删掉（必崩）
+
+**现象**：`cli launch app-android` 编译成功、无报错，但产物 `dist/cache/uts_custom_android/.../uts-keepalive/index.kt`
+只有 **2966 字节**，`index.jar` 里只有 `IndexKt.class`。`KeepAliveService` 与 `BootReceiver`
+**两个类完全不存在**，只在 `setClassName(...)` 里剩下字符串字面量。
+
+**后果**：若直接重打基座，manifest 指向的类不存在 → `startForegroundService()` 抛
+`ClassNotFoundException`，保活功能整个不可用，且编译期毫无提示。
+
+**根因**：HBuilderX 真实构建走的是 `bundleKotlin()`（native binding），它对「未被导出代码实际引用」
+的 class 做 tree-shaking。两个类只被 manifest 和字符串字面量引用，Java/Kotlin 侧没有任何强引用，
+于是被判定为死代码删除。本地用 `toKotlin()` 验证时**不会**触发（该路径保留全部类），
+这正是此前「本地编译通过」骗过验证的原因——**教训：验证必须用 `bundleKotlin` 而非 `toKotlin`**。
+
+**修复**：`index.uts` 的 `start()` 里加两行真实引用，让类进入依赖图：
+
+```uts
+const serviceClass = KeepAliveService().javaClass;
+const bootReceiverClass = BootReceiver().javaClass;
+```
+
+修复后产物 `index.kt` 9655 字节、`index.jar` 含三个 class
+（`KeepAliveService` / `BootReceiver` / `IndexKt`），`classes.dex` 同步三个类。
+
+#### bug 2：`isIgnoringBatteryOptimizations` 真机必抛 TypeError
+
+**现象**（真机日志）：
+
+```
+[keepalive] 电池优化状态查询失败（按未豁免处理）:,
+TypeError: powerManager.isIgnoringBatteryOptimizations is not a function  at utils/keepalive.ts:215
+```
+
+**根因**：`getSystemService('power')` 返回的是**安卓服务实例**，不是可 `new` 的类包装。对它
+`importClass` 只会返回原对象、**不挂方法表**，所以直接 `.isIgnoringBatteryOptimizations()` 必然报错。
+这正是 `keepalive.ts` 头注释里记录过、但此前没被踩到的 plus.android 桥限制。
+
+**后果**：`isIgnoringBatteryOptimizations()` 恒返回 `false` → 设置页的「电池优化白名单」
+**永远显示「未豁免」**，用户点进去却被告知已豁免/或无弹窗，白名单引导形同虚设——
+而白名单恰恰是后台存活率的最大杠杆。
+
+**修复**：改用 plus 桥的 `invoke`：
+
+```ts
+const powerManager = main.getSystemService('power');
+const ignored = bridge.invoke(powerManager, 'isIgnoringBatteryOptimizations', main.getPackageName());
+```
+
+同时在 `AndroidBridge` 接口补 `invoke` 声明。
+
+#### 本轮编译验证结论
+
+| 项 | 结果 |
+|---|---|
+| `cli launch app-android`（真机自定义基座推送） | ✅ 编译成功、wjs 同步、App 启动 |
+| `cli compile app-android --uni_module uts-keepalive`（官方编译入口） | ✅ 无报错 |
+| 产物类完整性（jar + dex） | ✅ `KeepAliveService` / `BootReceiver` / `IndexKt` 三件齐全 |
+| 本地 `kotlinc` 全量编译（含 UTS 源映射插件） | ✅ exit 0，三 class |
+| uniapp lint / type-check | ✅ |
+
+#### ⚠️ 仍待人工执行：重打自定义基座
+
+`cli launch` 输出 `手机端自定义基座"uniapp"已是最新版本…跳过更新`，实测手机上的基座
+`lastUpdateTime=2026-11-18 09:05`、MD5 与 `dist/debug/android_debug.apk`（2026-11-05 构建）**完全一致**，
+`aapt2` 检查其中 `KeepAliveService`/`BootReceiver`/`RECEIVE_BOOT_COMPLETED`/`connectedDevice` **全部为 0**。
+
+即：**当前手机上跑的仍是没有任何保活代码的旧基座**。UTS 插件属 Kotlin 层，靠 wgt 热更新推不进去，
+必须在 HBuilderX 菜单 **发行 → 制作自定义调试基座** 重新打包（CLI 无此命令，仅能 `base info` 查询），
+打包完成后 `cli launch` 才会真正覆盖安装。这一步无法由自动化代替。

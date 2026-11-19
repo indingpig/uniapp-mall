@@ -13,7 +13,7 @@
  */
 
 // #ifdef APP-PLUS
-import { isRunning, start, stop } from '@/uni_modules/uts-keepalive';
+import { heartbeat, isRunning, start, stop } from '@/uni_modules/uts-keepalive';
 // #endif
 import { loadMonitorSettings } from '@/utils/monitorSettings';
 
@@ -27,6 +27,12 @@ interface AndroidBridge {
   };
   /** 入参可为类名（返回类包装）或实例（注册该方法表，不保证生效，需 try/catch） */
   importClass: (o: unknown) => unknown;
+  /**
+   * 在原生实例上调用方法：bridge.invoke(instance, 'methodName', ...args)。
+   * 桥接返回的实例（如 getSystemService 拿到的 PowerManager）不会自动获得方法表，
+   * 只有 invoke 能可靠调到（2026-11-19 真机实测）。
+   */
+  invoke: (o: unknown, method: string, ...args: unknown[]) => unknown;
 }
 
 /** Intent 的可用方法子集（方法表齐全的场景：类名 importClass + new） */
@@ -172,6 +178,24 @@ export function stopKeepAlive(): void {
   // #endif
 }
 
+/**
+ * 上报一次 JS 活性（WS 连接期间由 useBabyMonitor 定期调用）。
+ *
+ * 前台服务只证明「进程/service 还活着」，不证明「JS 在跑、WS 连得上」。服务被
+ * START_STICKY 重建而 JS 未恢复时，通知栏会一直写着「后台监护已开启」——这是最
+ * 危险的假象。插件侧超过 90s 收不到心跳就把通知改写为「监护已中断」。
+ */
+export function pingKeepAlive(): void {
+  // #ifdef APP-PLUS
+  try {
+    heartbeat();
+  }
+  catch (e) {
+    console.warn('[keepalive] 心跳上报失败:', e);
+  }
+  // #endif
+}
+
 /* ------------------------------------------------------------------ */
 /*  电池优化白名单                                                      */
 /* ------------------------------------------------------------------ */
@@ -188,10 +212,16 @@ export function isIgnoringBatteryOptimizations(): boolean {
     const bridge = plus.android as unknown as AndroidBridge;
     const main = bridge.runtimeMainActivity();
     bridge.importClass('android.os.PowerManager'); // 类名注册先行
-    const powerManager = bridge.importClass(main.getSystemService('power')) as {
-      isIgnoringBatteryOptimizations: (pkg: string) => boolean;
-    };
-    return !!powerManager.isIgnoringBatteryOptimizations(main.getPackageName());
+    // getSystemService 返回的是「安卓服务实例」而不是可 new 的类包装：
+    // 对它 importClass 只会返回原对象、不挂方法表，直接 .isIgnoringBatteryOptimizations()
+    // 会抛 "is not a function"（2026-11-19 真机实测）。实例方法必须走 invoke。
+    const powerManager = main.getSystemService('power');
+    const ignored = bridge.invoke(
+      powerManager,
+      'isIgnoringBatteryOptimizations',
+      main.getPackageName(),
+    );
+    return !!ignored;
   }
   catch (e) {
     console.warn('[keepalive] 电池优化状态查询失败（按未豁免处理）:', e);

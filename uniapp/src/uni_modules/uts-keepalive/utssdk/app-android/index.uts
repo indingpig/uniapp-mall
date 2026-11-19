@@ -5,9 +5,26 @@
  * webview 的 JS 运行，使 useBabyMonitor 的 WebSocket 与本地哭声通知在后台
  * 持续工作（这是「被杀收不到推送」的主修复）。
  *
- * service 声明在插件的 AndroidManifest.xml（云打包合并），类名固定为
- * uts.sdk.modules.utsKeepalive.KeepAliveService（uni_modules 插件 ID 转驼峰规则），
- * Intent 用 setClassName 指定，避免在 UTS 里取 Class 对象。
+ * 前台服务类型用 connectedDevice 而不是 dataSync（2026-11-19 调整）：
+ * - dataSync 受 Android 15 的「24 小时内累计 6 小时」超时限制，到点系统回调
+ *   Service.onTimeout()，不 stopSelf 就抛 RemoteServiceException —— 本服务是
+ *   常驻不退出，targetSdk 一旦升到 35 就会每天崩一次；
+ * - Android 15 起禁止从 BOOT_COMPLETED 广播启动 dataSync 类型的前台服务，
+ *   开机自启会直接抛 ForegroundServiceStartNotAllowedException；
+ * - connectedDevice（API 29 起引入）无时长限制、不在 BOOT 受限名单里，语义也
+ *   更贴切（与局域网内的监护设备保持连接）。前置条件 CHANGE_NETWORK_STATE /
+ *   CHANGE_WIFI_STATE 由应用 manifest 声明，插件 manifest 亦声明
+ *   FOREGROUND_SERVICE_CONNECTED_DEVICE 权限。
+ *
+ * 活性标记（心跳）——解决「幽灵通知」：
+ * 前台服务可能被 START_STICKY 重建、而 JS 运行时并没有恢复，此时通知栏仍写着
+ * 「后台监护已开启」，实际 WS 已断、哭声通知永远不会发。故：
+ * - JS 侧 useBabyMonitor 在 WS 连接期间定期调 heartbeat() 写时间戳；
+ * - 本服务每 30s 查一次，超过 90s 没心跳就把常驻通知改写为「监护已中断」。
+ *
+ * service/receiver 声明在插件的 AndroidManifest.xml（云打包合并），类名固定为
+ * uts.sdk.modules.utsKeepalive.*（uni_modules 插件 ID 转驼峰规则），Intent 用
+ * setClassName 指定，避免在 UTS 里取 Class 对象。
  */
 
 import Service from 'android.app.Service';
@@ -23,18 +40,38 @@ import NotificationChannel from 'android.app.NotificationChannel';
 import NotificationManager from 'android.app.NotificationManager';
 import PendingIntent from 'android.app.PendingIntent';
 import ServiceInfo from 'android.content.pm.ServiceInfo';
+import Handler from 'android.os.Handler';
+import Looper from 'android.os.Looper';
+import BroadcastReceiver from 'android.content.BroadcastReceiver';
+import System from 'java.lang.System';
 
 const NOTIFICATION_ID : Int = 1001;
 const CHANNEL_ID = 'baby_keepalive';
 const CHANNEL_NAME = '后台保活';
 const NOTIFY_TITLE = '宝宝监护器运行中';
 const NOTIFY_TEXT = '后台监护已开启，锁屏也能收到哭声提醒';
+/* 心跳超时后的诚实文案：宁可说「中断了」，不能让用户以为还在监护 */
+const NOTIFY_TITLE_STALE = '监护已中断';
+const NOTIFY_TEXT_STALE = '与设备失联或 App 被系统回收，点开恢复监护';
+
+/* SharedPreferences：跨进程存活，Service 被 START_STICKY 重建后仍能读到上一份心跳 */
+const PREFS_NAME = 'baby_keepalive';
+const KEY_LAST_BEAT = 'last_beat';
+const KEY_ENABLED = 'enabled';
+
+/* 检查间隔要明显小于超时窗口，给排障留余量 */
+const CHECK_INTERVAL_MS : Long = 30000;
+const BEAT_TIMEOUT_MS : Long = 90000;
+const ZERO_LONG : Long = 0;
 
 /* 服务运行标记（同进程内 service 与本模块共享）；服务被系统强杀后不会自动回落 */
 let running : boolean = false;
 
-class KeepAliveService extends Service {
+class KeepAliveService extends Service implements Runnable {
   private wakeLock : WakeLock | null = null;
+  private handler : Handler | null = null;
+  /** 当前通知是否已切到「中断」态，避免每轮都 notify 造成无谓刷新 */
+  private stale : boolean = false;
 
   constructor() {
     super();
@@ -42,14 +79,20 @@ class KeepAliveService extends Service {
 
   override onCreate() {
     super.onCreate();
-    this.startForegroundWithNotification();
+    this.stale = false;
+    this.startForegroundWithNotification(false);
     this.acquireWakeLock();
     running = true;
+    /* 主线程 Looper 已就绪（Service 生命周期回调都在主线程），可安全 postDelayed */
+    const h = new Handler(Looper.getMainLooper());
+    this.handler = h;
+    h.postDelayed(this, CHECK_INTERVAL_MS);
   }
 
   override onStartCommand(intent : Intent, flags : Int, startId : Int) : Int {
     // START_STICKY：极端场景进程被回收后系统尽量重建服务。重建只恢复常驻通知，
-    // JS 运行时不会自动恢复——用户点通知回到 App 时 onLaunch 重新拉起全链路
+    // JS 运行时不会自动恢复——心跳随之失效，通知会在 90s 后自行改写成
+    // 「监护已中断」，用户点通知回到 App 时 onLaunch 重新拉起全链路。
     return Service.START_STICKY;
   }
 
@@ -58,12 +101,62 @@ class KeepAliveService extends Service {
   }
 
   override onDestroy() {
+    const h = this.handler;
+    if (h != null) {
+      h.removeCallbacks(this);
+      this.handler = null;
+    }
     this.releaseWakeLock();
     running = false;
     super.onDestroy();
   }
 
-  private startForegroundWithNotification() {
+  /** 定时体检：JS 心跳是否还在（见类注释「活性标记」） */
+  override run() {
+    if (!running) {
+      return;
+    }
+    let stale = true;
+    try {
+      const sp = this.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+      const lastBeat = sp.getLong(KEY_LAST_BEAT, ZERO_LONG);
+      const nowMs = System.currentTimeMillis();
+      const ageMs = lastBeat == ZERO_LONG ? -1 : nowMs - lastBeat;
+      /* 诊断：把最近一次体检结果写回偏好，外部可用 adb 读取（不依赖 logcat，
+         因为 UTS console 在 Service 上下文不一定进 logcat）。稳定后可删。 */
+      try {
+        const ed = sp.edit();
+        ed.putLong('dbg_last_check', nowMs);
+        ed.putLong('dbg_last_age', ageMs);
+        ed.putLong('dbg_last_beat', lastBeat);
+        ed.apply();
+      }
+      catch { /* 诊断写入失败不影响主逻辑 */ }
+      if (lastBeat != ZERO_LONG) {
+        stale = ageMs > BEAT_TIMEOUT_MS;
+      }
+    }
+    catch (e) {
+      /* 读不到偏好当「中断」处理：监护场景 fail-safe 优先 */
+      stale = true;
+    }
+    if (stale != this.stale) {
+      this.stale = stale;
+      try {
+        const manager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager;
+        manager.notify(NOTIFICATION_ID, this.buildNotification(stale));
+      }
+      catch (e) {
+        console.log('[keepalive] 刷新通知失败:', e);
+      }
+    }
+    const h = this.handler;
+    if (h != null) {
+      h.postDelayed(this, CHECK_INTERVAL_MS);
+    }
+  }
+
+  private startForegroundWithNotification(stale : boolean) {
     const manager = this.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager;
     if (Build.VERSION.SDK_INT >= 26) {
       // IMPORTANCE_MIN：不响铃不弹横幅，仅静默占据通知栏一行（监护常驻的可见性）
@@ -72,6 +165,17 @@ class KeepAliveService extends Service {
       manager.createNotificationChannel(channel);
     }
 
+    const notification = this.buildNotification(stale);
+    if (Build.VERSION.SDK_INT >= 29) {
+      // API 29+ 用三参重载显式声明类型，与 manifest 的 foregroundServiceType 一致
+      this.startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+    }
+    else {
+      this.startForeground(NOTIFICATION_ID, notification);
+    }
+  }
+
+  private buildNotification(stale : boolean) : Notification {
     // 点击常驻通知回到 App（不传 extras，仅恢复前台）
     const launchIntent = this.getPackageManager().getLaunchIntentForPackage(this.getPackageName());
     const pendingFlags : Int = Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0;
@@ -84,20 +188,12 @@ class KeepAliveService extends Service {
     else {
       builder = new Notification.Builder(this);
     }
-    builder.setContentTitle(NOTIFY_TITLE);
-    builder.setContentText(NOTIFY_TEXT);
+    builder.setContentTitle(stale ? NOTIFY_TITLE_STALE : NOTIFY_TITLE);
+    builder.setContentText(stale ? NOTIFY_TEXT_STALE : NOTIFY_TEXT);
     builder.setSmallIcon(this.getApplicationInfo().icon);
     builder.setContentIntent(pendingIntent);
     builder.setOngoing(true);
-    const notification = builder.build();
-
-    if (Build.VERSION.SDK_INT >= 29) {
-      // API 29+ 用三参重载显式声明类型，与 manifest 的 foregroundServiceType 一致
-      this.startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC);
-    }
-    else {
-      this.startForeground(NOTIFICATION_ID, notification);
-    }
+    return builder.build();
   }
 
   private acquireWakeLock() {
@@ -117,12 +213,66 @@ class KeepAliveService extends Service {
   }
 }
 
-export function start() {
-  if (running) {
-    return;
+/**
+ * 开机 / 应用更新后自启前台服务。
+ * 只负责把服务拉起来，不试图拉起 JS——JS 起不来时服务写的心跳早已过期，
+ * 通知会如实显示「监护已中断」，用户点通知回到 App 后才真正恢复全链路。
+ */
+class BootReceiver extends BroadcastReceiver {
+  constructor() {
+    super();
   }
+
+  override onReceive(context : Context, intent : Intent) {
+    try {
+      const sp = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+      /* 用户手动关掉后台保活后，重启不该再把服务拉起来 */
+      if (!sp.getBoolean(KEY_ENABLED, false)) {
+        return;
+      }
+      const serviceIntent = new Intent();
+      serviceIntent.setClassName(context.getPackageName(), 'uts.sdk.modules.utsKeepalive.KeepAliveService');
+      /* BOOT_COMPLETED 属于后台启动前台服务的豁免场景；connectedDevice 类型
+         不在 Android 15 的 BOOT 受限名单里，这里不会抛异常 */
+      if (Build.VERSION.SDK_INT >= 26) {
+        context.startForegroundService(serviceIntent);
+      }
+      else {
+        context.startService(serviceIntent);
+      }
+    }
+    catch (e) {
+      console.log('[keepalive] 开机自启服务失败:', e);
+    }
+  }
+}
+
+export function start() {
   const ctx = UTSAndroid.getAppContext();
   if (ctx == null) {
+    return;
+  }
+  /* 强制保留 KeepAliveService / BootReceiver 两个类：bundleKotlin 会把「未被导出
+     代码实际引用」的 class tree-shake 掉，只留下 setClassName 与 manifest 里的
+     字符串字面量（2026-11-19 实测：产物仅 2966B，两个类全部消失，重打基座后
+     startForegroundService 必抛 ClassNotFoundException）。下面两行让类被真正引用。 */
+  const serviceClass = KeepAliveService().javaClass;
+  const bootReceiverClass = BootReceiver().javaClass;
+  if (serviceClass == null || bootReceiverClass == null) {
+    return;
+  }
+  /* 记下「用户想要常驻」，BootReceiver 据此判断开机后要不要拉起 */
+  try {
+    const sp = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    const editor = sp.edit();
+    editor.putBoolean(KEY_ENABLED, true);
+    editor.putLong(KEY_LAST_BEAT, System.currentTimeMillis());
+    editor.apply();
+  }
+  catch (e) {
+    console.log('[keepalive] 写入保活偏好失败:', e);
+  }
+  if (running) {
     return;
   }
   const intent = new Intent();
@@ -141,10 +291,40 @@ export function stop() {
   if (ctx == null) {
     return;
   }
+  try {
+    const sp = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    const editor = sp.edit();
+    editor.putBoolean(KEY_ENABLED, false);
+    editor.apply();
+  }
+  catch (e) {
+    console.log('[keepalive] 清除保活偏好失败:', e);
+  }
   const intent = new Intent();
   intent.setClassName(ctx.getPackageName(), 'uts.sdk.modules.utsKeepalive.KeepAliveService');
   ctx.stopService(intent);
   running = false;
+}
+
+/**
+ * JS 侧活性汇报：WS 连接期间每 30s 左右调一次。
+ * 停止上报（进程被杀 / JS 挂起 / WS 断开）超过 90s，常驻通知会自行改写为
+ * 「监护已中断」——避免服务还在、通知还在、实际没有监护的假象。
+ */
+export function heartbeat() {
+  const ctx = UTSAndroid.getAppContext();
+  if (ctx == null) {
+    return;
+  }
+  try {
+    const sp = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    const editor = sp.edit();
+    editor.putLong(KEY_LAST_BEAT, System.currentTimeMillis());
+    editor.apply();
+  }
+  catch (e) {
+    console.log('[keepalive] 心跳写入失败:', e);
+  }
 }
 
 export function isRunning() : boolean {
