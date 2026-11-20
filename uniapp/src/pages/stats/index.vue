@@ -425,9 +425,8 @@ const neutralRatio = computed(() =>
       <text class="page-title text-main font-bold">统计</text>
     </view>
 
-    <!-- ========= 首次空态门控（设计稿 13：标题保留、分段控件隐藏、完整空态结构） ========= -->
+    <!-- ========= 首次空态门控（设计稿 13：标题由顶栏承载、分段控件隐藏、完整空态结构） ========= -->
     <template v-if="!hasPairedDevice">
-      <text class="page-title text-main font-bold block">统计</text>
       <view class="empty text-center">
         <image class="empty__img" src="/static/icons/ic-monitor-wave.svg" mode="aspectFit" />
         <text class="empty__title text-main font-semibold block">还没有统计数据</text>

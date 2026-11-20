@@ -36,6 +36,8 @@
 #define LOOP_TASK_STACK_SIZE 16384
 
 #include "config.h"
+#include <esp_heap_caps.h>   // heap_caps_get_largest_free_block (自愈守卫判据)
+#include <esp_mac.h>         // esp_read_mac (设备名, 不依赖 WiFi 启动时序)
 #include "ble_provision.h"
 #include "wifi_connect.h"
 #include "audio_pipeline.h"
@@ -52,7 +54,7 @@
 
 static char deviceName[32] = "BabyMonitor-0000";
 static bool s_listening = false;      // 推理是否在跑 (开关语义见 onServerCmd)
-static bool s_bleSession = false;     // BLE 会话活跃 (配网/采集): 期间暂停推理, 见 loop
+static bool s_sessionBusy = false;    // 会话忙 (BLE 配网/采集寻址, 或采集推流): 期间暂停推理
 static bool s_inferWanted = true;     // 监听偏好 (NVS 持久化): 配网成功默认开, App 可关
 static bool s_provisioned = false;    // 是否已配网 (出厂态不开推理)
 static bool s_collectStarted = false; // 采集服务是否已启动 (WiFi 连上后一次)
@@ -62,7 +64,7 @@ static uint32_t s_lastHeapLog = 0;
 /* 前向声明 (显式声明, 不依赖 Arduino 自动原型生成) */
 void onServerCmd(const char* cmd);
 void onServerLinkState(bool connected);
-void startListening();
+bool startListening();
 void stopListening();
 static void persistInferWanted();
 
@@ -208,9 +210,10 @@ void onWifiStatus(const char* status) {
   bleProvisionUpdateStatus(status);
   if (strcmp(status, BLE_STATUS_WIFI_CONNECTED) == 0) {
     led_off();   // 凭据已生效: 结束待配网/窗口闪烁, 之后由 server_connected 收尾
-    // WiFi 连上 (含配网成功/掉线重连) 按偏好自动开推理: startListening 内部
-    // 有偏好/出厂态门禁, 重连时已在跑则空操作
-    startListening();
+    // 推理启动时机 = server_connected (onServerLinkState), 不在 wifi_connected:
+    // 竞技场每次 run 都重新分配, 首跑必须落在堆最终成型 (WS/mDNS/HTTP 全部
+    // ramp 完) 之后, 否则首跑占的坑被 WiFi 栈挤压, 下一次 run 就放不回去
+    // (2026-11-20 真机: wifi_connected 时启动, ServerLink 连上后竞技场永久失败)
     if (!s_collectStarted) {
       s_collectStarted = true;
       collectServerStart();
@@ -267,23 +270,24 @@ void onServerLinkState(bool connected) {
  * 启动推理并置监听态。实际能否启动由两道门禁决定:
  *   - s_inferWanted: App 的持久偏好 (listen_off 后拒绝启动)
  *   - s_provisioned: 出厂态不开 (推理结果无处上报, 且挤占配网内存)
- * inferStart 需要一块较大的连续内部堆（32KB 采样 buffer + EI tensor arena，
- * 未走 PSRAM），启动早期被 WiFi/BLE 碎片挤占会失败：不放弃，loop 里 30s
- * 重试 (同样过门禁)。
- * BLE 会话（配网/采集）期间由 loop 主动暂停推理让内存，会话结束/配网闭环
- * （onServerLinkState）即按偏好恢复。
+ * inferStart 只翻开关（32KB 采样 buffer 已由 inferInit 开机常驻）；EI 竞技场
+ * 仍按秒 alloc/free（TFLITE 非 EON，SDK 无预分配开关），启动早期被 WiFi/BLE
+ * 碎片挤占会失败：不放弃，loop 里 30s 重试 + 连续失败自愈重启（见 loop 守卫）。
+ * BLE 会话（配网/采集）期间由 loop 主动暂停推理让内存，会话结束即按偏好恢复。
+ * @return true = 监听已开或门禁性不需要开; false = 真的启动失败 (内存)
  */
-void startListening() {
-  if (s_listening) return;
-  if (!s_inferWanted || !s_provisioned) return;   // 偏好关闭 / 出厂态: 不启动
+bool startListening() {
+  if (s_listening) return true;
+  if (!s_inferWanted || !s_provisioned) return true;   // 偏好关闭 / 出厂态: 不启动
   if (!inferStart()) {
     Serial.println("[Listen] ERR: 推理启动失败 (内存不足), 30s 后重试");
     serverLinkSetListening(false);   // 把失败状态同步给 App
-    return;
+    return false;
   }
   s_listening = true;
   serverLinkSetListening(true);
   Serial.println("[Listen] ON");
+  return true;
 }
 
 void stopListening() {
@@ -317,10 +321,12 @@ void setup() {
                 digitalRead(BOOT_BTN_PIN) == LOW ? "LOW" : "HIGH",
                 digitalRead(BOOT_BTN_PIN) == LOW ? " (被外部钳住? 按键检测暂不启用)" : "");
 
-  // 生成设备名 (基于 MAC 后 4 位)
-  String mac = WiFi.macAddress();
-  mac.replace(":", "");
-  snprintf(deviceName, sizeof(deviceName), "BabyMonitor-%s", mac.substring(8, 12).c_str());
+  // 生成设备名 (基于 MAC 后 4 位)。3.x 的 WiFi.macAddress() 需 WiFi 已启动,
+  // setup 早期调用返回全零 (2026-11-20 真机 BabyMonitor-0000), 改读 efuse ——
+  // 与 WiFi 启动后的 STA MAC 同源, 不依赖时序
+  uint8_t macBytes[6] = { 0 };
+  esp_read_mac(macBytes, ESP_MAC_WIFI_STA);
+  snprintf(deviceName, sizeof(deviceName), "BabyMonitor-%02X%02X", macBytes[4], macBytes[5]);
   Serial.printf("[Info] Device: %s\n", deviceName);
 
   printHeap("boot");
@@ -342,7 +348,12 @@ void setup() {
     closeProvisionWindow();
   }
 
-  // 音频采集链 (Core 0): I2S + 高通滤波, 常开
+  // 音频采集链 (Core 0): I2S + 高通滤波, 常开。
+  // inferInit 先行: 32KB 采样 buffer 在堆最干净的最早时刻定位分配 (常驻),
+  // 大缓冲开机一次性放好, 运行期只翻开关 —— 碎片化教训见 baby_infer.cpp
+  if (!inferInit()) {
+    Serial.println("[Boot] ERR: 推理采样 buffer 初始化失败, 推理将不可用");
+  }
   audioPipelineStart();
 
   // 监听偏好 (NVS): 配网成功默认开, App listen_on/off 持久化于此。
@@ -354,8 +365,10 @@ void setup() {
   prefs.end();
   s_provisioned = !isFactoryState();
 
-  // 已配网设备按偏好启动推理; 出厂态由 onWifiStatus (WiFi 连上) 自动开
-  startListening();
+  // 已配网设备的推理启动交给 onServerLinkState(server_connected) 与 loop 的
+  // 30s 重试 —— setup 此处直接 startListening 会在 WiFi/WS ramp 前占住竞技场
+  // 的坑, ramp 完成后竞技场重新分配失败且每秒复现 (2026-11-20 真机)。
+  // 出厂态本来就不启 (startListening 门禁)
 
   inferPrintInfo();
   printHeap("ready");
@@ -400,15 +413,19 @@ void loop() {
   // (2026-11-19 真机 TG1WDT, 复现: 配网页点「刷新列表」必崩)。收到凭据后的
   // wifiConnectBegin 同样吃内存, 故暂停范围取整个 BLE 会话而非仅扫描窗口。
   // 恢复走 startListening (偏好/出厂态门禁在内部), 用户已关监护则不自动重开
-  bool bleConnected = bleProvisionIsConnected();
-  if (bleConnected != s_bleSession) {
-    s_bleSession = bleConnected;
-    if (bleConnected) {
+  // 会话忙 = BLE 连接或采集 WS 客户端在位。App 采集页时序: BLE 寻址 → 断 BLE →
+  // 连采集 WS → (间隙) → 发 start。若门禁只看 BLE 或只看「正在录音」, 断 BLE
+  // 瞬间推理即抢跑, wsRing 旁若无人地膨胀 —— 2026-11-20 真机采集会话被拒的根因。
+  // 采集会话期间推理暂停 (EI 竞技场按秒 alloc/free ~28K, 会让出干净空间)
+  bool sessionBusy = bleProvisionIsConnected() || collectServerIsClientActive();
+  if (sessionBusy != s_sessionBusy) {
+    s_sessionBusy = sessionBusy;
+    if (sessionBusy) {
       if (s_listening) {
         inferStop();
         s_listening = false;
         serverLinkSetListening(false);
-        Serial.println("[Listen] PAUSED (BLE 会话, 为配网让出内存)");
+        Serial.println("[Listen] PAUSED (BLE/采集会话, 让出内存)");
       }
     } else {
       startListening();   // 会话结束恢复常开; 内存不足由下方 30s 重试兜底
@@ -425,10 +442,22 @@ void loop() {
   // 推理启动失败重试: 30s 一试 (启动早期内存被占用的场景)。门禁与
   // startListening 一致; BLE 会话期间不重试 —— 会话内暂停是有意为之
   static uint32_t s_lastInferRetry = 0;
-  if (!s_listening && s_inferWanted && s_provisioned && !s_bleSession
+  if (!s_listening && s_inferWanted && s_provisioned && !s_sessionBusy
       && now - s_lastInferRetry >= 30000) {
     s_lastInferRetry = now;
     startListening();
+  }
+
+  // 自愈守卫: 竞技场按秒重新分配, 堆被 BLE 会话缓冲 (~15-25K, 不可回收) 或
+  // WS ramp 碎掉后, 会出现「启动成功但每 run 失败」的盲转 —— 计数在
+  // baby_infer (s_runFailStreak)。连续 30 次 (~30s) 全失败 = 30s 重试救不了
+  // 碎片, 重启恢复 (偏好在 NVS, 重启即回健康稳态)。2026-11-20 真机引入
+  if (s_listening && s_runFailStreak >= 30) {
+    uint32_t maxBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    Serial.printf("[Listen] ERR: run 连续失败 %u 次 (max block=%u), 3s 后重启自愈\n",
+                  s_runFailStreak, (unsigned)maxBlock);
+    delay(3000);
+    ESP.restart();
   }
 
   delay(1);

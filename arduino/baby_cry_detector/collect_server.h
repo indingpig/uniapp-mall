@@ -22,3 +22,8 @@ void collectServerStart();
 void collectServerLoop();
 
 bool collectServerIsRecording();
+
+/* 采集 WS 客户端在位 (连接未断, 含尚未发 start 的间隙)。
+ * 推理门禁用: App 寻址完断 BLE 转推流, 从断 BLE 到发 start 有间隙,
+ * 若只看 IsRecording 会放推理抢跑, wsRing 挤不进来 (2026-11-20 真机) */
+bool collectServerIsClientActive();

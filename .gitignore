@@ -23,6 +23,11 @@ dist
 # PlatformIO 构建产物
 .pio/
 /uniapp/dist/
+# pioarduino(3.x 平台) 会把 .ino 预处理产物丢进源码目录, 勿提交（且文件名会
+# 撞 build_src_filter 的 +<xxx.ino*> 模式）
+arduino/baby_cry_detector/baby_cry_detector.ino.cpp
+# 串口监听临时脚本与日志（开发辅助, 勿提交）
+.pio-tmp/
 
 # server 本地持久化（家庭共享注册表，含各手机 token，勿提交）
 server/data/

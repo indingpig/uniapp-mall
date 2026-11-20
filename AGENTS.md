@@ -278,7 +278,11 @@ pio device monitor           # 串口监视器（115200）
 ### arduino
 
 - PlatformIO 配置在**仓库根** `platformio.ini`（不在 arduino/ 目录），`src_dir` 指向 `arduino/baby_cry_detector/`
-- **代码使用旧版 I2S 驱动 `driver/i2s.h`，必须用 arduino-esp32 2.0.x（platform espressif32@6.x）**；升级到 3.x 需整体迁移到 `ESP_I2S.h`，不要随手升级 platform
+- **主固件环境已迁 arduino-esp32 3.x（2026-11-20）**：platform 用 pioarduino `53.03.10`（Arduino core 3.1.0 / IDF 5.3；官方 `espressif32` 停在 6.x=2.0.x，不支持 OCTAL PSRAM），I2S 用新驱动 `ESP_I2S.h`（旧 `driver/i2s.h` 已随 2.0.x 退役）。其余子工程（audio_app/ble_test/i2s_recorder 等）仍在 `espressif32@6.9.0`，各自独立，不要混改
+  - **`ESP_I2S` 的 slot_mask 必须显式传 `I2S_STD_SLOT_LEFT`**（INMP441 L/R→GND）：靠默认值启动会读到非数据槽位，srcRms 恒 ~12.4K、模型全误报（2026-11-20 真机教训）
+  - **3.x 下 `WiFi.macAddress()` 需 WiFi 已启动**，setup 早期调用返回全零——取设备名用 `esp_read_mac()`（efuse，无时序依赖）
+  - **3.x 的 BLE `getValue()` 返回 `String`**（2.0.x 是 `std::string`），移植旧回调注意
+  - pioarduino 平台包国内直连 GitHub 易被 reset：zip 经 `gh-proxy.com/` 前缀下载后手动装 `~/.platformio/platforms/`，platformio.ini 用绝对路径引用（带前导零的版本号会被 PIO 语义化版本解析拒绝）；包（.zip）装 `~/.platformio/packages/<name>` 并手写 `.piopm`（版本号必须是合法 semver）；PIO registry（dl.registry.platformio.org）可直连，registry 有的包直接 `pio pkg install`
 - 每个子目录（`audio_app/`、`audio_streamer/`、`i2s_recorder/`、`waveform_viewer/` 等）是独立子工程，各有自己的 setup/loop；通过各 `[env:*]` 的 `build_src_filter` 只编译该工程的文件 —— **给某环境新增源文件时，必须同步更新 platformio.ini 的 src_filter**
 - **PlatformIO 不会把 `build_src_filter` 里的 `.ino` 当源文件编译**（可编译扩展只有 c/cpp/cc/cxx/c++/S/asm）：`src_dir` 根目录的 `.ino` 会先被转成临时的 `.ino.cpp` 再编译，所以过滤要用 `+<xxx.ino*>` 匹配转换后的文件名；子目录里的 `.ino` 永不转换，子工程若要编译须在环境里把 `src_dir` 指到该子目录（参考 `[env:audio_app]`）
 - 依赖 Edge Impulse 推理库 `babyCry_inferencing`，`lib_extra_dirs` 同时列出两台开发机的库目录（Windows 开发机 `D:/ArduinoProject/libraries`、Mac `/Users/sheldon/Documents/Arduino/libraries`），不存在的目录会被自动跳过
@@ -288,7 +292,7 @@ pio device monitor           # 串口监视器（115200）
 - 分区表 `partitions_n16r8.csv`（仓库根）铺满 16MB：`app0`/`app1` 各 3MB OTA 双槽 + `spiffs` 数据区 9.875MB + coredump
   - **CSV 必须纯 ASCII**：PlatformIO 按系统默认编码（Windows GBK）解析，中文注释会让 `_parse_partitions` 抛 `UnicodeDecodeError` 构建失败
   - `upload.maximum_size` 不用手写，PlatformIO 会按 `app0` 的 3MB 自动覆盖
-  - **PSRAM 禁用（2026-11-19 真机定论，别再启用）**：板子 N16R8 是 OCTAL PSRAM，但 arduino-esp32 2.0.x 预编译库的 sdkconfig 是 `CONFIG_SPIRAM_MODE_QUAD`（OCT 未编入）且 `SPIRAM_USE_MALLOC=y`（malloc>4KB 可落 PSRAM、不预留内部内存）。QUAD 编译配置对 OCTAL 实际硬件，数据读写能用，但 **WiFi/lwIP 启动会间歇性堆损坏**——配网页点「刷新列表」必崩（TG1WDT 复位 / lwIP `sys_arch_unprotect` 空指针，两次崩点不同 = 损坏非确定性），PSRAM 纯数据用途（推理窗、环形缓冲）则完全正常。曾于 11-16 启用、11-19 回退。**重新启用条件：迁移 arduino-esp32 3.x**（预编译库含 OCTAL 支持；但 3.x 需整体迁移 `ESP_I2S.h`）。代码侧所有大缓冲已是「PSRAM 优先 + 内部堆回落」，将来启用无需改代码；`i2s_recorder` 等**无 WiFi 子工程**保留 `qio_opi` 不受影响
+  - **PSRAM 已启用（2026-11-20，随 3.x 迁移落地）**：`board_build.arduino.memory_type = qio_opi` + `-DBOARD_HAS_PSRAM`，代码侧大缓冲为「PSRAM 优先 + 内部堆回落」，启动日志应见 `@ PSRAM`（回落 INTERNAL = 异常）。历史教训仍需知晓：**2.0.x（platform 6.x）下禁止启用**——其预编译库 sdkconfig 是 `CONFIG_SPIRAM_MODE_QUAD`（板子是 OCTAL），数据能用但 WiFi/lwIP 启动会间歇性堆损坏（2026-11-19 配网页三连崩的真因，曾在 11-16 启用、11-19 回退）。`i2s_recorder` 等**无 WiFi 子工程**保留 `qio_opi` 不受影响
 - 主固件 `baby_cry_detector` 的编译组成：`baby_cry_detector.ino` + `ble_provision.*` + `wifi_connect.*` + `led.*` + `config.h`
 
 ### 其他

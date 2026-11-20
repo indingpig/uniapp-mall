@@ -4,8 +4,6 @@
  */
 #pragma once
 
-#include <driver/i2s.h>   // AUDIO_I2S_PORT 用到 I2S_NUM_0
-
 /* ================================================================== */
 /*  NVS 存储                                                            */
 /* ================================================================== */
@@ -68,7 +66,6 @@
 /* ================================================================== */
 
 #define AUDIO_SAMPLE_RATE         16000
-#define AUDIO_I2S_PORT            I2S_NUM_0
 #define AUDIO_PIN_WS              4     // INMP441 WS
 #define AUDIO_PIN_SCK             5     // INMP441 SCK
 #define AUDIO_PIN_SD              6     // INMP441 SD
@@ -81,13 +78,18 @@
 // 换模型窗口大小时改这里即可
 #define INFER_WINDOW_SAMPLES      16000
 
-// 电平表环形缓冲: 0.5s (16KB)。/rms 与串口电平用, 不影响数据链路
-#define RMS_RING_SAMPLES          (AUDIO_SAMPLE_RATE / 2)
+// 电平表环形缓冲: 0.0625s (2KB)。/rms 轮询 200ms 只取最新电平, 够用; 给
+// BLE+全常驻缓冲的预算让路 (2026-11-20 内存重整, 见 WS_RING_SECONDS 注释)
+#define RMS_RING_SAMPLES          (AUDIO_SAMPLE_RATE / 16)
 
-// 采集推流环形缓冲: 2s (64KB)。容忍 loop 侧 run_classifier 的阻塞;
-// OOM 时可降到 1 (32KB), 代价是 App 消费不及时更容易触发 lost 重录
-#define WS_RING_SECONDS           2
-#define WS_RING_SAMPLES           (AUDIO_SAMPLE_RATE * WS_RING_SECONDS)
+// 采集推流环形缓冲: 0.25s (8KB), 开机常驻预分配 (audio_pipeline.cpp)。原 2s
+// (64KB) 运行期分配在已配网+连服态必失败 (暂停推理后 free≈64.0K 与需求只差
+// 76B, 碎片下最大连续块仅 13K, 2026-11-20 真机采集被拒); 常驻 48K/32K/16K 又
+// 逐步与 Bluedroid (~82K) 挤爆 288K 预算 —— 竞技场 (~28K, 按秒重分配) 需要
+// ramp 后最大连续块 ≥30K, 16K 常驻版差 ~10K。局域网 WS 消费 loop 以 64ms
+// 粒度排水, 0.25s (4 个 chunk) 吸收仍可用
+#define WS_RING_SECONDS           0.25f
+#define WS_RING_SAMPLES           (int)(AUDIO_SAMPLE_RATE * WS_RING_SECONDS)
 
 /* AGC (与 esp32_microphone.ino 的 apply_agc / audio_app_uni 的 audio.js 一致):
  * 每个推理窗(1s)按 目标RMS/实际RMS 计算增益, 限幅后归一化到训练分布 */

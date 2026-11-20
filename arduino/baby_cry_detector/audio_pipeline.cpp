@@ -1,7 +1,7 @@
 #include "audio_pipeline.h"
 
 #include <Arduino.h>
-#include <driver/i2s.h>
+#include <ESP_I2S.h>
 #include <math.h>
 
 #include "config.h"
@@ -49,13 +49,15 @@ static const uint32_t WINDOW_SAMPLES = INFER_WINDOW_SAMPLES;
 /* 环形缓冲内存策略 (2026-11-19 复盘): 内部堆是配网 WiFi start、推理 32KB
  * 缓冲 + EI arena 的主战场, 大缓冲一律让路 ——
  *   - rmsRing (16KB): 电平表核心 UX, 常驻 (audioPipelineStart 分配)
- *   - wsRing (64KB): 仅采集录音用, 99% 时间闲置 → 按需分配 (CollectStart
- *     分配 / CollectFree 释放)。采集会话期间推理被 BLE 门禁暂停, 推理的
- *     32KB 正好腾出 —— 两块大内存互斥使用, 互不挤占 */
+ *   - wsRing (32KB, WS_RING_SAMPLES): 采集推流缓冲, audioPipelineStart 开机常驻预分配。
+ *     曾按需分配 (CollectStart/CollectFree), 但已配网+连服态的暂停推理后
+ *     自由堆贴着需求红线, 运行期碎片化下分配必失败 (2026-11-20 真机),
+ *     改为开机定位分配 —— 代价是常态少 32KB, 换采集会话确定性可用 */
 static int16_t* rmsRing = nullptr;                 // 电平表环形缓冲
 static volatile uint32_t rmsHead = 0;
 
-static int16_t* wsRing = nullptr;                  // 采集推流环形缓冲 (按需分配, 见上)
+static int16_t* wsRing = nullptr;                  // 采集推流环形缓冲 (开机常驻, 见上)
+static bool s_wsRingPreallocated = false;          // true=开机预分配, CollectFree 只复位不释放
 static volatile uint32_t wsRingHead = 0;           // 生产 (采集任务)
 static volatile uint32_t wsRingTail = 0;           // 消费 (loop 推 WS)
 static volatile bool wsCollecting = false;
@@ -99,32 +101,21 @@ static volatile int32_t chunkPeak = 0;
 /* ================================================================== */
 
 static void audioPipeTask(void* param) {
-  i2s_config_t config = {
-    .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = AUDIO_SAMPLE_RATE,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 8,
-    .dma_buf_len = 512,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0
-  };
-  i2s_pin_config_t pins = {
-    // mck_io_num 是结构体首字段, 省略会被零初始化为 0, 而 0 是合法引脚号 ——
-    // i2s_set_pin 会把 GPIO0 (BOOT 键) 配成 I2S MCLK 输出, 按键读数恒为低,
-    // 导致 bootButtonLoop 把它当成"一直按住", 松手后误开配网窗口。
-    .mck_io_num = I2S_PIN_NO_CHANGE,
-    .bck_io_num = AUDIO_PIN_SCK,
-    .ws_io_num = AUDIO_PIN_WS,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = AUDIO_PIN_SD
-  };
-  i2s_driver_install(AUDIO_I2S_PORT, &config, 0, nullptr);
-  i2s_set_pin(AUDIO_I2S_PORT, &pins);
-  i2s_zero_dma_buffer(AUDIO_I2S_PORT);
+  // arduino-esp32 3.x 新 I2S 驱动 (ESP_I2S.h, 旧 driver/i2s.h 已随 2.0.x 退役)。
+  // INMP441 接线: L/R->GND = 左声道; setPins 第 5 参 mclk 显式给 -1 ——
+  // 与旧版 mck_io_num 零初始化同坑: 0 是合法引脚, 会把 GPIO0(BOOT 键) 配成
+  // MCLK 输出, 按键读数恒低 → 误判长按 (2026-11-14 前科)
+  static I2SClass i2s;
+  i2s.setPins(AUDIO_PIN_SCK, AUDIO_PIN_WS, -1 /*dout 不用*/, AUDIO_PIN_SD, -1 /*mclk*/);
+  // slot_mask 必须显式给 LEFT (INMP441 L/R->GND=左声道): 3.x 迁移首版靠默认值
+  // 启动, srcRms 恒 ~12.4K (读到非数据槽位), 显式 LEFT 后恢复真实音频 ——
+  // 别省略第 5 参 (2026-11-20 真机教训)
+  if (!i2s.begin(I2S_MODE_STD, AUDIO_SAMPLE_RATE, I2S_DATA_BIT_WIDTH_16BIT,
+                 I2S_SLOT_MODE_MONO, I2S_STD_SLOT_LEFT)) {
+    Serial.println("[AudioPipe] ERR: I2S begin 失败, 音频链未启动");
+    vTaskDelete(nullptr);
+    return;
+  }
 
   Serial.println("[AudioPipe] task started on Core 0");
 
@@ -132,9 +123,8 @@ static void audioPipeTask(void* param) {
   HighPassState hp = { 0, 0, 0, 0, 0, 0 };
 
   for (;;) {
-    size_t bytesRead = 0;
-    if (i2s_read(AUDIO_I2S_PORT, buf, sizeof(buf), &bytesRead, portMAX_DELAY) != ESP_OK ||
-        bytesRead == 0) {
+    size_t bytesRead = i2s.readBytes((char*)buf, sizeof(buf));
+    if (bytesRead == 0) {
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
@@ -187,7 +177,10 @@ static void audioPipeTask(void* param) {
 /* ================================================================== */
 
 void audioPipelineStart() {
-  // 只常驻 rmsRing; wsRing 按需分配 (见上方内存策略注释)
+  // 常驻 rmsRing + wsRing; wsRing 曾按需分配, 但已配网+连服态暂停推理后
+  // free≈64K 与旧 64K 需求只差 76B, 碎片下最大连续块仅 13K, 运行期分配必失败
+  // (2026-11-20 真机采集会话被拒两连)。开机常驻定位分配 (现 32KB, 见 config.h),
+  // 此后采集会话零分配、推理 churn 碎不掉它
   rmsRing = allocRingBuffer(RMS_RING_SAMPLES, "rmsRing");
   if (rmsRing == nullptr) {
     // PSRAM + 内部堆都拿不到 (理论上仅灾难场景): 不起采集任务, 保 BLE 配网可用
@@ -195,6 +188,18 @@ void audioPipelineStart() {
     return;
   }
   memset((void*)rmsRing, 0, (size_t)RMS_RING_SAMPLES * sizeof(int16_t));
+
+  if (wsRing == nullptr) {
+    wsRing = allocRingBuffer(WS_RING_SAMPLES, "wsRing");
+    s_wsRingPreallocated = (wsRing != nullptr);
+    if (wsRing != nullptr) {
+      Serial.printf("[AudioPipe] wsRing 常驻预分配 %u B\n",
+                    (unsigned)(WS_RING_SAMPLES * sizeof(int16_t)));
+    } else {
+      // 预分配失败不阻断音频链: CollectStart 仍有懒分配路径兜底
+      Serial.println("[AudioPipe] ERR: wsRing 预分配失败, 采集将走运行期懒分配");
+    }
+  }
 
   /* 推理窗优先放 PSRAM；失败则退回内部堆，保证功能可用 */
   if (windowRaw == nullptr) {
@@ -275,7 +280,7 @@ uint32_t audioPipelineDroppedWindows() {
 
 bool audioPipelineCollectStart() {
   if (wsCollecting) return true;
-  // 按需分配 64KB 推流缓冲 (PSRAM 优先)。失败则拒绝会话 —— 比静默丢样本好
+  // 懒分配兜底 (常态已开机预分配, 走不到这里)。失败则拒绝会话 —— 比静默丢样本好
   if (wsRing == nullptr) {
     wsRing = allocRingBuffer(WS_RING_SAMPLES, "wsRing");
     if (wsRing == nullptr) {
@@ -297,7 +302,7 @@ void audioPipelineCollectStop() {
 }
 
 /**
- * 释放 wsRing, 把 64KB 还给推理 (inferBuffer + EI arena)。
+ * 释放 wsRing 还给堆 (常驻预分配模式下只复位不释放, 见实现)。
  * 必须在 stop + 排干之后调用; 内部等 120ms 再释放 —— 生产任务以 64ms 为周期
  * (1024 样本 @16kHz) 轮询 wsCollecting, 延迟能兜住「flag 已读、写入在途」
  * 的最后一块, 避免释放后写入 (use-after-free)。
@@ -305,10 +310,16 @@ void audioPipelineCollectStop() {
 void audioPipelineCollectFree() {
   wsCollecting = false;
   if (wsRing == nullptr) return;
+  // 等 120ms: 生产任务以 64ms 为周期轮询 wsCollecting, 兜住「flag 已读、写入在途」
+  // 的最后一块。常驻预分配模式下只复位不释放 (运行期释放/重分配正是碎片化来源)
   vTaskDelay(pdMS_TO_TICKS(120));
-  heap_caps_free(wsRing);
-  wsRing = nullptr;
-  Serial.println("[AudioPipe] wsRing 已释放 (内存还给推理)");
+  if (!s_wsRingPreallocated) {
+    heap_caps_free(wsRing);
+    wsRing = nullptr;
+    Serial.println("[AudioPipe] wsRing 已释放 (内存还给推理)");
+  } else {
+    Serial.println("[AudioPipe] wsRing 复位 (常驻模式不释放)");
+  }
 }
 
 void audioPipelineCollectReset() {

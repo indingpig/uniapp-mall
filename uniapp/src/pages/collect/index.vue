@@ -137,12 +137,21 @@ function setupSocket(task: UniApp.SocketTask, onSettled?: (ok: boolean) => void)
 
 function handleCmdText(text: string) {
   try {
-    const j = JSON.parse(text) as { cmd?: string; samples?: number; lost?: boolean };
+    const j = JSON.parse(text) as { cmd?: string; message?: string; samples?: number; lost?: boolean };
     if (j.cmd === 'done') {
       stopRecordingLocal();
       if (j.lost)
         addLog('有数据丢失，建议重录');
       finalizeRec(j.samples || recTotal);
+    }
+    else if (j.cmd === 'error') {
+      // 板子拒绝会话 (ring_alloc_failed: wsRing 48KB 分配失败=内部堆不足)。
+      // 计时器按实收字节走, 会话被拒时恒 0s —— 必须明确报错, 别让用户干等
+      stopRecordingLocal();
+      statusText.value = '设备内存不足，采集被拒绝';
+      statusOk.value = false;
+      uni.showToast({ title: '设备拒绝采集（内存不足），请稍后重试', icon: 'none' });
+      addLog(`固件错误: ${j.message || 'unknown'}`);
     }
   }
   catch {

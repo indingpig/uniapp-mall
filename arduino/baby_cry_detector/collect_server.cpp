@@ -365,6 +365,10 @@ bool collectServerIsRecording() {
   return audioPipelineCollectActive();
 }
 
+bool collectServerIsClientActive() {
+  return s_wsClient && s_wsClient.connected();
+}
+
 void collectServerLoop() {
   // 新 HTTP / WS 连接
   WiFiClient c = s_server.available();

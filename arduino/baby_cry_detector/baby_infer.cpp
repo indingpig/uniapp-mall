@@ -25,6 +25,7 @@
 static int16_t* s_inferBuffer = nullptr;   // AGC 后的窗口 (送分类器)
 static bool s_running = false;
 static bool s_debugNn = false;             // true 打印 DSP Features (刷屏, 排查用)
+uint8_t s_runFailStreak = 0;               // run_classifier 连续失败计数 (主固件读取, ≥30 触发重启自愈)
 
 void inferPrintInfo() {
   ei_printf("Inferencing settings:\n");
@@ -42,19 +43,31 @@ static int inferSignalGetData(size_t offset, size_t length, float* out_ptr) {
   return 0;
 }
 
-bool inferStart() {
-  if (s_running) return true;
-  // AGC 输出缓冲 (32KB): PSRAM 优先 —— 内部堆留给 run_classifier 每次调用
-  // 内部分配的 EI tensor arena (瞬时大块, 2026-11-19 TG1WDT 复盘的主战场)。
-  // 读写量每秒一次 32KB, PSRAM 带宽绰绰有余
+bool inferInit() {
+  // AGC 输出缓冲 (32KB): PSRAM 优先, 内部堆回落。开机常驻 —— EI 的 blocking
+  // run_classifier 每秒 alloc/free 竞技场一次 (SDK 无预分配开关, 本库
+  // run_classifier_init 只重置状态), 那个 churn 无法消除; 我们能做的是把
+  // 自己的大缓冲在堆还干净时定位分配, 把干净空间尽量留给竞技场
   const size_t bufferBytes = (size_t)EI_CLASSIFIER_RAW_SAMPLE_COUNT * sizeof(int16_t);
   s_inferBuffer = (int16_t*)heap_caps_malloc(bufferBytes, MALLOC_CAP_SPIRAM);
+  const bool inPsram = (s_inferBuffer != nullptr);
   if (s_inferBuffer == nullptr) {
     s_inferBuffer = (int16_t*)heap_caps_malloc(bufferBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   }
   if (s_inferBuffer == nullptr) {
-    Serial.printf("[Infer] ERR: malloc inference buffer failed (%u bytes), free=%u\n",
+    Serial.printf("[Infer] ERR: 初始化分配采样 buffer 失败 (%u bytes), free=%u\n",
                   (unsigned)bufferBytes, ESP.getFreeHeap());
+    return false;
+  }
+  Serial.printf("[Infer] init: buffer %u B @ %s, free heap=%u\n",
+                (unsigned)bufferBytes, inPsram ? "PSRAM" : "INTERNAL", ESP.getFreeHeap());
+  return true;
+}
+
+bool inferStart() {
+  if (s_running) return true;
+  if (s_inferBuffer == nullptr) {
+    Serial.println("[Infer] ERR: 采样 buffer 未就绪 (inferInit 未执行或失败)");
     return false;
   }
   audioPipelineSetListenEnabled(true);
@@ -68,10 +81,7 @@ void inferStop() {
   if (!s_running) return;
   audioPipelineSetListenEnabled(false);
   s_running = false;
-  if (s_inferBuffer != nullptr) {
-    free(s_inferBuffer);
-    s_inferBuffer = nullptr;
-  }
+  // buffer 常驻不释放: 运行期 alloc/free 大块 = 碎片化根源, 见 inferInit 注释
   Serial.printf("[Infer] stopped, dropped windows=%u, free heap=%u\n",
                 audioPipelineDroppedWindows(), ESP.getFreeHeap());
 }
@@ -113,9 +123,14 @@ bool inferPoll(InferResult* out) {
   ei_impulse_result_t result = { 0 };
   EI_IMPULSE_ERROR err = run_classifier(&signal, &result, s_debugNn);
   if (err != EI_IMPULSE_OK) {
-    Serial.printf("[Infer] ERR: run_classifier (%d)\n", err);
+    // 连续失败计数: 竞技场按秒重新分配, 堆被 BLE 会话缓冲/WS ramp 碎掉后
+    // 会「启动成功但每 run 失败」地盲转 —— 30 次 (~30s) 不可恢复即重启自愈
+    // (重启后全量恢复; 偏好在 NVS)。主固件据此触发 ESP.restart()
+    s_runFailStreak++;
+    Serial.printf("[Infer] ERR: run_classifier (%d) 连续失败 %u\n", err, s_runFailStreak);
     return false;
   }
+  s_runFailStreak = 0;
 
   /* ---- argmax ---- */
   size_t best = 0;

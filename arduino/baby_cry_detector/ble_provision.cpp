@@ -95,7 +95,7 @@ class SecurityCallbacks : public BLESecurityCallbacks {
 /* ================================================================== */
 
 /* 诊断用: 写入原始字节 hex (排查句柄错位/CCCD 残留等诡异写入, 上限 32 字节) */
-static String hexDump(const std::string& v) {
+static String hexDump(const String& v) {
   String out;
   for (size_t i = 0; i < v.length() && i < 32; i++) {
     char buf[4];
@@ -108,7 +108,7 @@ static String hexDump(const std::string& v) {
 class SSIDWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("SSID")) return;
-    std::string raw = c->getValue();
+    String raw = c->getValue();   // 3.x: getValue 返回 String (2.0.x 是 std::string)
     s_pendingSSID = String(raw.c_str());
     s_pendingSSID.trim();
     Serial.printf("[BLE] SSID received: [%s] len=%u hex=%s\n",
@@ -119,7 +119,7 @@ class SSIDWriteCallback : public BLECharacteristicCallbacks {
 class PassWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("Password")) return;
-    std::string raw = c->getValue();
+    String raw = c->getValue();   // 3.x: getValue 返回 String (2.0.x 是 std::string)
     s_pendingPass = String(raw.c_str());
     s_pendingPass.trim();
     Serial.printf("[BLE] Password received (hidden) len=%u\n", (unsigned)raw.length());
@@ -129,7 +129,7 @@ class PassWriteCallback : public BLECharacteristicCallbacks {
 class ServerURLWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("ServerURL")) return;
-    std::string raw = c->getValue();
+    String raw = c->getValue();   // 3.x: getValue 返回 String (2.0.x 是 std::string)
     String url = String(raw.c_str());
     url.trim();
 
