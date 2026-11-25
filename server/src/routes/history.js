@@ -6,21 +6,32 @@ export function createHistoryRoutes(dataStore) {
   /** 获取历史记录列表 */
   router.get('/', (req, res) => {
     const { page = 1, pageSize = 20, from, to } = req.query;
+    const pageNum = Math.max(1, Number(page) || 1);
+    const size = Math.max(1, Number(pageSize) || 20);
 
-    let records;
+    let items;
+    let total;
     if (from && to) {
-      records = dataStore.getRange(Number(from), Number(to));
+      // 指定时间范围：范围内全量取回后分页（范围通常有限，安全）
+      const records = dataStore.getRange(Number(from), Number(to));
+      total = records.length;
+      const start = (pageNum - 1) * size;
+      // 与原实现一致：对外按时间倒序
+      items = records.slice(start, start + size).reverse();
     } else {
-      records = dataStore.getRecent(Number(pageSize));
+      // 无范围：走数据库分页。
+      // 2026-11-25 修 bug——原实现先 getRecent(pageSize) 再 slice，
+      // total 恒 ≤ pageSize，page≥2 必返回空数组。
+      const paged = dataStore.getPage({ page: pageNum, pageSize: size });
+      total = paged.total;
+      // getPage 已是倒序（新→旧），这里保持对外语义不变
+      items = paged.items;
     }
+
     // 事件层（「有动静」等）随采样记录一并返回，App 时间线把两者按时间归并
     const events = from && to
       ? dataStore.getEvents(Number(from), Number(to))
       : dataStore.getEvents(Date.now() - 6 * 86_400_000, Date.now());
-
-    const total = records.length;
-    const start = (Number(page) - 1) * Number(pageSize);
-    const items = records.slice(start, start + Number(pageSize)).reverse();
 
     res.json({
       code: 0,
@@ -34,8 +45,8 @@ export function createHistoryRoutes(dataStore) {
         })),
         events: events.map(e => ({ time: e.time, type: e.type })),
         total,
-        page: Number(page),
-        pageSize: Number(pageSize),
+        page: pageNum,
+        pageSize: size,
       },
     });
   });

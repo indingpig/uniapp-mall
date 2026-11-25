@@ -29,27 +29,29 @@ export function createStatsRoutes() {
 
   /** 摘要统计 */
   router.get('/summary', (_req, res) => {
-    const all = dataStore.getRecent(9999);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayRecords = all.filter(r => r.time >= today.getTime());
+    // 2026-11-25：改用 SQL 聚合，不再 getRecent(9999) 捞全量。
+    // 原实现受 MAX_HISTORY=500 限制，"今日"统计实际只看最近 4 分钟；
+    // 迁 SQLite 后若继续 getRecent(9999) 会漏掉 9999 条之外的今日数据。
+    const today = dataStore.getDailyStats(1)[0] || {
+      cryCount: 0,
+      maxRms: 0,
+      avgRms: 0,
+      sampleCount: 0,
+    };
+    // total 保持原结构（cryCount/maxRms/sampleCount）不变，避免破坏前端类型契约；
+    // 语义 = 库内保留期内的全部采样。注意前端已注明它「不能当昨日基线」。
+    const total = dataStore.getAllTimeSummary();
 
     res.json({
       code: 0,
       data: {
         today: {
-          cryCount: todayRecords.filter(r => r.status === 'crying').length,
-          maxRms: todayRecords.length > 0 ? Math.max(...todayRecords.map(r => r.rms)) : 0,
-          avgRms: todayRecords.length > 0
-            ? Math.round(todayRecords.reduce((s, r) => s + r.rms, 0) / todayRecords.length)
-            : 0,
-          sampleCount: todayRecords.length,
+          cryCount: today.cryCount,
+          maxRms: today.maxRms,
+          avgRms: today.avgRms,
+          sampleCount: today.sampleCount,
         },
-        total: {
-          cryCount: all.filter(r => r.status === 'crying').length,
-          maxRms: all.length > 0 ? Math.max(...all.map(r => r.rms)) : 0,
-          sampleCount: all.length,
-        },
+        total,
       },
     });
   });
