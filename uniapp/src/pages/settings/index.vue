@@ -5,8 +5,8 @@
 <script setup lang="ts">
 import type { DeviceData } from '@/api/baby';
 import type { MonitorSettings } from '@/utils/monitorSettings';
-import { onShow } from '@dcloudio/uni-app';
-import { computed, onMounted, ref } from 'vue';
+import { onHide, onShow } from '@dcloudio/uni-app';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { fetchDevice } from '@/api/baby';
 import { fetchFamilyOverview } from '@/api/family';
 import { colors } from '@/constants/colors';
@@ -49,7 +49,28 @@ const hasPairedDevice = ref(false);
 function loadDevice() {
   fetchDevice().then((d) => {
     device.value = d;
-  }).catch(() => {});
+  }).catch(() => {
+    // 断网/服务器不可达: 不保留上次成功拉到的在线态（防假在线——
+    // 2026-11-25 实测断所有网后设置页徽章仍显示「在线」）
+    device.value = { ...device.value, isOnline: false, connectionText: '无法连接服务器' };
+  });
+}
+
+/** 页面可见期间轮询设备状态（tabBar 页 mount 后常驻，仅靠 onShow 刷新的话，
+ * 停留在本页时的断网/恢复要等切页面才反映——2026-11-25 实测） */
+let devicePollTimer: ReturnType<typeof setInterval> | null = null;
+
+function startDevicePoll() {
+  if (devicePollTimer)
+    return;
+  devicePollTimer = setInterval(loadDevice, 5000);
+}
+
+function stopDevicePoll() {
+  if (devicePollTimer) {
+    clearInterval(devicePollTimer);
+    devicePollTimer = null;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -286,6 +307,8 @@ onShow(() => {
   // 从配对页返回时刷新配对状态与设备状态
   hasPairedDevice.value = hasLocalPairing();
   loadDevice();
+  // 页面可见期间持续轮询设备在线状态（防停留期间的断网/恢复不反映）
+  startDevicePoll();
   // 从系统设置页返回时刷新通知授权（用户可能刚在系统里开了/关了通知）
   systemNotifyAuth.value = isNotificationAuthorized();
   // 从分享管理页返回时刷新成员配额（板05 右值 N/6 / 已加入）
@@ -294,6 +317,15 @@ onShow(() => {
   batteryWhitelisted.value = isIgnoringBatteryOptimizations();
   // 前台服务运行状态同样重查（用户可能刚在系统里强停过本应用）
   keepAliveRunning.value = isKeepAliveRunning();
+});
+
+// 切走时停轮询（tabBar 页切到其他 tab；页面销毁兜底）
+onHide(() => {
+  stopDevicePoll();
+});
+
+onBeforeUnmount(() => {
+  stopDevicePoll();
 });
 </script>
 

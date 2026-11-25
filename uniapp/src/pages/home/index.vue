@@ -32,7 +32,7 @@ import { hasLocalPairing, storage } from '@/utils/storage';
 /*  服务端数据                                                          */
 /* ------------------------------------------------------------------ */
 
-const { status, volume, device, durationSec, listening, refresh, reconnect, sendCmd } = useBabyMonitor();
+const { status, volume, device, durationSec, listening, refresh, reconnect, ensureAlive, sendCmd } = useBabyMonitor();
 
 /* ------------------------------------------------------------------ */
 /*  本地数据                                                            */
@@ -491,6 +491,9 @@ onShow(() => {
   // 家庭角色与称呼：成员加入/退出后回到首页即刷新
   isMember.value = getFamilyRole() === 'member';
   userName.value = getFamilyMember()?.name || getFamilyOwner()?.name || 'Sheldon';
+  // Bug B 修法④：回前台主动续命——锁屏/切后台回来时重连链可能已静默死掉，
+  // WS 不在健康态就立即重连（健康连接受 wsActive/connecting 守卫，不会误断）
+  ensureAlive();
 });
 
 onBeforeUnmount(() => {
