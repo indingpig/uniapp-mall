@@ -1,0 +1,101 @@
+{
+  "id": "uts-wavrec",
+  "displayName": "宝宝监护器采集录制（原生 socket 直写 WAV）",
+  "version": "1.0.0",
+  "description": "Android 原生 WebSocket 收板子采集音频：字节不进 JS 桥，原生逐窗 AGC + 流式写 WAV（RandomAccessFile 占位头+回补），JS 只拿进度与结果。消除 uni-app 桥接二进制的消费卡顿（2026-11-24 定位的采集丢样根因）",
+  "repository": "",
+  "keywords": [
+    "websocket",
+    "wav",
+    "采集",
+    "uts"
+  ],
+  "engines": {
+    "HBuilderX": "^3.95"
+  },
+  "dcloudext": {
+    "type": "uts",
+    "sale": {
+      "regular": {
+        "price": "0.00"
+      },
+      "sourcecode": {
+        "price": "0.00"
+      }
+    },
+    "contact": {},
+    "declaration": {
+      "ads": "无",
+      "data": "音频仅写入本机应用私有目录，不采集上传",
+      "permissions": "Android: INTERNET（宿主 App 已声明，插件无新增权限）"
+    },
+    "npmurl": "",
+    "darkmode": "x",
+    "i18n": "x",
+    "widescreen": "x"
+  },
+  "uni_modules": {
+    "dependencies": [],
+    "encrypt": [],
+    "platforms": {
+      "cloud": {
+        "tcb": "x",
+        "aliyun": "x",
+        "alipay": "x"
+      },
+      "client": {
+        "uni-app": {
+          "vue": {
+            "vue2": "-",
+            "vue3": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            }
+          },
+          "web": {
+            "safari": "x",
+            "chrome": "x"
+          },
+          "app": {
+            "vue": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            },
+            "nvue": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            },
+            "android": {
+              "extVersion": "1.0.0",
+              "minVersion": "21"
+            },
+            "ios": {
+              "extVersion": "1.0.0",
+              "minVersion": "12"
+            },
+            "harmony": {
+              "extVersion": "1.0.0",
+              "minVersion": ""
+            }
+          },
+          "mp": {
+            "weixin": "x",
+            "alipay": "x",
+            "toutiao": "x",
+            "baidu": "x",
+            "kuaishou": "x",
+            "jd": "x",
+            "harmony": "x",
+            "qq": "x",
+            "lark": "x",
+            "xhs": "x"
+          },
+          "quickapp": {
+            "huawei": "x",
+            "unionid": "x"
+          }
+        }
+      }
+    }
+  }
+}

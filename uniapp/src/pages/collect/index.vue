@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { BLEDevice } from '@/hooks/useBLE';
+import type { WavRecResult } from '@/utils/nativeWavRec';
+import type { WavStreamSession } from '@/utils/wavStream';
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { CACHE_KEY } from '@/constants/cache';
 import { useBLE } from '@/hooks/useBLE';
@@ -11,8 +13,20 @@ import {
 } from '@/utils/audioData';
 import { AUTO_BLE_ON_MOUNT } from '@/utils/bleEnv';
 import { getIcon } from '@/utils/icons';
+import {
+  nativeClose,
+  nativeConnectWS,
+  nativeGetResult,
+  nativeGetState,
+  nativeIsConnected,
+  nativeProgress,
+  nativeStart,
+  nativeStop,
+  nativeWavRecAvailable,
+} from '@/utils/nativeWavRec';
 import { saveWavFile } from '@/utils/saveWav';
 import { storage } from '@/utils/storage';
+import { startWavStream } from '@/utils/wavStream';
 
 /**
  * 哭声数据采集页 (开发者工具)
@@ -69,6 +83,19 @@ let recChunks: Int16Array[] = [];
 let recTotal = 0;
 let recTimer: ReturnType<typeof setInterval> | null = null;
 let meterTimer: ReturnType<typeof setInterval> | null = null;
+/* 流式写盘 (App 端): 开流成功时非 null, 磁盘上逐窗落盘, JS 不攒全量 PCM;
+ * H5 / 开流失败为 null, 回退 recChunks 内存累积 */
+let streamSession: WavStreamSession | null = null;
+let streamName = '';
+let startingRec = false;
+/* 原生直录模式 (uts-wavrec): true 时 WS 收流在 Kotlin 层, 音频字节不过 JS 桥;
+ * JS 流式/内存路径是其回退 (原生开连失败 / H5) */
+let usingNative = false;
+/* done 回执兜底 (2026-11-24): stop 后 done 不来 (WS 半死/断连) 会永久卡在
+ * 「正在结束录音」且数据静默丢失 —— 真机实测现场。超时按本地缓冲收尾 */
+const DONE_GUARD_MS = 8000;
+const stopPending = ref(false);
+let stopGuardTimer: ReturnType<typeof setTimeout> | null = null;
 
 function addLog(msg: string) {
   log.value.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -105,23 +132,32 @@ function setupSocket(task: UniApp.SocketTask, onSettled?: (ok: boolean) => void)
       handleCmdText(data);
       return;
     }
-    // ArrayBuffer: 可能是音频, 也可能是被当二进制送达的文本命令
-    const bytes = new Uint8Array(data);
-    if (bytes.length > 1 && bytes[0] === 0x7b) {
-      // '{' — 文本命令被平台塞进二进制帧
-      let txt = '';
-      for (let i = 0; i < bytes.length; i++) txt += String.fromCharCode(bytes[i]);
-      handleCmdText(txt);
+    // 平台会把文本命令塞进二进制帧送达, 必须区分。按帧长判别:
+    // 音频恒为 2048B 整块 (AUDIO_CHUNK_SAMPLES=1024), 文本命令几十 B。
+    // 旧版按首字节 0x7b 嗅探 —— PCM 首样本低字节恰为 0x7b 的概率 1/256,
+    // 每条长录音被静默吃掉 ~0.4% 块 (2026-11-24 实测 715 块丢 3 块, 由此定位)
+    if (data.byteLength >= 1024) {
+      if (recording.value) {
+        const view = new Int16Array(data);
+        recTotal += view.length;
+        if (streamSession)
+          streamSession.append(view); // 流式: 逐窗落盘, JS 内存恒定
+        else
+          recChunks.push(view); // 回退: 内存累积 (H5 / 开流失败)
+      }
       return;
     }
-    if (recording.value) {
-      recChunks.push(new Int16Array(data));
-      recTotal += data.byteLength / 2;
-    }
+    let txt = '';
+    const bytes = new Uint8Array(data);
+    for (let i = 0; i < bytes.length; i++) txt += String.fromCharCode(bytes[i]);
+    handleCmdText(txt);
   });
   task.onClose(() => {
     connected.value = false;
-    stopRecordingLocal();
+    if (stopPending.value)
+      finalizeFromBuffer('连接断开');
+    else
+      stopRecordingLocal();
     statusText.value = '连接已断开';
     statusOk.value = false;
     stopMeter();
@@ -129,6 +165,8 @@ function setupSocket(task: UniApp.SocketTask, onSettled?: (ok: boolean) => void)
   });
   task.onError((e) => {
     connected.value = false;
+    if (stopPending.value)
+      finalizeFromBuffer('连接错误'); // 与 onClose 双触发时由 stopPending 去重
     statusText.value = `连接错误: ${e.errMsg || 'unknown'}`;
     statusOk.value = false;
     onSettled?.(false);
@@ -139,10 +177,19 @@ function handleCmdText(text: string) {
   try {
     const j = JSON.parse(text) as { cmd?: string; message?: string; samples?: number; lost?: boolean };
     if (j.cmd === 'done') {
+      if (stopGuardTimer) {
+        clearTimeout(stopGuardTimer);
+        stopGuardTimer = null;
+      }
+      const late = !stopPending.value;
+      stopPending.value = false;
       stopRecordingLocal();
       if (j.lost)
         addLog('有数据丢失，建议重录');
-      finalizeRec(j.samples || recTotal);
+      if (late)
+        addLog('done 迟到（已按本地缓冲收过尾），忽略固件回执');
+      else
+        finalizeRec(j.samples || recTotal);
     }
     else if (j.cmd === 'error') {
       // 板子拒绝会话 (ring_alloc_failed: wsRing 48KB 分配失败=内部堆不足)。
@@ -161,13 +208,52 @@ function handleCmdText(text: string) {
 
 function doConnect(onSettled?: (ok: boolean) => void) {
   if (connected.value) {
-    socketTask?.close({});
+    if (usingNative) {
+      nativeClose();
+      connected.value = false;
+      statusText.value = '连接已断开';
+      statusOk.value = false;
+    }
+    else {
+      socketTask?.close({});
+    }
+    usingNative = false;
     return;
   }
   statusText.value = '连接中...';
   statusOk.value = false;
   const url = wsUrl();
 
+  // 原生直录优先 (APP): 音频字节不进 JS 桥; 开连失败回退 JS socket 路径。
+  // 插件零回调参数, 连接态轮询 getState (0 未连/1 连接中/2 已连)
+  if (nativeWavRecAvailable) {
+    nativeConnectWS(url);
+    const startAt = Date.now();
+    const statePoll = setInterval(() => {
+      const st = nativeGetState();
+      if (st === 2) {
+        clearInterval(statePoll);
+        usingNative = true;
+        connected.value = true;
+        statusText.value = '已连接开发板（原生直录）';
+        statusOk.value = true;
+        addLog(`已连接 ${url}（uts 原生 socket）`);
+        startMeter();
+        onSettled?.(true);
+      }
+      else if (st === 0 || Date.now() - startAt > 8000) {
+        clearInterval(statePoll);
+        usingNative = false;
+        addLog('原生连接失败，回退 JS socket');
+        connectViaJsSocket(url, onSettled);
+      }
+    }, 250);
+    return;
+  }
+  connectViaJsSocket(url, onSettled);
+}
+
+function connectViaJsSocket(url: string, onSettled?: (ok: boolean) => void) {
   let task: UniApp.SocketTask | null = null;
   try {
     // 官方用法: 必须传 complete 回调, 返回值才是 SocketTask
@@ -216,7 +302,12 @@ const scanningBoard = ref(false);
 function probeConnect(): Promise<boolean> {
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
-      socketTask?.close({});
+      if (usingNative) {
+        nativeClose();
+      }
+      else {
+        socketTask?.close({});
+      }
       resolve(false);
     }, 8000);
     doConnect((ok) => {
@@ -330,7 +421,18 @@ function startMeter() {
   if (meterTimer)
     return;
   meterTimer = setInterval(() => {
-    if (!connected.value)
+    // 原生模式断连感知: onClosed/onFailure 在 Kotlin 层, JS 拿不到回调,
+    // 用 500ms 轮询连接态兜底 (录音中的断连经 getResult 结果送达)
+    if (usingNative && !recording.value && connected.value && !nativeIsConnected()) {
+      connected.value = false;
+      statusText.value = '连接已断开';
+      statusOk.value = false;
+      addLog('连接断开');
+      stopMeter();
+      return;
+    }
+    // 录音中暂停轮询: 每秒 2 次 uni.request 全程过 JS 桥, 与推流抢桥无谓开销
+    if (!connected.value || recording.value)
       return;
     const base = baseUrl.value.trim().replace(/\/+$/, '');
     uni.request({
@@ -359,28 +461,131 @@ function stopMeter() {
 
 /* ==================== 录音 ==================== */
 
-function startRec() {
-  if (!connected.value || recording.value)
+async function startRec() {
+  if (!connected.value || recording.value || startingRec)
     return;
-  recChunks = [];
-  recTotal = 0;
-  recSecs.value = 0;
-  recording.value = true;
-  socketTask?.send({ data: JSON.stringify({ cmd: 'start' }), fail: () => addLog('发送 start 失败') });
-  statusText.value = '录音中...';
-  statusOk.value = false;
-  addLog(`开始录音 [${selectedCat.value}]`);
-  recTimer = setInterval(() => {
-    recSecs.value = Math.round(recTotal / SAMPLE_RATE);
-  }, 200);
+  startingRec = true; // 开流走异步桥调用, 防双击重入
+  try {
+    recChunks = [];
+    recTotal = 0;
+    recSecs.value = 0;
+    // 文件名此刻定下 (磁盘先建文件), 计数器保存成功才自增;
+    // 模式优先级: 原生直录 > JS 流式写盘 > 内存累积
+    const count = counters.value[selectedCat.value] || 0;
+    streamName = `${selectedCat.value}_${String(count + 1).padStart(3, '0')}.wav`;
+    let mode = '';
+    if (usingNative) {
+      if (!nativeStart(streamName)) {
+        statusText.value = '启动失败（原生）';
+        statusOk.value = false;
+        addLog('⚠ nativeStart 失败');
+        return;
+      }
+      mode = '（原生直录）';
+    }
+    else {
+      streamSession = await startWavStream(streamName);
+      if (streamSession) {
+        mode = '（流式写盘）';
+      }
+    }
+    recording.value = true;
+    if (!usingNative) {
+      socketTask?.send({ data: JSON.stringify({ cmd: 'start' }), fail: () => addLog('发送 start 失败') });
+    }
+    statusText.value = '录音中...';
+    statusOk.value = false;
+    addLog(`开始录音 [${selectedCat.value}]${mode}`);
+    recTimer = setInterval(() => {
+      // 原生模式: 音频不进 JS, recTotal 不增长, 进度从插件轮询
+      const samples = usingNative ? nativeProgress() : recTotal;
+      recSecs.value = Math.round(samples / SAMPLE_RATE);
+    }, 200);
+  }
+  finally {
+    startingRec = false;
+  }
 }
 
 function stopRec() {
-  if (!recording.value)
+  if (!recording.value || stopPending.value)
     return;
   statusText.value = '正在结束录音...';
+  stopPending.value = true;
+  if (usingNative) {
+    // 原生模式: done 在 Kotlin 层消费并收尾, 结果轮询 getResult 送达;
+    // 插件内 8s 兜底/断连也会生成 result, 页面轮询上限 10s 再兜底
+    const ok = nativeStop();
+    if (!ok) {
+      // 返回 false 的唯一含义是「WS 已断，命令发不出去」（已收尾的情况插件返回 true）。
+      // 旧文案「发送 stop 失败」曾把"会话已结束"也报成失败，误导排查方向（2026-11-24 修正）
+      stopPending.value = false;
+      addLog('停止失败：连接已断开');
+      return;
+    }
+    const pollStart = Date.now();
+    const resultPoll = setInterval(() => {
+      const res = nativeGetResult();
+      if (res != null) {
+        clearInterval(resultPoll);
+        onNativeResult(res);
+      }
+      else if (Date.now() - pollStart > 10000) {
+        clearInterval(resultPoll);
+        stopPending.value = false;
+        stopRecordingLocal();
+        statusText.value = '结束超时，未收到保存结果';
+        statusOk.value = false;
+        addLog('⚠ 结束超时：原生层未生成结果');
+      }
+    }, 300);
+    return;
+  }
   socketTask?.send({ data: JSON.stringify({ cmd: 'stop' }), fail: () => addLog('发送 stop 失败') });
-  // done 回来后 finalizeRec 处理
+  // done 回来后 finalizeRec 处理; 兜底: 超时按本地缓冲收尾
+  if (stopGuardTimer)
+    clearTimeout(stopGuardTimer);
+  stopGuardTimer = setTimeout(finalizeFromBuffer, DONE_GUARD_MS, 'done 超时');
+}
+
+/* 原生直录的结果落 UI（文件已由 Kotlin 层写完并校验） */
+function onNativeResult(res: WavRecResult) {
+  stopPending.value = false;
+  stopRecordingLocal();
+  const name = streamName;
+  streamName = '';
+  if (res.lost)
+    addLog('板端报有数据丢失，建议重录');
+  if (!res.ok) {
+    statusText.value = `保存未完成 (${res.reason})`;
+    statusOk.value = false;
+    addLog(`⚠ 保存未完成: ${res.reason}`);
+    return;
+  }
+  const count = counters.value[selectedCat.value] || 0;
+  counters.value[selectedCat.value] = count + 1;
+  persistCounters();
+  const secs = (res.samples / SAMPLE_RATE).toFixed(1);
+  const reasonTag = res.reason === 'done' ? '' : `, ${res.reason}`;
+  addLog(`保存 ${name} (原始RMS=${Math.round(res.rms)}, ${secs}s, ${res.bytes}B${reasonTag})`);
+  statusText.value = `已保存 ${name} (RMS ${Math.round(res.rms)}, ${secs}s)`;
+  statusOk.value = true;
+  addLog(`${name} → ${res.path}`);
+}
+
+/* done 不来的兜底 (超时/断连/错误): 按本地已收缓冲收尾。
+ * stopPending 既标记「等待 done」也做 finalize 去重 */
+function finalizeFromBuffer(reason: string) {
+  if (!stopPending.value)
+    return;
+  stopPending.value = false;
+  if (stopGuardTimer) {
+    clearTimeout(stopGuardTimer);
+    stopGuardTimer = null;
+  }
+  addLog(`⚠ ${reason}，按本地缓冲收尾`);
+  stopRecordingLocal();
+  finalizeRec(recTotal);
 }
 
 function stopRecordingLocal() {
@@ -391,15 +596,21 @@ function stopRecordingLocal() {
   }
 }
 
-function finalizeRec(samples: number) {
+async function finalizeRec(samples: number) {
   addLog(`完成: 本地缓冲=${recTotal} 样本, 固件=${samples} 样本`);
   if (recTotal < SAMPLE_RATE * 0.5) {
     statusText.value = `录音太短 (只收到 ${(recTotal / SAMPLE_RATE).toFixed(1)}s)`;
     addLog('录音太短，已丢弃');
+    streamSession?.cancel(); // 删除半成品, 文件名下轮复用
+    streamSession = null;
+    return;
+  }
+  if (streamSession) {
+    await finalizeStream();
     return;
   }
   try {
-    // 合并累积 PCM
+    // 内存累积路径 (H5 / 开流失败回退): 合并 → 逐窗 AGC → WAV → saveWavFile
     const all = new Int16Array(recTotal);
     let off = 0;
     for (const c of recChunks) {
@@ -421,6 +632,34 @@ function finalizeRec(samples: number) {
     statusText.value = `保存异常: ${(e as Error).message}`;
     addLog(`保存异常: ${(e as Error).message}`);
   }
+  finally {
+    recChunks = []; // 立即释放全量 PCM (可达十几 MB)
+  }
+}
+
+/* 流式路径: 数据已在磁盘, 只需回补 44B 头 + 计数 (零全量内存操作) */
+async function finalizeStream() {
+  const sess = streamSession;
+  const name = streamName;
+  streamSession = null;
+  streamName = '';
+  if (!sess)
+    return;
+  const result = await sess.finalize();
+  if (!result) {
+    statusText.value = '流式写盘失败，本段未保存';
+    statusOk.value = false;
+    addLog('⚠ 流式写盘失败 (见 console)，本段未保存');
+    return;
+  }
+  const count = counters.value[selectedCat.value] || 0;
+  counters.value[selectedCat.value] = count + 1;
+  persistCounters();
+  const secs = (recTotal / SAMPLE_RATE).toFixed(1);
+  addLog(`保存 ${name} (原始RMS=${Math.round(result.rms)}, ${secs}s, ${result.bytes}B)`);
+  statusText.value = `已保存 ${name} (RMS ${Math.round(result.rms)}, ${secs}s)`;
+  statusOk.value = true;
+  addLog(`${name} → ${result.path}`);
 }
 
 function afterSave(name: string, rms: number, where: string) {

@@ -131,7 +131,9 @@ class KeepAliveService extends Service implements Runnable {
         ed.putLong('dbg_last_beat', lastBeat);
         ed.apply();
       }
-      catch { /* 诊断写入失败不影响主逻辑 */ }
+      // 必须带异常变量：UTS 无变量的 `catch {}` 会原样转译成 Kotlin `catch  {}`，
+      // kotlinc 报 "Expecting exception variable declaration"（2026-11-24 实测）
+      catch (e) { /* 诊断写入失败不影响主逻辑 */ }
       if (lastBeat != ZERO_LONG) {
         stale = ageMs > BEAT_TIMEOUT_MS;
       }

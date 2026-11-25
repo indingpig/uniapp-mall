@@ -1,0 +1,46 @@
+/**
+ * uts-wavrec iOS 空桩
+ *
+ * 产品采集端目前仅 Android 真机（华为 P30 测试机）。iOS 需要等价实现时，
+ * 用 URLSessionWebSocketTask + FileHandle 依 interface.uts 契约补齐。
+ * 本文件仅为 iOS 构建提供合法入口，所有操作均报不可用。
+ */
+
+/** 单轮录制结果（iOS 空桩，仅维持类型兼容；type 而非 interface 同 Android 侧） */
+export type WavRecResult = {
+  ok: boolean,
+  reason: string,
+  samples: number,
+  lost: boolean,
+  rms: number,
+  path: string,
+  bytes: number,
+}
+
+export function connectWS(_url : string) {
+  console.log('[wavrec] 尚未实现 iOS 版本');
+}
+
+export function getState() : number {
+  return 0;
+}
+
+export function start(_name : string) : boolean {
+  return false;
+}
+
+export function stop() : boolean {
+  return false;
+}
+
+export function getResult() : WavRecResult | null {
+  return null;
+}
+
+export function getProgress() : number {
+  return 0;
+}
+
+export function closeWs() {
+  // 空实现
+}

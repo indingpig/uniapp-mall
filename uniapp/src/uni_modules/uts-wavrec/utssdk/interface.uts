@@ -1,0 +1,38 @@
+/**
+ * interface.uts
+ * uts-wavrec 原生采集录制插件接口契约（文档）
+ *
+ * ⚠️ 本文件只允许注释与文档，不放任何代码（含类型导出）——本仓库 HBuilderX
+ * 5.34 的 UTS 编译器把 interface.uts 里的无实现函数声明当重载声明解析，
+ * 相邻不同名的声明直接 panic（uts_transforms/overload.rs "overload error
+ * X != Y"，2026-11-24 云端编译三次实证）。可行先例：uts-keepalive 的
+ * interface.uts 即纯注释；类型一律定义在各平台 index.uts 内并导出。
+ * JS 侧类型见 src/types/uts-wavrec.d.ts（真值源 = app-android/index.uts）。
+ *
+ * API 契约（导出于 utssdk/app-android/index.uts）：
+ * - connectWS(url): 建连（异步）；getState() 轮询: 0=未连 1=连接中 2=已连
+ * - start(name): 建文件（占位 44B 头）+ 下发 {"cmd":"start"}，清空上轮结果
+ * - stop(): 下发 {"cmd":"stop"}；getResult() 轮询本轮结果
+ *   （done/8s 兜底超时/断连都会生成结果，结构见 WavRecResult）
+ * - getProgress(): 已落盘样本数（页面 200ms 计时器轮询显示秒数）
+ * - closeWs(): 关连接（录制中先按已落盘数据收尾）
+ *
+ * 解决的问题（2026-11-24 定位）：uni.connectSocket 的二进制消息要过
+ * Java→JNI→JS 引擎三重边界，App 端消费 32KB/s 音频流跟不上，TCP 背压
+ * 顶回板子造成丢样。本插件把 WS 收流 + 逐窗 AGC + WAV 落盘全部下沉到
+ * Kotlin 层，音频字节不过 JS 桥，JS 只轮询进度和结果。
+ * ⚠️ API 全轮询、零回调参数：顶层导出带 lambda 参数同样崩 overload 变换器。
+ *
+ * 协议（与 collect_server 固件一致）：
+ * - 控制走 WS 文本帧: {"cmd":"start"} / {"cmd":"stop"}；回执 {"cmd":"done",
+ *   "samples":N,"lost":bool} / {"cmd":"error",...}
+ * - 音频走 WS 二进制帧: 2048B 整块（1024 样本 @16kHz int16 LE）
+ * - 原生层按 WS 帧类型天然区分文本/音频（OkHttp 分两个回调），无嗅探歧义
+ *
+ * 写盘：RandomAccessFile('rwd') 占位 44B 头 → 逐 1s AGC 窗（16000 样本，
+ * 与固件推理同粒度）顺序追加 → done 到达后 seek(0) 回补头 + 大小校验。
+ * AGC 与固件 config.h / 前端 audioData.ts 同参：目标 RMS 2500，限幅 0.25~64。
+ * 目录：<外部私有>/files/BabyCry/<name>（与 saveWav.ts 同目录）。
+ * iOS：无实现（空桩），产品采集端目前仅 Android 真机。
+ * 约束：仅限 APP-PLUS 条件编译内导入（业务侧统一走 src/utils/nativeWavRec.ts）。
+ */

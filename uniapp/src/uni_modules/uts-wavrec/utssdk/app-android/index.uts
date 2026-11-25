@@ -1,0 +1,510 @@
+/**
+ * uts-wavrec Android 实现：原生 WebSocket 收板子采集音频 + 逐窗 AGC + 流式写 WAV
+ *
+ * 音频字节全程留在 Kotlin 层（OkHttp onMessage → 窗缓冲 → RandomAccessFile），
+ * 不过 JS 桥 —— 根治 uni.connectSocket 二进制消费卡顿（2026-11-24 实测链路：
+ * 170s 会话单次消费卡顿 1.24s、417s 2.54s，随 JS 攒的数据量增长 = GC 签名）。
+ *
+ * 帧判别无需嗅探：OkHttp 把 WS 文本帧和二进制帧分发到不同回调（onMessage(String)
+ * / onMessage(ByteString)），固件的 done/error 走文本帧、音频走二进制帧，天然无歧义
+ * （JS 页面里按首字节 0x7b 嗅探曾以 1/256 概率误吃 PCM 块，见 collect 页 11-24 注释）。
+ *
+ * 写盘：RandomAccessFile('rwd') 占位 44B 头 → 逐 1s 窗（16000 样本，与固件推理
+ * 同粒度）AGC 归一化后顺序追加 → done 到达后 seek(0) 回补头 + 文件大小校验。
+ * AGC 与固件 config.h / 前端 audioData.ts 同参：目标 RMS 2500，增益限幅 0.25~64。
+ *
+ * API 全轮询、零回调参数（云端编译实证顶层导出带 lambda 参数会崩 overload
+ * 变换器）。线程模型：OkHttp 回调在派发线程（同一连接顺序执行），录制状态机
+ * 只在回调线程变更文件与窗缓冲；JS 侧经原子量与 ws.send（OkHttp 内部排队）
+ * 交互。8s 兜底超时/断连也会生成 result。
+ *
+ * UTS↔Kotlin 边界备忘（2026-11-24 云端编译三轮实证）：
+ * - UTS number 编译为 kotlin Number：调强类型 API 须显式 .toInt()/.toLong()
+ * - 数字字面量后禁止直接跟方法（0.toLong() 触发扫描器错误「Identifier cannot
+ *   follow number」且生成破损 Kotlin）—— 一律先存 let 变量再调方法
+ * - 全局可空变量跨线程不可智能转换，须捕获局部 val 再调用
+ * - okhttp3 依赖在 config.json dependencies 声明；ByteString 属于 okio 包
+ *   （okhttp3.ByteString 不存在，别再踩）
+ * - 继承 Java 类须写显式 constructor + super()
+ * - interface.uts 只放文档零代码（函数声明会被当重载声明炸掉 overload 解析）
+ */
+
+import Context from 'android.content.Context';
+import File from 'java.io.File';
+import RandomAccessFile from 'java.io.RandomAccessFile';
+import AtomicBoolean from 'java.util.concurrent.atomic.AtomicBoolean';
+import AtomicLong from 'java.util.concurrent.atomic.AtomicLong';
+import Thread from 'java.lang.Thread';
+import JSONObject from 'org.json.JSONObject';
+// okhttp 必须用 DCloud 重打包的 dc.squareup.* 命名空间（2026-11-24 云端 5 连败根因）：
+// 基座运行库与编译期可达的 jar 都只有 dc.squareup.okhttp3 / dc.squareup.okio，
+// 原生 okhttp3.* 在编译期 Unresolved reference（应用 APK 里虽有第三方带入的 okhttp3，
+// 但不在 UTS 模块的编译 classpath 内）。config.json 的 dependencies 也不要再声明
+// okhttp——那会额外引入一份原生包，与基座内的 dc 版重复。
+import OkHttpClient from 'dc.squareup.okhttp3.OkHttpClient';
+import Request from 'dc.squareup.okhttp3.Request';
+import Response from 'dc.squareup.okhttp3.Response';
+import WebSocket from 'dc.squareup.okhttp3.WebSocket';
+import WebSocketListener from 'dc.squareup.okhttp3.WebSocketListener';
+import ByteString from 'dc.squareup.okio.ByteString';
+
+/* ---------- 类型与常量（interface.uts 只放文档, 见其头注） ---------- */
+
+/** 连接状态（getState 返回值）。用 let 不用 const: 编译器会内联 const 数字,
+ * 导致后续 .toLong() 变成字面量调方法而炸扫描器 */
+export let WAVREC_STATE_DISCONNECTED = 0
+export let WAVREC_STATE_CONNECTING = 1
+export let WAVREC_STATE_CONNECTED = 2
+
+/** 单轮录制结果（getResult 返回；null = 本轮尚未收尾）。
+ * 必须用 type 而非 interface：UTS 对象字面量只接受 construction type
+ * （UTS110111163，2026-11-24 云端编译实证） */
+export type WavRecResult = {
+  /** true = 文件完整落盘并校验；false = 会话异常（文件可能不完整） */
+  ok: boolean,
+  /**
+   * ok=true 时为收尾原因：'done'（板端正常回执）| 'timeout'（8s 无回执，
+   * 按已落盘数据收尾）| 'disconnected'（连接中断）。ok=false 时为错误说明。
+   */
+  reason: string,
+  /** 实际落盘样本数 */
+  samples: number,
+  /** 板端 done JSON 的 lost 标志（板侧环形缓冲曾溢出） */
+  lost: boolean,
+  /** 整条录音的原始 RMS（AGC 前，与页面旧口径一致） */
+  rms: number,
+  /** 落盘绝对路径；失败为空串 */
+  path: string,
+  /** 文件字节数；失败为 0 */
+  bytes: number,
+}
+
+let WINDOW_SAMPLES = 16000; // 1s @16kHz，与固件推理窗一致
+let WINDOW_BYTES = WINDOW_SAMPLES * 2;
+/** 音频二进制帧长下限（实际恒 2048B）；小于此长度的二进制帧按文本命令解析 */
+let AUDIO_FRAME_MIN_BYTES = 1024;
+let AGC_TARGET = 2500.0;
+let AGC_MIN = 0.25;
+let AGC_MAX = 64.0;
+let DONE_GUARD_MS = 8000;
+
+/* ---------- 连接状态 ---------- */
+let client: OkHttpClient | null = null;
+let ws: WebSocket | null = null;
+let initState = WAVREC_STATE_DISCONNECTED;
+let state = new AtomicLong(initState.toLong());
+
+/* ---------- 录制状态（WS 回调线程独占访问；JS 只经原子量交互） ---------- */
+let recording = new AtomicBoolean(false);
+let finalized = new AtomicBoolean(true);
+let failed = new AtomicBoolean(false);
+let totalSamples = new AtomicLong(0);
+let totalSumSq = new AtomicLong(0);
+let raf: RandomAccessFile | null = null;
+let filePath = '';
+let winBytes = WINDOW_BYTES;
+let winRaw = new ByteArray(winBytes.toInt()); // 原始窗字节缓冲（复用）
+let winNorm = new ByteArray(winBytes.toInt()); // 归一化输出（复用）
+let winFillBytes = 0;
+let lastResult: WavRecResult | null = null;
+
+/* ---------- LE 编解码小工具（number→Int 边界显式转换） ---------- */
+function decodeShort(buf: ByteArray, pos: number): number {
+  const lo = buf[pos.toInt()].toInt() & 0xFF;
+  const hi = buf[(pos.toInt() + 1)].toInt() & 0xFF;
+  let s = lo | (hi << 8);
+  if (s >= 32768) {
+    s -= 65536;
+  }
+  return s;
+}
+
+function encodeShort(buf: ByteArray, pos: number, v: number) {
+  const vi = v.toInt();
+  buf[pos.toInt()] = (vi & 0xFF).toByte();
+  buf[pos.toInt() + 1] = ((vi >> 8) & 0xFF).toByte();
+}
+
+function putU32(buf: ByteArray, pos: number, v: number) {
+  const vi = v.toInt();
+  buf[pos.toInt()] = (vi & 0xFF).toByte();
+  buf[pos.toInt() + 1] = ((vi >> 8) & 0xFF).toByte();
+  buf[pos.toInt() + 2] = ((vi >> 16) & 0xFF).toByte();
+  buf[pos.toInt() + 3] = ((vi >> 24) & 0xFF).toByte();
+}
+
+function putU16(buf: ByteArray, pos: number, v: number) {
+  const vi = v.toInt();
+  buf[pos.toInt()] = (vi & 0xFF).toByte();
+  buf[pos.toInt() + 1] = ((vi >> 8) & 0xFF).toByte();
+}
+
+function wavHeaderBytes(dataLen: number): ByteArray {
+  let hdrSize = 44;
+  const buf = new ByteArray(hdrSize.toInt());
+  // "RIFF"
+  buf[0] = 0x52.toByte(); buf[1] = 0x49.toByte(); buf[2] = 0x46.toByte(); buf[3] = 0x46.toByte();
+  putU32(buf, 4, 36 + dataLen);
+  // "WAVE"
+  buf[8] = 0x57.toByte(); buf[9] = 0x41.toByte(); buf[10] = 0x56.toByte(); buf[11] = 0x45.toByte();
+  // "fmt "
+  buf[12] = 0x66.toByte(); buf[13] = 0x6D.toByte(); buf[14] = 0x6C.toByte(); buf[15] = 0x20.toByte();
+  putU32(buf, 16, 16);
+  putU16(buf, 20, 1); // PCM
+  putU16(buf, 22, 1); // mono
+  putU32(buf, 24, 16000);
+  putU32(buf, 28, 32000);
+  putU16(buf, 32, 2);
+  putU16(buf, 34, 16);
+  // "data"
+  buf[36] = 0x64.toByte(); buf[37] = 0x61.toByte(); buf[38] = 0x74.toByte(); buf[39] = 0x61.toByte();
+  putU32(buf, 40, dataLen);
+  return buf;
+}
+
+/** 文本命令帧 → UTS string（命令为纯 ASCII JSON, 逐字节映射足够；
+ * Kotlin String(ByteArray, Charset) 需要 Charset 类型, UTS 侧不易构造） */
+function bytesToAscii(bytes: ByteArray): string {
+  let s = '';
+  for (let i = 0; i < bytes.size; i++) {
+    // 下标必须显式 .toInt()：UTS 的 let i 编译成 kotlin Number，
+    // 直接 bytes[i] 生成 bytes[i].toInt()，对 ByteArray 取下标会报
+    // 「actual type is 'Number', but 'Int' was expected」（2026-11-24 实证）
+    s += String.fromCharCode(bytes[i.toInt()].toInt() & 0xFF);
+  }
+  return s;
+}
+
+/* ---------- 录制会话 ---------- */
+
+function openRecording(ctx: Context, name: string): boolean {
+  const root = ctx.getExternalFilesDir(null);
+  if (root == null) {
+    return false;
+  }
+  const dir = new File(root.getAbsolutePath() + '/BabyCry');
+  dir.mkdirs();
+  filePath = dir.getAbsolutePath() + '/' + name;
+  try {
+    // 捕获局部 val: 全局可空 raf 跨线程不可智能转换 (Kotlin 空安全)
+    const f = new RandomAccessFile(filePath, 'rwd');
+    let zero = 0;
+    f.seek(zero.toLong());
+    f.write(wavHeaderBytes(0)); // 占位头, done 后回补真实长度
+    raf = f;
+  }
+  catch (e) {
+    console.log('[wavrec] 建文件失败:', e);
+    raf = null;
+    return false;
+  }
+  winFillBytes = 0;
+  failed.set(false);
+  totalSamples.set(0);
+  totalSumSq.set(0);
+  return true;
+}
+
+/** 喂一个 2048B 音频帧（WS 回调线程） */
+function feedAudio(bytes: ByteArray) {
+  if (!recording.get() || failed.get()) {
+    return;
+  }
+  const r = raf;
+  if (r == null) {
+    return;
+  }
+  let src = 0;
+  const total = bytes.size;
+  try {
+    while (src < total) {
+      const remain = WINDOW_BYTES - winFillBytes;
+      const n = total - src < remain ? total - src : remain;
+      for (let i = 0; i < n; i++) {
+        winRaw[(winFillBytes + i).toInt()] = bytes[(src + i).toInt()];
+      }
+      winFillBytes += n;
+      src += n;
+      if (winFillBytes == WINDOW_BYTES && !flushWindow(r)) {
+        return;
+      }
+    }
+  }
+  catch (e) {
+    console.log('[wavrec] 写盘异常, 本段后续丢弃:', e);
+    failed.set(true);
+  }
+}
+
+/** 冲刷一个窗: AGC 归一化 → 追加写盘。返回 false = 写盘失败 */
+function flushWindow(r: RandomAccessFile): boolean {
+  const samples = winFillBytes / 2;
+  let sumSq = 0;
+  for (let i = 0; i < samples; i++) {
+    const s = decodeShort(winRaw, i * 2);
+    sumSq += s * s;
+  }
+  const rms = samples > 0 ? Math.sqrt(sumSq / samples) : 0;
+  let g = rms > 1 ? AGC_TARGET / rms : AGC_MAX;
+  if (g < AGC_MIN) {
+    g = AGC_MIN;
+  }
+  if (g > AGC_MAX) {
+    g = AGC_MAX;
+  }
+  for (let i = 0; i < samples; i++) {
+    let v = decodeShort(winRaw, i * 2) * g;
+    if (v > 32767) {
+      v = 32767;
+    }
+    else if (v < -32768) {
+      v = -32768;
+    }
+    encodeShort(winNorm, i * 2, Math.floor(v));
+  }
+  try {
+    let off = 0;
+    r.write(winNorm, off.toInt(), winFillBytes.toInt());
+    totalSumSq.addAndGet(sumSq.toLong());
+    totalSamples.addAndGet(samples.toLong());
+    winFillBytes = 0;
+    return true;
+  }
+  catch (e) {
+    console.log('[wavrec] 窗写盘失败, 本段后续丢弃:', e);
+    failed.set(true);
+    return false;
+  }
+}
+
+/** 收尾（幂等，finalized CAS 去重）: 冲尾窗 → 回补头 → 校验 → 生成 result */
+function finishWith(okArg: boolean, reasonArg: string, lost: boolean) {
+  if (!finalized.compareAndSet(false, true)) {
+    return;
+  }
+  recording.set(false);
+  let ok = okArg;
+  let reason = reasonArg;
+  try {
+    const r = raf;
+    if (r != null && winFillBytes > 0 && !failed.get()) {
+      flushWindow(r); // 尾窗 (不足 1s 按实际长度 AGC)
+    }
+  }
+  catch (e) {
+    console.log('[wavrec] 尾窗冲刷异常:', e);
+    failed.set(true);
+  }
+  try {
+    raf?.close();
+  }
+  catch (e) {
+    console.log('[wavrec] 关闭文件异常:', e);
+  }
+  raf = null;
+
+  const samples = totalSamples.get().toInt();
+  let bytes = 0;
+  if (!failed.get()) {
+    try {
+      const jf = new File(filePath);
+      bytes = jf.length().toInt();
+    }
+    catch (e) {
+      console.log('[wavrec] 读文件大小失败:', e);
+    }
+    if (bytes != 44 + samples * 2) {
+      console.log('[wavrec] 落盘大小不符:', bytes, '期望', 44 + samples * 2);
+      ok = false;
+      reason = 'size-mismatch';
+    }
+  }
+  else {
+    ok = false;
+    reason = 'write-failed';
+  }
+  const rms = totalSamples.get() > 0
+    ? Math.sqrt(totalSumSq.get().toDouble() / totalSamples.get().toDouble())
+    : 0;
+  lastResult = {
+    ok: ok,
+    reason: reason,
+    samples: samples,
+    lost: lost,
+    rms: rms,
+    path: ok ? filePath : '',
+    bytes: bytes,
+  } as WavRecResult;
+}
+
+/** 文本帧: done / error 回执 */
+function handleText(text: string) {
+  let cmd = '';
+  try {
+    const j = new JSONObject(text);
+    cmd = j.optString('cmd');
+  }
+  catch (e) {
+    return;
+  }
+  if (cmd == 'done') {
+    const lost = new JSONObject(text).optBoolean('lost', false);
+    finishWith(true, 'done', lost);
+  }
+  else if (cmd == 'error') {
+    finishWith(false, 'rejected', false);
+  }
+}
+
+/* ---------- WS 监听 ---------- */
+
+class RecListener extends WebSocketListener {
+	constructor() {
+		super();
+	}
+
+  override onOpen(webSocket: WebSocket, response: Response) {
+    let st = WAVREC_STATE_CONNECTED;
+    state.set(st.toLong());
+  }
+
+  override onMessage(webSocket: WebSocket, text: String) {
+    handleText(text.toString());
+  }
+
+  override onMessage(webSocket: WebSocket, bytes: ByteString) {
+    const arr = bytes.toByteArray();
+    // 帧长判别: 音频恒 2048B 整块; 短二进制帧是平台语义下的文本命令
+    if (arr.size >= AUDIO_FRAME_MIN_BYTES) {
+      feedAudio(arr);
+    }
+    else {
+      handleText(bytesToAscii(arr));
+    }
+  }
+
+  override onClosed(webSocket: WebSocket, code: Int, reason: String) {
+    let st = WAVREC_STATE_DISCONNECTED;
+    state.set(st.toLong());
+    if (recording.get()) {
+      finishWith(true, 'disconnected', false);
+    }
+  }
+
+  override onFailure(webSocket: WebSocket, t: Throwable, response: Response | null) {
+    let st = WAVREC_STATE_DISCONNECTED;
+    state.set(st.toLong());
+    if (recording.get()) {
+      finishWith(true, 'disconnected', false);
+    }
+  }
+}
+
+/* ---------- 导出 API（全轮询、零回调参数） ---------- */
+
+export function connectWS(url: string): void {
+  closeWs();
+  const ctx = UTSAndroid.getAppContext();
+  if (ctx == null) {
+    console.log('[wavrec] AppContext 不可用');
+    return;
+  }
+  let st = WAVREC_STATE_CONNECTING;
+  state.set(st.toLong());
+  if (client == null) {
+    client = new OkHttpClient();
+  }
+  const request = new Request.Builder().url(url).build();
+  const c = client!;
+  ws = c.newWebSocket(request, new RecListener());
+}
+
+export function getState(): number {
+  return state.get().toInt();
+}
+
+export function start(name: string): boolean {
+  const socket = ws;
+  if (socket == null || !connectedNow()) {
+    return false;
+  }
+  if (!recording.compareAndSet(false, true)) {
+    return false;
+  }
+  const ctx = UTSAndroid.getAppContext();
+  if (ctx == null || !openRecording(ctx, name)) {
+    recording.set(false);
+    return false;
+  }
+  finalized.set(false);
+  lastResult = null;
+  socket.send('{"cmd":"start"}');
+  // ❗这里禁止再起任何定时收尾线程。2026-11-24 实测事故：兜底计时器原本放在
+  // start() 里，等价于「录音最长 8 秒」——录 10 秒的文件被静默截断成 7.94 秒
+  // （8.000s 减首帧流延迟 0.064s），且 finishWith 传 ok=true + reason='timeout'，
+  // 页面显示"保存成功"，用户完全看不出丢了数据。
+  // 正确语义：DONE_GUARD_MS = 「等 done 回执」的超时，只在 stop() 发出后才开始计时。
+  return true;
+}
+
+function connectedNow(): boolean {
+  let want = WAVREC_STATE_CONNECTED;
+  return state.get().toInt() == want.toInt();
+}
+
+export function stop(): boolean {
+  const socket = ws;
+  if (socket == null) {
+    return false;
+  }
+  // 已收尾（done 已到 / 兜底已触发 / 断连）：stop 是幂等的，返回 true 而不是 false。
+  // 旧实现返回 false 会让页面记一条「发送 stop 失败」，但那句话的真实含义是
+  // "会话已结束"，不是"命令没发出去"——措辞与语义都误导（2026-11-24 实测）。
+  if (!recording.get()) {
+    return true;
+  }
+  socket.send('{"cmd":"stop"}');
+  // 兜底计时器的**正确位置**：只在发出 stop 之后才开始等 done。
+  // 放这里而非 start()，录音长度才不再受 8 秒限制。
+  new Thread(() => {
+    try {
+      let ms = DONE_GUARD_MS;
+      Thread.sleep(ms.toLong());
+    }
+    catch (e) {
+      return;
+    }
+    // 仍在录制且未收尾 = 板子没回 done，按已落盘数据收尾，保证 getResult 有值
+    if (recording.get() && !finalized.get()) {
+      finishWith(true, 'timeout', false);
+    }
+  }).start();
+  return true;
+}
+
+export function getResult(): WavRecResult | null {
+  return lastResult;
+}
+
+export function getProgress(): number {
+  return totalSamples.get().toInt();
+}
+
+export function closeWs(): void {
+  if (recording.get()) {
+    finishWith(true, 'closed', false);
+  }
+  let dis = WAVREC_STATE_DISCONNECTED;
+  state.set(dis.toLong());
+  const socket = ws;
+  if (socket != null) {
+    try {
+      let code = 1000;
+      socket.close(code.toInt(), null);
+    }
+    catch (e) {
+      console.log('[wavrec] close ws 异常:', e);
+    }
+  }
+  ws = null;
+}
