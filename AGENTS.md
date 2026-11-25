@@ -274,6 +274,18 @@ pio device monitor           # 串口监视器（115200）
 - **包管理器统一用 pnpm**（两台开发机都是）：锁文件只有 `pnpm-lock.yaml`（package-lock.json 已删除），两个子项目的 `preinstall` 有 `only-allow pnpm` 守卫，误用 `npm install` 会直接报错；Windows 开发机装 pnpm：`npm install -g pnpm`（或 `iwr https://get.pnpm.io/install.ps1 -useb | iex`）。uniapp 的 pnpm 配置在 `pnpm-workspace.yaml`（allowBuilds 放行 esbuild/ttf2woff2/vue-demi 的安装脚本，trustPolicy 误报豁免见文件内注释）
 - 提交前跑 `pnpm run lint` 和 `pnpm run type-check`
 - 蓝牙相关常量在 `src/constants/ble.ts`，BLE 逻辑集中在 `src/hooks/useBLE.ts`
+- **UTS 插件开发避坑（2026-11-24～25 云端构建 6 连败实证，第 7 次成功；详见 交接-2026-11-25-uts编译破局与原生直录.md）**：
+  - 先分清插件来源：`bin-bluetooth` 是**插件市场免费插件**（作者 binbinbox，v1.5.0，有 GitHub 仓库），只有 `uts-keepalive` / `uts-wavrec` 是本项目自研。**市场插件出问题先看上游 readme/changelog、找作者，别自己改源码**（改了下次升级就冲突）
+  - `utssdk/interface.uts` **只放文档注释零代码**——无实现的函数声明会被当重载声明解析，相邻不同名直接 panic（overload.rs "overload error X != Y"）；顶层导出函数**不能带 lambda 参数**（同样崩），回调一律改轮询（getState/getResult 模式）
+  - 对象字面量的类型用 `type X = {...}` 不用 `interface`（UTS110111163）
+  - UTS number = kotlin.Number：调强类型 API（seek/set/sleep/write/位运算/数组索引）显式 `.toInt()/.toLong()`；**数字 const 会被编译期内联成字面量，字面量上的 .toInt()/.toLong() 被静默剥掉**——数字常量一律 `let`，转换一律经 let 变量（`0.toLong()` 这种字面量直接调方法还会炸扫描器）
+  - Maven 三方库须在 `utssdk/app-android/config.json` 的 `dependencies` 声明（编译期不可见基座自带的类）；但基座内置的 `dc.*` 重打包库**直接 import、不声明**（见下条 okhttp 例外）——两类库判断依据见 [HBuilderX 内置依赖清单](https://uniapp.dcloud.net.cn/plugin/androidInnerLib.html)
+  - **okhttp 例外：基座里的是 DCloud 重打包的 `dc.squareup.okhttp3` / `dc.squareup.okio` 命名空间，`import ... from 'okhttp3.OkHttpClient'` 云端必 `Unresolved reference`**（6 连败根因）。用 `dc.squareup.*` 且**不要**在 config.json 再声明 okhttp（会重复引入原生包）；ByteString 在 `dc.squareup.okio` 包不在 okhttp3
+  - 继承 Java 类写显式 `constructor + super()`；`interface.uts` 里的类型在平台实现里经 `import {...} from '../interface.uts'` 引用
+  - **新增/修改 UTS 插件必须重打自定义基座**（`cli pack --iscustom true`，云端排队 ~20 分钟），JS 热推对原生代码无效；插件 TS 类型壳放 `src/types/`（注意：该 .d.ts 顶层不能有 export，否则 declare module 退化成模块增强报 Cannot find module）
+  - 大数据量（音频/文件流）**不要过 JS 桥**：uni.connectSocket 二进制消息过 Java→JNI→JS 三重边界，消费 32KB/s 即丢帧——用 UTS 原生收流写盘、JS 只轮询进度（uts-wavrec 模式）
+  - **改完 UTS 插件先跑本地自查，别直接提交云端**：`cd uniapp && node scripts/check-uts.mjs [插件id]`（不传 id 则检查全部）。云端排队 ~20 分钟且只回 Kotlin 报错、**看不到编译 classpath**，本地这套用 HBuilderX 自带 `compile()` + 自带 `kotlinc` + 云端等价 classpath，秒级复现同样的错误。脚本已内置 ExtAPI 假阳性过滤（bin-bluetooth 这类引用 `UniError`/`Resolver` 的插件会误报，脚本自动忽略并提示"需云端最终确认"），真实错误（okhttp 未解析 / Number-Int 不符 / catch 语法错）一条都不会漏。
+  - **无变量 `catch {}` 在 UTS 里过不了 Kotlin 编译**：会原样转译成 `catch  {}`，kotlinc 报 `Expecting exception variable declaration`。一律写 `catch (e) { ... }`（2026-11-24 在 uts-keepalive 里抓到，该处此前**从未真正编译过**——`dist/cache` 里的 jar 是更早代码的陈旧缓存，md5 对得上但产物不含新符号，别信缓存）
 
 ### arduino
 

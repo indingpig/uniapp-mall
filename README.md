@@ -149,7 +149,7 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 | **TypeScript** | 类型安全（vue-tsc 已清零历史错误） |
 | **SCSS** | 主题 token + Tailwind 风格原子类（`styles/utilities.scss`） |
 | **Vite 5** | 构建工具（@uni-helper/unh 工具链） |
-| **UTS 插件** | `bin-bluetooth` 跨平台 BLE（App/小程序/H5-mock 三端）；`uts-keepalive` Android 前台服务保活（App 端） |
+| **UTS 插件** | `bin-bluetooth` 跨平台 BLE（**插件市场免费版**，Android/iOS/鸿蒙/微信/支付宝）；`uts-keepalive` Android 前台服务保活 + `uts-wavrec` 原生 WS 收流写 WAV（**两者自研**，位于 `uniapp/src/uni_modules/`） |
 
 ### 后端
 
