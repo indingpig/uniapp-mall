@@ -82,13 +82,13 @@
 // BLE+全常驻缓冲的预算让路 (2026-11-20 内存重整, 见 WS_RING_SECONDS 注释)
 #define RMS_RING_SAMPLES          (AUDIO_SAMPLE_RATE / 16)
 
-// 采集推流环形缓冲: 0.25s (8KB), 开机常驻预分配 (audio_pipeline.cpp)。原 2s
-// (64KB) 运行期分配在已配网+连服态必失败 (暂停推理后 free≈64.0K 与需求只差
-// 76B, 碎片下最大连续块仅 13K, 2026-11-20 真机采集被拒); 常驻 48K/32K/16K 又
-// 逐步与 Bluedroid (~82K) 挤爆 288K 预算 —— 竞技场 (~28K, 按秒重分配) 需要
-// ramp 后最大连续块 ≥30K, 16K 常驻版差 ~10K。局域网 WS 消费 loop 以 64ms
-// 粒度排水, 0.25s (4 个 chunk) 吸收仍可用
-#define WS_RING_SECONDS           0.25f
+// 采集推流环形缓冲: 4s (128KB), 开机常驻预分配 (audio_pipeline.cpp)。
+// 历史: 原 2s 运行期分配在 2.0.x 已配网+连服态必碎片化失败 (2026-11-20 真
+// 机采集被拒), 一路砍到 0.25s/8KB 常驻保竞技场连续块 —— 那是内部堆饥荒的
+// 约束。3.x+PSRAM 后缓冲落 PSRAM (开机日志 @ PSRAM), 深缓冲零内部堆代价。
+// 2026-11-24 诊断版实测: App 消费最大单次卡顿 1.24s (TCP 背压), 0.25s 环
+// 被打穿 (35936 丢样/170s); 4s = 观测尖峰 ×3 余量
+#define WS_RING_SECONDS           4.0f
 #define WS_RING_SAMPLES           (int)(AUDIO_SAMPLE_RATE * WS_RING_SECONDS)
 
 /* AGC (与 esp32_microphone.ino 的 apply_agc / audio_app_uni 的 audio.js 一致):

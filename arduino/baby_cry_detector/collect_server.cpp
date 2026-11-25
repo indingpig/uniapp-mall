@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "audio_pipeline.h"
+#include "collect_page_html.h"
 #include "config.h"
 #include "server_url.h"
 #include "ble_provision.h"
@@ -25,6 +26,16 @@ static WiFiClient s_wsClient;
 // 全局缓冲: 避免在 loopTask 栈上分配大数组导致栈溢出 (audio_app 的教训)
 static int16_t wsChunk[AUDIO_CHUNK_SAMPLES];   // WS 推流临时块 (2KB)
 static uint8_t wsPayload[512];                 // WS 命令解析缓冲
+
+/* 推流诊断 (2026-11-24, lost=yes 定位):
+ *   s_maxWriteUs   单次 WS 二进制帧写耗时峰值 —— 偏大 = TCP 阻塞 (App 消费慢 / 射频迟滞)
+ *   s_writeOver25ms 写耗时 >25ms 的次数 (25ms = 2KB 在健康链路的量级)
+ *   s_maxIterUs    推流节拍间隔峰值 —— 偏大且写不阻塞 = 主循环被别的活饿死
+ * 判读: highWater 贴满 + write 阻塞大 → 下游慢; iter 大 + write 快 → loop 饿死 */
+static uint32_t s_maxWriteUs = 0;
+static uint32_t s_writeOver25ms = 0;
+static uint32_t s_maxIterUs = 0;
+static uint32_t s_lastStreamUs = 0;
 
 /* ================================================================== */
 /*  WebSocket (RFC 6455 最小实现, 服务端; 搬自 audio_app.ino)            */
@@ -99,6 +110,10 @@ static void startRecording() {
     wsSendText(s_wsClient, msg);
     return;
   }
+  s_maxWriteUs = 0;
+  s_writeOver25ms = 0;
+  s_maxIterUs = 0;
+  s_lastStreamUs = 0;
 }
 
 static void stopRecording() {
@@ -113,6 +128,11 @@ static void stopRecording() {
   wsSendText(s_wsClient, msg);
   Serial.printf("[REC] stop: %u samples, lost=%s\n",
                 audioPipelineCollectSamples(), audioPipelineCollectLost() ? "yes" : "no");
+  Serial.printf("[REC] diag: highWater=%u/%u lostEvents=%u maxWrite=%luus writeOver25ms=%lu maxIter=%luus\n",
+                audioPipelineCollectHighWater(), (unsigned)WS_RING_SAMPLES,
+                audioPipelineCollectLostEvents(),
+                (unsigned long)s_maxWriteUs, (unsigned long)s_writeOver25ms,
+                (unsigned long)s_maxIterUs);
   audioPipelineCollectFree();   // 64KB 还给推理 (监护模式是常态)
 }
 
@@ -263,8 +283,19 @@ static void handleSetServer(WiFiClient& c, const String& query) {
   ESP.restart();
 }
 
+/* 板载采集页 (2026-11-24 移植自 audio_app/index.html): PC 浏览器直录,
+ * WAV 直接落电脑, 免手机搬运。控制走 WS 文本命令 (与 App 同协议), 见页面 JS */
+static void sendHtml(WiFiClient& c) {
+  c.print("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-cache\r\nContent-Length: ");
+  c.print(COLLECT_PAGE_HTML_LEN);
+  c.print("\r\nConnection: close\r\n\r\n");
+  c.write((const uint8_t*)COLLECT_PAGE_HTML, COLLECT_PAGE_HTML_LEN);
+}
+
 static void route(WiFiClient& c, const String& path, const String& query) {
-  if (path == "/rms") {
+  if (path == "/" || path == "/index.html") {
+    sendHtml(c);
+  } else if (path == "/rms") {
     handleRms(c);
   } else if (path == "/setserver") {
     handleSetServer(c, query);
@@ -389,7 +420,16 @@ void collectServerLoop() {
     if (s_wsClient && s_wsClient.connected() && collectServerIsRecording()) {
       // 每次循环最多推一个块 (2KB 有界写, 块间回到 available() 不会被饿死)
       if (audioPipelinePopChunk(wsChunk) == AUDIO_CHUNK_SAMPLES) {
+        uint32_t t0 = micros();
         wsSendBinary(s_wsClient, (const uint8_t*)wsChunk, sizeof(wsChunk));
+        uint32_t wus = micros() - t0;
+        if (wus > s_maxWriteUs) s_maxWriteUs = wus;
+        if (wus > 25000) s_writeOver25ms++;
+        uint32_t nowUs = micros();
+        if (s_lastStreamUs != 0 && nowUs - s_lastStreamUs > s_maxIterUs) {
+          s_maxIterUs = nowUs - s_lastStreamUs;
+        }
+        s_lastStreamUs = nowUs;
       }
     }
   }

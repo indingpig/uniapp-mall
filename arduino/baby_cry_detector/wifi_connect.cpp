@@ -44,6 +44,10 @@ static void reportStatus(const char* status) {
 static void startAttempt(uint32_t now) {
   WiFi.disconnect();
   WiFi.begin(s_currentSSID.c_str(), s_currentPass.c_str());
+  // 关 WiFi 省电: modem 在 beacon 间隔打盹会让 TCP ACK 迟滞 100-400ms,
+  // 超过 wsRing (250ms) 即采集推流丢样。audio_app README 早有同案
+  // (setSleep(false)+delay(1)), 主固件集成推流时未同步 (2026-11-24 lost=yes 定位)
+  WiFi.setSleep(false);
   s_attempting = true;
   s_attemptStart = now;
   s_lastCheck = 0;

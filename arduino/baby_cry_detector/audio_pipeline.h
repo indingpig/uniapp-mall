@@ -77,3 +77,6 @@ size_t audioPipelinePopChunk(int16_t* out);
 /* 本次采集累计样本数 / 是否发生过环形缓冲覆盖丢帧 */
 uint32_t audioPipelineCollectSamples();
 bool audioPipelineCollectLost();
+/* 丢样诊断 (2026-11-24): 会话内最大积压 (样本) / 环满覆盖事件数 */
+uint32_t audioPipelineCollectHighWater();
+uint32_t audioPipelineCollectLostEvents();

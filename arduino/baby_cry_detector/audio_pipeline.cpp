@@ -63,6 +63,11 @@ static volatile uint32_t wsRingTail = 0;           // 消费 (loop 推 WS)
 static volatile bool wsCollecting = false;
 static volatile uint32_t wsSamples = 0;
 static volatile bool wsLost = false;
+/* 丢样诊断仪表 (2026-11-24): 区分「平均排空不及」vs「瞬时阻塞尖峰」。
+ * wsRingHighWater = 会话内最大积压 (贴满 4000 = 排空长期跟不上);
+ * wsLostEvents = 环满覆盖事件数 (=丢样数, 每事件丢最旧 1 样本) */
+static volatile uint32_t wsRingHighWater = 0;
+static volatile uint32_t wsLostEvents = 0;
 
 /* 环形缓冲分配: PSRAM 优先, 失败回落内部堆 (行为兜底, 与 windowRaw 同策略) */
 static int16_t* allocRingBuffer(size_t samples, const char* tag) {
@@ -142,10 +147,13 @@ static void audioPipeTask(void* param) {
       rmsHead++;
 
       if (wsCollecting && wsRing != nullptr) {
-        if (wsRingHead - wsRingTail >= WS_RING_SAMPLES) {
+        uint32_t depth = wsRingHead - wsRingTail;
+        if (depth >= WS_RING_SAMPLES) {
           wsLost = true;                 // 消费不及时, 覆盖最旧
+          wsLostEvents++;
           wsRingTail++;
         }
+        if (depth > wsRingHighWater) wsRingHighWater = depth;
         wsRing[wsRingHead % WS_RING_SAMPLES] = sf;
         wsRingHead++;
         wsSamples++;
@@ -292,6 +300,8 @@ bool audioPipelineCollectStart() {
   wsRingTail = 0;
   wsSamples = 0;
   wsLost = false;
+  wsRingHighWater = 0;
+  wsLostEvents = 0;
   wsCollecting = true;
   Serial.println("[REC] start (WS stream)");
   return true;
@@ -349,4 +359,12 @@ uint32_t audioPipelineCollectSamples() {
 
 bool audioPipelineCollectLost() {
   return wsLost;
+}
+
+uint32_t audioPipelineCollectHighWater() {
+  return wsRingHighWater;
+}
+
+uint32_t audioPipelineCollectLostEvents() {
+  return wsLostEvents;
 }
