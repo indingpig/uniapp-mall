@@ -14,6 +14,10 @@ import { createStatsRoutes } from './routes/stats.js';
 import { createFamilyRoutes } from './routes/family.js';
 
 const PORT = process.env.PORT || 8080;
+// 监听地址：默认 0.0.0.0 保持本机开发体验（手机真机调试要连局域网 IP）。
+// 生产环境（服务器 .env）必须设 HOST=127.0.0.1，让 Node 只绑回环，
+// 外部只能经 Caddy 反代进来 —— 即便安全组误开 3001，公网也物理不可达。
+const HOST = process.env.HOST || '0.0.0.0';
 
 const app = express();
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
@@ -48,9 +52,9 @@ if (useSimulator) {
 // ntfy 兜底推送配置状态（未启用时不打印）
 logNotifyConfig();
 
-server.listen(PORT, () => {
-  console.log(`[Server] Baby Cry Monitor API listening on http://localhost:${PORT}`);
-  console.log(`[Server] WebSocket: ws://localhost:${PORT}/ws`);
+server.listen(PORT, HOST, () => {
+  console.log(`[Server] Baby Cry Monitor API listening on http://${HOST}:${PORT}`);
+  console.log(`[Server] WebSocket: ws://${HOST}:${PORT}/ws`);
 });
 
 server.on('error', (err) => {
