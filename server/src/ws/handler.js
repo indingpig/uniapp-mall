@@ -1,6 +1,11 @@
 import { WebSocketServer } from 'ws';
 import { STATUS } from '../services/detector.js';
 import { deviceCameBack, deviceWentOffline, pushCry } from '../services/notify.js';
+import {
+  AUTH_MODE,
+  extractDeviceTokenFromRequest,
+  verifyDeviceToken,
+} from '../services/auth.js';
 
 const clients = new Set();
 let esp32Client = null;           // 设备连接 (单设备)
@@ -40,15 +45,41 @@ export function createWSServer(server, detector, dataStore, familyStore) {
 
   wss.on('connection', (ws, req) => {
     const clientType = req.url?.includes('esp32') ? 'esp32' : 'app';
-    // 家庭角色（?ftoken=，S-07）：member 拒绝设备指令；owner/未加入(无 token 的旧客户端)保持原行为
-    let familyRole = 'guest';
-    if (clientType === 'app') {
+
+    // ===== 鉴权（2026-11-26 上公网加固，S-07 强化）=====
+    // 旧实现：app 的 ftoken 无效时 catch 落成 'guest' 放行 —— 等于无 token 也能连，
+    // 任何人带 ?esp32 即可冒充设备上报假数据。现在改为握手期直接拒绝。
+    let familyRole = null;
+
+    if (AUTH_MODE === 'off') {
+      // 过渡模式：仅当显式配置 AUTH_MODE=off 时放行，用于固件未升级的空窗期
+      familyRole = clientType === 'esp32' ? 'device' : 'guest';
+      console.warn(`[WS] AUTH_MODE=off，放行 ${clientType} 连接（不安全，仅过渡用）`);
+    } else if (clientType === 'esp32') {
+      if (!verifyDeviceToken(extractDeviceTokenFromRequest(req))) {
+        console.warn(`[WS] 拒绝 esp32：设备令牌无效或缺失 (${rejectReason(req)})`);
+        ws.close(1008, 'invalid device token');
+        return;
+      }
+      familyRole = 'device';
+    } else {
+      // app：必须持有 familyStore 签发的有效 token
+      let token = null;
       try {
-        familyRole = familyStore.auth(new URL(req.url, 'http://localhost').searchParams.get('ftoken')).role;
+        token = new URL(req.url, 'http://localhost').searchParams.get('ftoken');
       } catch {
-        familyRole = 'guest';
+        token = null;
+      }
+      try {
+        familyRole = familyStore.auth(token).role;
+      } catch {
+        // 无 token / token 失效 → 拒绝。App 侧需引导用户先配对认领或扫码加入。
+        console.warn('[WS] 拒绝 app：缺少或无效的 ftoken');
+        ws.close(1008, 'unauthorized');
+        return;
       }
     }
+
     clients.add(ws);
     // 心跳存活标记：ws 库协议层自动回 pong（ESP32 固件 server_link.cpp 手写了
     // ping→pong 回执），清扫循环据此识别死连接
@@ -172,6 +203,15 @@ export function createWSServer(server, detector, dataStore, familyStore) {
   wss.on('close', () => clearInterval(heartbeatTimer));
 
   return wss;
+}
+
+/* 拒绝原因归类（只用于日志，不把令牌本体写进日志） */
+function rejectReason(req) {
+  const hasAuthz = typeof req.headers?.authorization === 'string';
+  const hasApiKey = typeof req.headers?.['x-api-key'] === 'string';
+  const hasQuery = typeof req.url === 'string' && req.url.includes('dtoken=');
+  if (!hasAuthz && !hasApiKey && !hasQuery) return '固件未携带任何令牌，需重新配网写入';
+  return '令牌与 server/.env 的 DEVICE_TOKEN 不一致';
 }
 
 function broadcast(data) {

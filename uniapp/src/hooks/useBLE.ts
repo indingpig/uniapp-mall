@@ -4,6 +4,7 @@ import type { Advertisement } from '@/uni_modules/bin-bluetooth';
 import { onBeforeUnmount, ref } from 'vue';
 import {
   BLE_CHAR_DEVICE_INFO_UUID,
+  BLE_CHAR_DEVICE_TOKEN_UUID,
   BLE_CHAR_SERVER_URL_UUID,
   BLE_CHAR_STATUS_UUID,
   BLE_CHAR_WIFI_LIST_UUID,
@@ -66,6 +67,7 @@ export function useBLE() {
     wifiSSID: '',
     wifiPass: '',
     serverUrl: '',
+    deviceToken: '',
     status: '',
     deviceInfo: '',
     wifiList: '',
@@ -239,6 +241,8 @@ export function useBLE() {
     platformCharUuids.wifiSSID = matchUUID(charUUIDs, BLE_CHAR_WIFI_SSID_UUID);
     platformCharUuids.wifiPass = matchUUID(charUUIDs, BLE_CHAR_WIFI_PASS_UUID);
     platformCharUuids.serverUrl = matchUUID(charUUIDs, BLE_CHAR_SERVER_URL_UUID);
+    // 设备令牌特征值: 旧固件没有, 缺失时跳过写入（server 未开鉴权时仍可用）
+    platformCharUuids.deviceToken = matchUUID(charUUIDs, BLE_CHAR_DEVICE_TOKEN_UUID);
     platformCharUuids.status = matchUUID(charUUIDs, BLE_CHAR_STATUS_UUID);
     platformCharUuids.deviceInfo = matchUUID(charUUIDs, BLE_CHAR_DEVICE_INFO_UUID);
     // WiFi 列表特征值: 旧固件可能没有, 缺失时配对页回退手输 SSID
@@ -422,7 +426,7 @@ export function useBLE() {
     await peripheral.write(ref, strToHex(value), 0); // 0 = withResponse
   }
 
-  async function pair(ssid: string, password: string, serverUrl: string): Promise<PairedResult> {
+  async function pair(ssid: string, password: string, serverUrl: string, deviceToken = ''): Promise<PairedResult> {
     if (!connectedDevice.value)
       return { success: false, message: '未连接设备' };
     provisionError.value = '';
@@ -434,6 +438,12 @@ export function useBLE() {
       await sleep(200);
       await writeChar('Password', platformCharUuids.wifiPass, password);
       await sleep(200);
+      // 设备令牌必须在 Server URL **之前**写：固件把「收到 Server URL」当作
+      // 凭据齐全的触发点，会立刻发起连接，令牌晚到这一轮就白连。
+      if (deviceToken && platformCharUuids.deviceToken) {
+        await writeChar('Device Token', platformCharUuids.deviceToken, deviceToken);
+        await sleep(200);
+      }
       await writeChar('Server URL', platformCharUuids.serverUrl, serverUrl);
       statusText.value = '固件已收到凭证, 等待联网...';
 

@@ -56,6 +56,9 @@ const showPassword = ref(false);
 const serverUrl = ref(
   uni.getStorageSync(CACHE_KEY.PAIRED_SERVER_URL) || import.meta.env.VITE_WS_URL || '',
 );
+// 设备令牌（2026-11-26 鉴权）：与家人 token 分开的**设备**凭证，配网时写入板子 NVS。
+// 存本机复用，避免每次配网都要重新贴；换令牌时改这里即可。
+const deviceToken = ref(uni.getStorageSync(CACHE_KEY.DEVICE_TOKEN) || '');
 const scanAttempted = ref(false);
 
 /* ---------- 规范 5.4：WiFi 配网页状态 ---------- */
@@ -322,7 +325,10 @@ async function onStartPair() {
   passwordError.value = false;
   modalDismissed.value = false;
   currentStep.value = 'pairing';
-  const result = await pair(wifiSSID.value, wifiPass.value, serverUrl.value);
+  // 令牌持久化到本机，下次配网免重填
+  if (deviceToken.value)
+    uni.setStorageSync(CACHE_KEY.DEVICE_TOKEN, deviceToken.value);
+  const result = await pair(wifiSSID.value, wifiPass.value, serverUrl.value, deviceToken.value);
   if (result.success) {
     const now = new Date();
     pairedAtText.value = `今天 ${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -722,6 +728,13 @@ onBeforeUnmount(() => {
                 v-model="serverUrl"
                 class="wifi-adv__input"
                 placeholder="ws://IP:3001/ws"
+                placeholder-class="input-placeholder"
+              >
+              <!-- 设备令牌：server 开启鉴权后板子必须携带，否则连不上 -->
+              <input
+                v-model="deviceToken"
+                class="wifi-adv__input"
+                placeholder="设备令牌（server 开启鉴权时必填）"
                 placeholder-class="input-placeholder"
               >
             </view>

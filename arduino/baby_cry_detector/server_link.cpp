@@ -21,6 +21,9 @@ static bool     s_connected = false;
 static bool     s_listening = false;
 static String   s_host;
 static uint16_t s_port = 80;
+// 设备令牌（2026-11-26 鉴权）：由 BLE 配网写入 NVS，握手时放 Authorization 头。
+// 不在固件里写死任何字面量 —— 公开仓库里等于公开密钥（AGENTS.md）。
+static String   s_deviceToken;
 
 static WiFiClient s_client;
 static uint32_t s_lastAttempt = 0;
@@ -236,7 +239,12 @@ static bool tryConnect() {
                "Upgrade: websocket\r\n" +
                "Connection: Upgrade\r\n" +
                "Sec-WebSocket-Key: " + key + "\r\n" +
-               "Sec-WebSocket-Version: 13\r\n\r\n";
+               "Sec-WebSocket-Version: 13\r\n";
+  // 鉴权头：未配令牌时不发（服务端会拒绝，日志会提示去配网写入）
+  if (s_deviceToken.length() > 0) {
+    req += "Authorization: Bearer " + s_deviceToken + "\r\n";
+  }
+  req += "\r\n";
   s_client.print(req);
 
   static char respBuf[1024];
@@ -335,7 +343,14 @@ void serverLinkStart(ServerCmdCallback cmdCb, ServerLinkStateCallback stateCb) {
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, true);
   String url = prefs.getString(NVS_KEY_SERVER_URL, "");
+  s_deviceToken = prefs.getString(NVS_KEY_DEVICE_TOKEN, "");
   prefs.end();
+
+  if (s_deviceToken.length() > 0) {
+    Serial.printf("[ServerLink] device token loaded (len=%u)\n", (unsigned)s_deviceToken.length());
+  } else {
+    Serial.println("[ServerLink] ⚠️ 未配置设备令牌，server 开启鉴权后将拒绝连接（需 BLE 配网写入）");
+  }
 
   if (url.length() == 0) {
     Serial.println("[ServerLink] 未配置服务器地址 (BLE 配网时写入, 或 /setserver?url=)");

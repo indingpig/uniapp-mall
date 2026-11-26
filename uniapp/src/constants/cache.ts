@@ -5,6 +5,11 @@ export const CACHE_KEY = {
   PAIRED_DEVICE: 'BABY_PAIRED_DEVICE',
   /** 上次配对成功的服务器地址（配对页「高级设置」预填，规范 5.4） */
   PAIRED_SERVER_URL: 'BABY_PAIRED_SERVER_URL',
+  /**
+   * 设备令牌（2026-11-26 鉴权）：配网时写入板子 NVS，板子连 server 时携带。
+   * 注意：这是**设备**凭证，与家人 token 分开，可单独轮换。
+   */
+  DEVICE_TOKEN: 'BABY_DEVICE_TOKEN',
   /** 设备重命名的本机昵称（设备详情页导航行「重命名」，规范 5.5；空=显示配对设备名） */
   DEVICE_NAME_OVERRIDE: 'BABY_DEVICE_NAME_OVERRIDE',
   /** 首页铃铛红点已读时刻（规范 S-06：今日最新事件时间戳 > 此值即点亮红点） */

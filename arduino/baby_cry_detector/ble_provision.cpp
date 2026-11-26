@@ -163,6 +163,47 @@ class ServerURLWriteCallback : public BLECharacteristicCallbacks {
   }
 };
 
+class DeviceTokenWriteCallback : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* c) override {
+    if (!writeAllowed("DeviceToken")) return;
+    String raw = c->getValue();
+    String token = String(raw.c_str());
+    token.trim();
+
+    // 空串 = 清除令牌 (退回未鉴权状态, 仅本机局域网调试用)
+    if (token.length() == 0) {
+      Preferences prefs;
+      prefs.begin(NVS_NAMESPACE, false);
+      prefs.remove(NVS_KEY_DEVICE_TOKEN);
+      prefs.end();
+      Serial.println("[BLE] Device token cleared");
+      return;
+    }
+
+    if (token.length() > DEVICE_TOKEN_MAX_LEN) {
+      Serial.printf("[BLE] Device token rejected (too long: %u)\n", (unsigned)token.length());
+      return;
+    }
+    // 只接受 URL/header 安全字符, 避免固件拼请求头时被注入 CRLF
+    for (size_t i = 0; i < token.length(); i++) {
+      char ch = token.charAt(i);
+      bool ok = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') ||
+                (ch >= 'A' && ch <= 'Z') || ch == '-' || ch == '_' || ch == '.';
+      if (!ok) {
+        Serial.printf("[BLE] Device token rejected (illegal char at %u)\n", (unsigned)i);
+        return;
+      }
+    }
+
+    Preferences prefs;
+    prefs.begin(NVS_NAMESPACE, false);
+    prefs.putString(NVS_KEY_DEVICE_TOKEN, token);
+    prefs.end();
+    // 不打印令牌本体, 只报长度
+    Serial.printf("[BLE] Device token stored (len=%u)\n", (unsigned)token.length());
+  }
+};
+
 class WifiListWriteCallback : public BLECharacteristicCallbacks {
   void onWrite(BLECharacteristic* c) override {
     if (!writeAllowed("WiFiList")) return;
@@ -461,6 +502,12 @@ void bleProvisionInit(const char* deviceName) {
     BLE_CHAR_SERVER_URL_UUID, BLECharacteristic::PROPERTY_WRITE);
   cURL->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
   cURL->setCallbacks(new ServerURLWriteCallback());
+
+  // Device Token (Write, 要求加密链路) —— 2026-11-26 鉴权：板子连 server 时携带
+  BLECharacteristic* cToken = service->createCharacteristic(
+    BLE_CHAR_DEVICE_TOKEN_UUID, BLECharacteristic::PROPERTY_WRITE);
+  cToken->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  cToken->setCallbacks(new DeviceTokenWriteCallback());
 
   // Status (Notify + Read)
   s_charStatus = service->createCharacteristic(

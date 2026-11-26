@@ -12,6 +12,7 @@ import { createBabyRoutes } from './routes/baby.js';
 import { createHistoryRoutes } from './routes/history.js';
 import { createStatsRoutes } from './routes/stats.js';
 import { createFamilyRoutes } from './routes/family.js';
+import { requireFamilyToken, logAuthConfig } from './services/auth.js';
 
 const PORT = process.env.PORT || 8080;
 // 监听地址：默认 0.0.0.0 保持本机开发体验（手机真机调试要连局域网 IP）。
@@ -29,13 +30,21 @@ detector.on('statusChange', ({ from, to }) => {
   console.log(`[Detector] ${from} → ${to}`);
 });
 
-app.use('/api/baby', createBabyRoutes(detector, dataStore));
-app.use('/api/history', createHistoryRoutes(dataStore));
-app.use('/api/stats', createStatsRoutes());
-app.use('/api/family', createFamilyRoutes(familyStore, notifyFamilyChanged));
+// ===== 鉴权分层（2026-11-26 上公网加固）=====
+// /api/health 刻意豁免：负载均衡/监控探活不该需要凭据，且它不暴露任何隐私数据。
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, onlineClients: getOnlineCount() });
 });
+
+// 业务端点一律要求有效家人 token（owner 或 member 均可读）；
+// 板子拉取配置类接口额外允许设备令牌通过。
+const familyGuard = requireFamilyToken(familyStore);
+
+app.use('/api/baby', familyGuard, createBabyRoutes(detector, dataStore));
+app.use('/api/history', familyGuard, createHistoryRoutes(dataStore));
+app.use('/api/stats', familyGuard, createStatsRoutes());
+// family 路由内部自带更细的角色校验（owner/member 分支），此处只挡匿名
+app.use('/api/family', createFamilyRoutes(familyStore, notifyFamilyChanged));
 
 const server = createServer(app);
 
@@ -51,6 +60,8 @@ if (useSimulator) {
 
 // ntfy 兜底推送配置状态（未启用时不打印）
 logNotifyConfig();
+// 鉴权配置状态（不打印密钥本体）
+logAuthConfig();
 
 server.listen(PORT, HOST, () => {
   console.log(`[Server] Baby Cry Monitor API listening on http://${HOST}:${PORT}`);

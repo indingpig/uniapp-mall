@@ -13,7 +13,9 @@
 #define NVS_KEY_WIFI_PASS      "wifi_pass"
 #define NVS_KEY_SERVER_URL     "server_url"
 #define NVS_KEY_INFER_ON       "infer_on"   // 监听偏好 (bool, 默认 true): App listen_on/off 持久化于此
+#define NVS_KEY_DEVICE_TOKEN   "dev_token"  // 设备令牌 (2026-11-26 鉴权): 配网时 App 经 BLE 写入
 #define SERVER_URL_MAX_LEN     96      // 服务器地址上限 (写入口校验, 见 server_url.h)
+#define DEVICE_TOKEN_MAX_LEN   80      // 设备令牌上限 (hex 64 字符留余量)
 // 已废弃: NVS_KEY_RST_SEQ / NVS_KEY_LAST_RST (RST 连击方案, 2026-11-08 移除;
 // 残留键值留在 NVS 里无害, 恢复出厂时会一并擦除)
 

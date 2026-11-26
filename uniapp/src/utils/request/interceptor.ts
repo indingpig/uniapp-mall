@@ -1,4 +1,5 @@
 import type { RequestInterceptor } from './type';
+import { familyTokenHeader } from '@/utils/family';
 import { resolveApiBaseUrl } from '@/utils/server';
 import { joinURL } from '../tools';
 
@@ -10,6 +11,14 @@ export const defaultInterceptor: RequestInterceptor = {
       const base = resolveApiBaseUrl();
       if (base)
         config.url = joinURL(base, config.url);
+    }
+    // 家人身份令牌统一注入（2026-11-26 上公网加固）：
+    // server 的业务端点全部要求有效 token，这里兜住所有 api/*，
+    // 避免每个调用点各写一遍 header 而漏配。
+    // 显式传入的同名 header 优先（family.ts 已自带，不会冲突）。
+    const tokenHeader = familyTokenHeader();
+    if (tokenHeader['X-Family-Token']) {
+      config.headers = { ...tokenHeader, ...(config.headers || {}) };
     }
     return config;
   },

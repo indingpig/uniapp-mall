@@ -27,6 +27,7 @@
 #define BLE_CHAR_WIFI_SSID_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define BLE_CHAR_WIFI_PASS_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26a9"
 #define BLE_CHAR_SERVER_URL_UUID    "beb5483e-36e1-4688-b7f5-ea07361b26ab"
+#define BLE_CHAR_DEVICE_TOKEN_UUID  "beb5483e-36e1-4688-b7f5-ea07361b26ae"  // 设备令牌 (2026-11-26 鉴权), 写
 #define BLE_CHAR_STATUS_UUID        "beb5483e-36e1-4688-b7f5-ea07361b26aa"
 #define BLE_CHAR_DEVICE_INFO_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26ac"
 #define BLE_CHAR_WIFI_LIST_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26ad"  // 写"1"触发扫描, notify 逐条回 AP 列表
