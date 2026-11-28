@@ -10,7 +10,14 @@ export type ApiErrorCode = 'BAD_REQUEST'
   | 'NOT_FOUND'
   | 'CONFLICT'
   | 'INTERNAL'
-  | 'DEVICE_OFFLINE';
+  | 'DEVICE_OFFLINE'
+  /**
+   * 预留（2026-11-28 登录/注册契约，规范 5.6）：手机号或密码不正确。刻意不走 401/UNAUTHORIZED——
+   * 全局 401 收敛会清家庭身份并 reLaunch 首页，登录表单需要的是字段级报错而非被踢回
+   */
+  | 'AUTH_FAILED'
+  /** 预留（同上）：手机号已注册（注册页字段级错误，建议 HTTP 409） */
+  | 'PHONE_REGISTERED';
 
 /** 通用业务响应结构。不变量：2xx 当且仅当 code === 0（请求层已强制） */
 export interface ApiResponse<T = unknown> {

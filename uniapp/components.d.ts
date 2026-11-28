@@ -8,8 +8,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppButton: typeof import('./src/components/AppButton.vue')['default']
+    AppField: typeof import('./src/components/AppField.vue')['default']
     AppSwitch: typeof import('./src/components/AppSwitch.vue')['default']
     CustomTabBar: typeof import('./src/components/CustomTabBar.vue')['default']
-    UniLoadMore: typeof import('@dcloudio/uni-ui/lib/uni-load-more/uni-load-more.vue')['default']
   }
 }

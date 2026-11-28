@@ -11,7 +11,9 @@ type _LocationUrl =
   "/pages/family-join-success/index" |
   "/pages/family-share/index" |
   "/pages/history/index" |
+  "/pages/login/index" |
   "/pages/pairing/index" |
+  "/pages/register/index" |
   "/pages/settings/index" |
   "/pages/stats/index";
 

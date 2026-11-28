@@ -14,6 +14,9 @@ const OPEN_API_PATTERNS = [
   /^\/api\/family\/claim$/,
   /^\/api\/family\/join$/,
   /^\/api\/family\/invites\/[^/]+\/accept$/,
+  // 账号体系（2026-11-28 登录/注册页，规范 5.6）：登录前无任何身份，天然开放
+  /^\/api\/auth\/login$/,
+  /^\/api\/auth\/register$/,
 ];
 
 /** 401 清身份去重窗口：轮询类调用（设置页 5s/首页兜底）失败时只收敛一次 */

@@ -30,4 +30,6 @@ export const CACHE_KEY = {
   FAMILY_MEMBER: 'BABY_FAMILY_MEMBER',
   /** 电池优化白名单是否已自动引导过（一次性，避免每次开 App 都弹系统授权） */
   BATTERY_PROMPT_DONE: 'BABY_BATTERY_PROMPT_DONE',
+  /** 账号登录凭证（2026-11-28 登录/注册页预留；账号体系接入流程前仅保存不参与鉴权） */
+  AUTH_TOKEN: 'BABY_AUTH_TOKEN',
 } as const;
