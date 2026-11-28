@@ -274,7 +274,7 @@ pio device monitor           # 串口监视器（115200）
 - **包管理器统一用 pnpm**（两台开发机都是）：锁文件只有 `pnpm-lock.yaml`（package-lock.json 已删除），两个子项目的 `preinstall` 有 `only-allow pnpm` 守卫，误用 `npm install` 会直接报错；Windows 开发机装 pnpm：`npm install -g pnpm`（或 `iwr https://get.pnpm.io/install.ps1 -useb | iex`）。uniapp 的 pnpm 配置在 `pnpm-workspace.yaml`（allowBuilds 放行 esbuild/ttf2woff2/vue-demi 的安装脚本，trustPolicy 误报豁免见文件内注释）
 - 提交前跑 `pnpm run lint` 和 `pnpm run type-check`
 - 蓝牙相关常量在 `src/constants/ble.ts`，BLE 逻辑集中在 `src/hooks/useBLE.ts`
-- **UTS 插件开发避坑（2026-11-24～25 云端构建 6 连败实证，第 7 次成功；详见 交接-2026-11-25-uts编译破局与原生直录.md）**：
+- **UTS 插件开发避坑（2026-11-24～25 云端构建 6 连败实证，第 7 次成功）**：
   - 先分清插件来源：`bin-bluetooth` 是**插件市场免费插件**（作者 binbinbox，v1.5.0，有 GitHub 仓库），只有 `uts-keepalive` / `uts-wavrec` 是本项目自研。**市场插件出问题先看上游 readme/changelog、找作者，别自己改源码**（改了下次升级就冲突）
   - `utssdk/interface.uts` **只放文档注释零代码**——无实现的函数声明会被当重载声明解析，相邻不同名直接 panic（overload.rs "overload error X != Y"）；顶层导出函数**不能带 lambda 参数**（同样崩），回调一律改轮询（getState/getResult 模式）
   - 对象字面量的类型用 `type X = {...}` 不用 `interface`（UTS110111163）
@@ -283,6 +283,7 @@ pio device monitor           # 串口监视器（115200）
   - **okhttp 例外：基座里的是 DCloud 重打包的 `dc.squareup.okhttp3` / `dc.squareup.okio` 命名空间，`import ... from 'okhttp3.OkHttpClient'` 云端必 `Unresolved reference`**（6 连败根因）。用 `dc.squareup.*` 且**不要**在 config.json 再声明 okhttp（会重复引入原生包）；ByteString 在 `dc.squareup.okio` 包不在 okhttp3
   - 继承 Java 类写显式 `constructor + super()`；`interface.uts` 里的类型在平台实现里经 `import {...} from '../interface.uts'` 引用
   - **新增/修改 UTS 插件必须重打自定义基座**（`cli pack --iscustom true`，云端排队 ~20 分钟），JS 热推对原生代码无效；插件 TS 类型壳放 `src/types/`（注意：该 .d.ts 顶层不能有 export，否则 declare module 退化成模块增强报 Cannot find module）
+  - **云端 bundleKotlin 会 tree-shake「仅被 manifest/字符串引用」的类**（2026-11-19 实证）：uts-keepalive 的 `KeepAliveService`/`BootReceiver` 曾被整类删除——编译期零提示，本地 `toKotlin()` 验证不触发（它不做 shaking），装上基座才 `ClassNotFoundException`。修法：index.uts 里对类做真实引用（如 `const serviceClass = KeepAliveService().javaClass`）拉进依赖图；产物完整性判据是 jar/dex 里真的有类，不是编译通过
   - 大数据量（音频/文件流）**不要过 JS 桥**：uni.connectSocket 二进制消息过 Java→JNI→JS 三重边界，消费 32KB/s 即丢帧——用 UTS 原生收流写盘、JS 只轮询进度（uts-wavrec 模式）
   - **改完 UTS 插件先跑本地自查，别直接提交云端**：`cd uniapp && node scripts/check-uts.mjs [插件id]`（不传 id 则检查全部）。云端排队 ~20 分钟且只回 Kotlin 报错、**看不到编译 classpath**，本地这套用 HBuilderX 自带 `compile()` + 自带 `kotlinc` + 云端等价 classpath，秒级复现同样的错误。脚本已内置 ExtAPI 假阳性过滤（bin-bluetooth 这类引用 `UniError`/`Resolver` 的插件会误报，脚本自动忽略并提示"需云端最终确认"），真实错误（okhttp 未解析 / Number-Int 不符 / catch 语法错）一条都不会漏。
   - **无变量 `catch {}` 在 UTS 里过不了 Kotlin 编译**：会原样转译成 `catch  {}`，kotlinc 报 `Expecting exception variable declaration`。一律写 `catch (e) { ... }`（2026-11-24 在 uts-keepalive 里抓到，该处此前**从未真正编译过**——`dist/cache` 里的 jar 是更早代码的陈旧缓存，md5 对得上但产物不含新符号，别信缓存）
@@ -305,6 +306,7 @@ pio device monitor           # 串口监视器（115200）
   - **CSV 必须纯 ASCII**：PlatformIO 按系统默认编码（Windows GBK）解析，中文注释会让 `_parse_partitions` 抛 `UnicodeDecodeError` 构建失败
   - `upload.maximum_size` 不用手写，PlatformIO 会按 `app0` 的 3MB 自动覆盖
   - **PSRAM 已启用（2026-11-20，随 3.x 迁移落地）**：`board_build.arduino.memory_type = qio_opi` + `-DBOARD_HAS_PSRAM`，代码侧大缓冲为「PSRAM 优先 + 内部堆回落」，启动日志应见 `@ PSRAM`（回落 INTERNAL = 异常）。历史教训仍需知晓：**2.0.x（platform 6.x）下禁止启用**——其预编译库 sdkconfig 是 `CONFIG_SPIRAM_MODE_QUAD`（板子是 OCTAL），数据能用但 WiFi/lwIP 启动会间歇性堆损坏（2026-11-19 配网页三连崩的真因，曾在 11-16 启用、11-19 回退）。`i2s_recorder` 等**无 WiFi 子工程**保留 `qio_opi` 不受影响
+- **推理启动时机只允许四处**：server_connected / listen_on 指令 / 会话结束恢复 / 30s 重试——**别加回 setup/wifi_connected 直启**（EI 竞技场首跑撞上 WiFi/WS ramp 后坑被挤，即永久盲转；2.0.x 时代实证，3.x+PSRAM 后风险降低但保持惯例）
 - 主固件 `baby_cry_detector` 的编译组成：`baby_cry_detector.ino` + `ble_provision.*` + `wifi_connect.*` + `led.*` + `config.h`
 
 ### 其他

@@ -72,7 +72,7 @@ if (u.startsWith("https://") || u.startsWith("wss://")) {
 **要做 wss 需要**：
 1. 换 `WiFiClientSecure`（ESP32 内置 mbedTLS）
 2. 评估内存：TLS 握手约需 40-50KB 内部堆；板子 3.x + PSRAM 后推理缓冲已外置，
-   `ready free ≈ 133K`（见《交接-内存重整与3x迁移》§2.1），**看起来够，但必须真机实测**
+   `ready free ≈ 133K`（2026-11-20 真机实测），**看起来够，但必须真机实测**
 3. 证书验证策略：完整链验证 vs 只固定 SPKI 指纹（内存/安全折中）
 
 > 这是绕不过的工作量，估 **2-3 小时**（含真机内存观测）。
@@ -291,7 +291,7 @@ find /opt/babycry/backup -name 'babycry-*.db' -mtime +30 -delete
 | 风险 | 说明 | 应对 |
 |---|---|---|
 | **板子要重新配网** | 服务器地址在 NVS（`NVS_KEY_SERVER_URL`），走 BLE 写入 | 不用重烧固件，重新配网填新地址。**回滚同理** |
-| **App 地址回落** | 装 App 会清空本地存储，回落到 `.env` 烘焙的旧 IP（见《交接-设备离线排障》§5） | 同步改 `uniapp/.env.production` 的 `VITE_WS_URL`，或重新配对 |
+| **App 地址回落** | 装 App 会清空本地存储，回落到 `.env` 烘焙的旧 IP（`todo-配网安全.md` 挂账） | 同步改 `uniapp/.env.production` 的 `VITE_WS_URL`，或重新配对 |
 | **时区算错** | 未设 `TZ` 时，`dataStore` 的 `strftime(...,'localtime')` 全偏 8 小时 | 必须在 `.env` 设 `TZ=Asia/Shanghai` |
 | **模拟器污染** | 默认开模拟器，会持续写假数据进 SQLite | 必须 `NO_SIMULATOR=true` |
 | 回滚 | 云上出问题临时切回 Mac | 板子重新配网指回局域网地址即可，两端都用同一套代码 |

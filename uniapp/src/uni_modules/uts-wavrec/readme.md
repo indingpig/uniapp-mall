@@ -6,7 +6,7 @@ done 后回补 + 大小校验），JS 只拿进度与结果。
 
 **为什么存在**：uni.connectSocket 的二进制消息过 Java→JNI→JS 引擎三重边界，
 App 端消费 32KB/s 音频流跟不上，TCP 背压顶回板子造成丢样（2026-11-24 定位，
-详见仓库 交接-内存重整与3x迁移.md §6）。
+诊断详版见 git 历史交接文档，2026-11-28 归档）。
 
 协议与固件 collect_server 一致：控制 `{"cmd":"start"/"stop"}` 文本帧，音频
 2048B 二进制帧，回执 `{"cmd":"done","samples":N,"lost":bool}`。OkHttp 按帧

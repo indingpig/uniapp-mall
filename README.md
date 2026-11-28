@@ -127,7 +127,7 @@ REST 接口：`/api/baby/status` `/api/baby/volume` `/api/baby/device`、`/api/h
 
 ### 🔔 推送与保活（2026-11-19）
 
-解决「手机锁屏后 App 被系统杀掉、哭声提醒收不到」，双层结构（详见 [交接-后台保活与ntfy兜底.md](交接-后台保活与ntfy兜底.md)）：
+解决「手机锁屏后 App 被系统杀掉、哭声提醒收不到」，双层结构（实现：`server/src/services/notify.js` + `uniapp/src/uni_modules/uts-keepalive/`；设计记录已归档 git 历史）：
 
 - **设备端推理常开** — 检测不再依赖任何 App 在线（推理随观众启停会退化成纯音量阈值，空调外机也能触发误报）；`listen_on/off` 指令保留协议待「远程听声」立项
 - **App 内前台服务保活** — uts-keepalive UTS 插件（常驻通知 + WakeLock + START_STICKY，类型 `connectedDevice`）+ 电池优化白名单（首启自动引导一次）+ 厂商自启动引导 + 开机自启；四个 tab 页返回键统一退后台不杀进程。改插件需重打自定义基座

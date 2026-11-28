@@ -1,0 +1,20 @@
+# gitleaks 配置：在默认规则集之上叠加豁免（detect / protect 都会读取）
+# 原则：只按「路径 + 规则 ID」精确豁免已人工核实为误报的命中，
+# 不做宽泛的路径豁免，避免把真泄漏也静音。
+
+[extend]
+# 不修改内置规则，仅追加 allowlist
+useDefault = true
+
+[[allowlists]]
+description = "BLE 特征值 UUID 是公开协议常量（Espressif 官方示例 base，固件与 App 必须共享同一组才能通信），不是凭据；generic-api-key 纯因常量名含 TOKEN/KEY 关键词而误报"
+ruleID = "generic-api-key"
+
+# App 侧协议常量表 + 固件协议头（audio_app* 为同一组 UUID 的独立子工程）。
+# 路径用后缀子串匹配（不加 ^ 锚点）：git 模式报相对路径、--no-git 模式报绝对路径，后缀匹配两者都覆盖
+paths = [
+  '''uniapp/src/constants/ble\.ts$''',
+  '''arduino/baby_cry_detector/ble_provision\.h$''',
+  '''arduino/baby_cry_detector/audio_app/''',
+  '''arduino/baby_cry_detector/audio_app_uni/''',
+]
