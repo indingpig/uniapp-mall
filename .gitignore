@@ -52,3 +52,9 @@ server/data/
 
 # ZCode 工具目录（AI 编码工具的本地状态，勿提交）
 .zcode/
+
+# 设计工具 WorkBuddy 的工作记忆（disign/ 的 AI 工具本地状态，勿提交）
+uniapp/disign/.workbuddy/
+
+# HBuilderX 编译临时文件
+uniapp/_tmp_*
