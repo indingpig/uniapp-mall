@@ -307,6 +307,10 @@ pio device monitor           # 串口监视器（115200）
   - `upload.maximum_size` 不用手写，PlatformIO 会按 `app0` 的 3MB 自动覆盖
   - **PSRAM 已启用（2026-11-20，随 3.x 迁移落地）**：`board_build.arduino.memory_type = qio_opi` + `-DBOARD_HAS_PSRAM`，代码侧大缓冲为「PSRAM 优先 + 内部堆回落」，启动日志应见 `@ PSRAM`（回落 INTERNAL = 异常）。历史教训仍需知晓：**2.0.x（platform 6.x）下禁止启用**——其预编译库 sdkconfig 是 `CONFIG_SPIRAM_MODE_QUAD`（板子是 OCTAL），数据能用但 WiFi/lwIP 启动会间歇性堆损坏（2026-11-19 配网页三连崩的真因，曾在 11-16 启用、11-19 回退）。`i2s_recorder` 等**无 WiFi 子工程**保留 `qio_opi` 不受影响
 - **推理启动时机只允许四处**：server_connected / listen_on 指令 / 会话结束恢复 / 30s 重试——**别加回 setup/wifi_connected 直启**（EI 竞技场首跑撞上 WiFi/WS ramp 后坑被挤，即永久盲转；2.0.x 时代实证，3.x+PSRAM 后风险降低但保持惯例）
+- **BLE 服务的属性句柄上限必须显式给够，且改表要同步换设备地址**（2026-11-28 全天实证，详见 `ble_provision.h` 注释）：
+  - 框架 `createService` 默认只给 15 个属性句柄，超限的特征值被协议栈**静默丢弃**——不报错不注册，手机发现不到。用 `BLE_SERVICE_NUM_HANDLES`（现值 24）显式传参；启动自检 `[BLE] GATT table (board side)` 会打印各特征值 handle 并对缺项报 ⚠️
+  - Android 对已绑定设备缓存 GATT 表且 EMUI 上**解绑/删蓝牙数据/重配对都刷不掉**——`BLE_GATT_TABLE_VERSION` 版本 +1 时固件自动换身份地址（确定性派生的静态随机地址）逼手机重新发现。**增删特征值 = 改表 + 版本号 +1，两件事一起做**
+  - 排查「手机发现不到某特征值」：先看板子启动日志的 GATT 表，缺项在板子侧是固件问题；两边都有而只有手机缺才是缓存问题
 - 主固件 `baby_cry_detector` 的编译组成：`baby_cry_detector.ino` + `ble_provision.*` + `wifi_connect.*` + `led.*` + `config.h`
 
 ### 其他
