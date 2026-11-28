@@ -158,10 +158,17 @@ export function useBabyMonitor() {
       console.warn('[WS] 未配置服务器地址（配对或加入家庭监护后可用）');
       return;
     }
-    connecting = true;
-    // 家庭 token 上行（S-07）：server 据此判角色，成员端设备指令会被拒
+    // 家庭 token 上行（S-07）：server 据此判角色，成员端设备指令会被拒。
+    // 无身份不连 WS（全局 401 收敛）：server 已在握手期拒绝无 token 连接，
+    // 盲连等于每 3 秒送一次注定被拒的握手（方案 §3）；数据靠轮询兜底，
+    // 认领/加入入口见首页与设置页
     const familyToken = getFamilyMember()?.token || getFamilyOwner()?.token;
-    const url = familyToken ? `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}ftoken=${familyToken}` : wsUrl;
+    if (!familyToken) {
+      console.warn('[WS] 无家庭身份，跳过 WS 连接（数据走轮询，认领/加入后自动恢复）');
+      return;
+    }
+    connecting = true;
+    const url = `${wsUrl}${wsUrl.includes('?') ? '&' : '?'}ftoken=${familyToken}`;
     console.warn('[WS] connect', url);
     // 必须传 complete 回调才返回 SocketTask（不传回调时返回 Promise，
     // success 回调里的 res 不是 SocketTask）

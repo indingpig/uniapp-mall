@@ -140,16 +140,25 @@ export function useBLE() {
   }
 
   function matchUUID(platformUUIDs: string[], targetFull: string): string {
-    const needle = targetFull.toLowerCase();
-    const exact = platformUUIDs.find(u => u.toLowerCase() === needle);
+    // 统一去连字符再比较，兼容平台返回大写/无连字符形态
+    const norm = (u: string) => u.toLowerCase().split('-').join('');
+    const needle = norm(targetFull);
+    const exact = platformUUIDs.find(u => norm(u) === needle);
     if (exact)
       return exact;
-    const tail8 = targetFull.slice(-8);
-    const byTail = platformUUIDs.find(u => u.toLowerCase().endsWith(tail8));
+    const tail8 = needle.slice(-8);
+    const byTail = platformUUIDs.find(u => norm(u).endsWith(tail8));
     if (byTail)
       return byTail;
-    const short4 = targetFull.slice(4, 8);
-    return platformUUIDs.find(u => u.toLowerCase().includes(short4)) || '';
+    // 兜底仅对标准 16 位 UUID（0000xxxx-0000-1000-8000-00805f9b34fb）开放：
+    // 自定义 128 位 UUID 共享同一 base（本项目 beb5483e-…），按短段 includes
+    // 匹配会把「列表里缺失的特征值」错配到第一个特征值上（2026-11-28 实证：
+    // EMUI GATT 缓存里没有 token 特征值，64 位令牌被写进 SSID，板子拿令牌
+    // 当 WiFi 名连网）。缺失一律返回空串，由调用方跳过/降级，绝不猜。
+    if (!needle.startsWith('0000'))
+      return '';
+    const short4 = needle.slice(4, 8);
+    return platformUUIDs.find(u => norm(u).includes(short4)) || '';
   }
 
   /* ===================== 扫描 ===================== */
@@ -247,6 +256,13 @@ export function useBLE() {
     platformCharUuids.deviceInfo = matchUUID(charUUIDs, BLE_CHAR_DEVICE_INFO_UUID);
     // WiFi 列表特征值: 旧固件可能没有, 缺失时配对页回退手输 SSID
     platformCharUuids.wifiList = matchUUID(charUUIDs, BLE_CHAR_WIFI_LIST_UUID);
+
+    // 配对必需的写入特征值缺失 = 发现服务不完整（典型原因：Android/EMUI 按设备 MAC
+    // 缓存旧 GATT 表，新固件新增的特征值不在缓存里）。在此快速失败并给出可操作提示，
+    // 绝不带着残缺的 UUID 映射继续走配对（2026-11-28 教训）
+    if (!platformCharUuids.wifiSSID || !platformCharUuids.wifiPass || !platformCharUuids.serverUrl) {
+      throw new Error('未发现完整配对服务（蓝牙缓存可能过期，请关闭再打开手机蓝牙后重试）');
+    }
 
     if (!platformCharUuids.status) {
       throw new Error('未找到状态特征值, 请确认固件已正确烧录');

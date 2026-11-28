@@ -302,6 +302,8 @@ function goPairing() {
 
 /** 本机是否家庭成员：监听等设备控制入口对成员隐藏（P-02 只读） */
 const isMember = ref(false);
+/** 已配对但无家庭身份 → 首页展示认领/加入引导条（点按进分享页走认领弹框） */
+const showClaimEntry = ref(false);
 
 function onJoinTap() {
   // #ifdef APP-PLUS
@@ -457,6 +459,11 @@ function goSettings() {
   uni.switchTab({ url: '/pages/settings/index' });
 }
 
+/** 认领/加入引导条 → 分享管理页（已配对未认领时进页即弹认领框；member 加入走既有流程） */
+function goFamilyShare() {
+  uni.navigateTo({ url: '/pages/family-share/index' });
+}
+
 /** 设备信息卡入口（规范 5.5）：在线 → 设备详情页；离线无 chevron，仍去设置页 */
 function goDeviceDetail() {
   if (isDeviceOffline.value) {
@@ -490,6 +497,9 @@ onShow(() => {
   greeting.value = hasPairedDevice.value ? buildGreeting() : '你好'; // 空态无设备语境（规范 12.2）
   // 家庭角色与称呼：成员加入/退出后回到首页即刷新
   isMember.value = getFamilyRole() === 'member';
+  // 认领/加入引导条：已配对但本机无家庭身份（全局 401 收敛的前提——
+  // 只拦截不给入口等于把「被拒」变成「沉默离线」，方案 §3）
+  showClaimEntry.value = hasPairedDevice.value && getFamilyRole() === 'none';
   userName.value = getFamilyMember()?.name || getFamilyOwner()?.name || 'Sheldon';
   // Bug B 修法④：回前台主动续命——锁屏/切后台回来时重连链可能已静默死掉，
   // WS 不在健康态就立即重连（健康连接受 wsActive/connecting 守卫，不会误断）
@@ -577,6 +587,13 @@ onBeforeUnmount(() => {
           <image class="offline-banner__icon" :src="getIcon('wifi-off', 'amberInk')" mode="aspectFit" />
           <text class="offline-banner__text">{{ offlineBannerText }}</text>
           <image class="offline-banner__spinner" :src="getIcon('spinner', 'amberInk')" mode="aspectFit" />
+        </view>
+
+        <!-- 认领/加入引导条：已配对但无家庭身份（server 会 401 拒绝受保护请求） -->
+        <view v-if="showClaimEntry" class="claim-banner rounded-lg flex items-center gap-3" @tap="goFamilyShare">
+          <image class="claim-banner__icon" :src="getIcon('users', 'primary')" mode="aspectFit" />
+          <text class="claim-banner__text flex-1 text-main">完成家庭共享，开始接收监护数据</text>
+          <image class="claim-banner__arrow" :src="getIcon('chevron-right', 'muted')" mode="aspectFit" />
         </view>
 
         <!-- 当前状态卡片 -->
@@ -777,6 +794,22 @@ page {
 }
 
 /* 离线提示条（规范 12.1）：琥珀底 r12 */
+.claim-banner {
+  padding: 20rpx 24rpx;
+  background-color: $color-primary-soft;
+
+  &__icon,
+  &__arrow {
+    width: 32rpx; // 16px
+    height: 32rpx;
+  }
+
+  &__text {
+    font-size: 24rpx; // 12px
+    font-weight: 500;
+  }
+}
+
 .offline-banner {
   gap: 12rpx;
   padding: 20rpx 24rpx;

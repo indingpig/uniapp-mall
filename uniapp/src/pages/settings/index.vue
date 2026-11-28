@@ -48,7 +48,11 @@ const hasPairedDevice = ref(false);
 
 function loadDevice() {
   fetchDevice().then((d) => {
-    device.value = d;
+    // 判空防御：401 错误体过 ApiResponse 解包后可能 resolve 出 undefined，
+    // 直接赋值会让模板 device.name 炸渲染白屏（2026-11-28 实证；根修在
+    // createRequest.ts 的 statusCode 检查，这里是 belt-and-suspenders）
+    if (d)
+      device.value = d;
   }).catch(() => {
     // 断网/服务器不可达: 不保留上次成功拉到的在线态（防假在线——
     // 2026-11-25 实测断所有网后设置页徽章仍显示「在线」）

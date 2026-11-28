@@ -344,6 +344,10 @@ async function onStartPair() {
     if (result.message === 'server_unreachable') {
       showToast('WiFi 已连通，但服务器不可达：请启动后台服务或检查服务器地址');
     }
+    else if (result.message === 'server_auth') {
+      // 固件上报 error:server_auth：server 握手期拒绝了设备令牌（固件已停止重连）
+      showToast('设备令牌被服务器拒绝：请核对高级设置里的 DEVICE_TOKEN 后重新配对');
+    }
     else if (result.message === 'wifi_failed') {
       showToast('WiFi 连接失败，请检查密码和信号');
     }
