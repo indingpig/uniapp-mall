@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { dataStore } from '../services/dataStore.js';
+import { ok } from '../services/errors.js';
 
 export function createStatsRoutes() {
   const router = Router();
@@ -7,10 +8,7 @@ export function createStatsRoutes() {
   /** 获取每日统计 */
   router.get('/daily', (req, res) => {
     const days = Number(req.query.days) || 7;
-    res.json({
-      code: 0,
-      data: dataStore.getDailyStats(days),
-    });
+    ok(res, dataStore.getDailyStats(days));
   });
 
   /** 获取每小时统计 */
@@ -21,10 +19,7 @@ export function createStatsRoutes() {
       const s = stats[h] || { maxRms: 0, avgRms: 0, count: 0, cryCount: 0 };
       result.push({ hour: h, ...s });
     }
-    res.json({
-      code: 0,
-      data: result,
-    });
+    ok(res, result);
   });
 
   /** 摘要统计 */
@@ -42,17 +37,14 @@ export function createStatsRoutes() {
     // 语义 = 库内保留期内的全部采样。注意前端已注明它「不能当昨日基线」。
     const total = dataStore.getAllTimeSummary();
 
-    res.json({
-      code: 0,
-      data: {
-        today: {
-          cryCount: today.cryCount,
-          maxRms: today.maxRms,
-          avgRms: today.avgRms,
-          sampleCount: today.sampleCount,
-        },
-        total,
+    ok(res, {
+      today: {
+        cryCount: today.cryCount,
+        maxRms: today.maxRms,
+        avgRms: today.avgRms,
+        sampleCount: today.sampleCount,
       },
+      total,
     });
   });
 

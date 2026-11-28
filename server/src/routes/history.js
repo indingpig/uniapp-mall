@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { ok } from '../services/errors.js';
 
 export function createHistoryRoutes(dataStore) {
   const router = Router();
@@ -33,21 +34,18 @@ export function createHistoryRoutes(dataStore) {
       ? dataStore.getEvents(Number(from), Number(to))
       : dataStore.getEvents(Date.now() - 6 * 86_400_000, Date.now());
 
-    res.json({
-      code: 0,
-      data: {
-        items: items.map(r => ({
-          time: r.time,
-          rms: r.rms,
-          peak: r.peak,
-          db: Math.round(20 * Math.log10(Math.max(r.rms, 1))),
-          status: r.status,
-        })),
-        events: events.map(e => ({ time: e.time, type: e.type })),
-        total,
-        page: pageNum,
-        pageSize: size,
-      },
+    ok(res, {
+      items: items.map(r => ({
+        time: r.time,
+        rms: r.rms,
+        peak: r.peak,
+        db: Math.round(20 * Math.log10(Math.max(r.rms, 1))),
+        status: r.status,
+      })),
+      events: events.map(e => ({ time: e.time, type: e.type })),
+      total,
+      page: pageNum,
+      pageSize: size,
     });
   });
 

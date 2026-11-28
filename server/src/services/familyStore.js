@@ -2,6 +2,7 @@ import { randomInt, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ApiError } from './errors.js';
 
 // ===== 有效期与上限（env 覆盖仅用于联调时缩短等待）=====
 /** 扫码加入码有效期，设计稿 19：「二维码 5 分钟内有效」 */
@@ -15,16 +16,14 @@ const MEMBER_CAP = 6;
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 // 与其余纯内存数据不同：所有权若不落盘，server 重启后任意先打开分享页的手机
-// 都会抢到 owner，成员也被清空，故注册表单独持久化为一个小 JSON
-const DATA_FILE = join(dirname(fileURLToPath(import.meta.url)), '../../data/family.json');
+// 都会抢到 owner，成员也被清空，故注册表单独持久化为一个小 JSON。
+// FAMILY_DATA_FILE 仅供契约测试隔离数据用（缺省为仓库内 data/family.json）
+const DATA_FILE = process.env.FAMILY_DATA_FILE
+  || join(dirname(fileURLToPath(import.meta.url)), '../../data/family.json');
 
-/** 业务错误：路由层统一转成 `{ code:1, message }` + 对应 HTTP 状态 */
-export class FamilyError extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
+/** 业务错误：错误中间件统一渲染为 `{ code, message }` + 对应 HTTP 状态。
+ *  code 缺省时按状态码取默认映射；跨状态码的原因（加入码/邀请码失效）显式传参 */
+export class FamilyError extends ApiError {}
 
 const genToken = () => randomUUID().replace(/-/g, '');
 const genCode = () => {
@@ -103,7 +102,8 @@ class FamilyStore {
     this._pruneInvites();
     const { joinCode } = this.registry;
     if (!joinCode || joinCode.code !== code || isExpired(joinCode)) {
-      throw new FamilyError(400, '二维码已失效，请让家人重新生成');
+      // 状态码不变（历史口径），由业务码区分「码失效」：与 404 的邀请失效同因不同径
+      throw new FamilyError(400, '二维码已失效，请让家人重新生成', 'JOIN_CODE_EXPIRED');
     }
     return this._addMember(name);
   }
@@ -142,7 +142,8 @@ class FamilyStore {
     this._pruneInvites();
     const invite = this.registry.invites.find(i => i.code === code);
     if (!invite) {
-      throw new FamilyError(404, '邀请已失效，请联系家人重新邀请');
+      // 状态码不变（历史口径），由业务码区分「码失效」：与 400 的二维码失效同因不同径
+      throw new FamilyError(404, '邀请已失效，请联系家人重新邀请', 'JOIN_CODE_EXPIRED');
     }
     this.registry.invites = this.registry.invites.filter(i => i !== invite);
     const member = this._addMember(invite.name);

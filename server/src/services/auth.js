@@ -94,19 +94,19 @@ export function requireFamilyToken(familyStore, opts = {}) {
       }
     }
 
-    // 家人令牌通道
+    // 家人令牌通道。FamilyError(401)/403 由错误中间件统一渲染；
+    // 其它异常不再伪装成 401（那是把内部 bug 显示成「未登录」），转 500 并记日志
     const token = req.headers['x-family-token'];
     try {
       const result = familyStore.auth(token);
       if (requireOwner && result.role !== 'owner') {
-        res.status(403).json({ code: 1, message: '仅所有者可执行该操作' });
+        res.status(403).json({ code: 'FORBIDDEN', message: '仅所有者可执行该操作' });
         return;
       }
       req.auth = result;
       return next();
     } catch (err) {
-      // FamilyError(401) 与其它异常都收敛成 401，不泄露内部细节
-      res.status(401).json({ code: 1, message: err?.message || '请先配对认领或扫码加入家庭共享' });
+      return next(err);
     }
   };
 }

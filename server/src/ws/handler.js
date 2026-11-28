@@ -15,8 +15,83 @@ let lastInference = null;         // { label, ts } 设备最新识别结果, 附
 // 模型 label 的有效期: 推理 1s 一窗, 取 1.5s 覆盖两次 audio 间隔
 const LABEL_FRESH_MS = 1500;
 
+/** 握手期拒绝：直接回 HTTP 状态 + JSON 错误体再断开。
+ *  不能在 101 之后再 close(1008)——固件只判断状态行（server_link.cpp 期待 "HTTP/1.1 101"），
+ *  101-然后-拒绝会被它当成「已连接」，上报 server_connected 造成配网假成功（2026-11-28 实证）。
+ *  握手期回 401 让固件现成的 `handshake rejected` 分支命中，不再上报成功。 */
+function denyHandshake(socket, status, statusText, code, message, logPrefix) {
+  console.warn(`${logPrefix}`);
+  const body = JSON.stringify({ code, message });
+  socket.write(
+    `HTTP/1.1 ${status} ${statusText}\r\n`
+    + 'Content-Type: application/json; charset=utf-8\r\n'
+    + `Content-Length: ${Buffer.byteLength(body)}\r\n`
+    + 'Connection: close\r\n'
+    + '\r\n'
+    + body,
+  );
+  socket.destroy();
+}
+
 export function createWSServer(server, detector, dataStore, familyStore) {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  // noServer 模式：升级请求先过鉴权，通过才 handleUpgrade（方案 §2 第 5 项）
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (req, socket, head) => {
+    let url = null;
+    try {
+      url = new URL(req.url, 'http://localhost');
+    } catch {
+      socket.destroy();
+      return;
+    }
+    if (url.pathname !== '/ws') {
+      denyHandshake(socket, 404, 'Not Found', 'NOT_FOUND', '接口不存在', `[WS] 拒绝非 /ws 升级请求: ${url.pathname}`);
+      return;
+    }
+
+    const clientType = req.url.includes('esp32') ? 'esp32' : 'app';
+    let familyRole = null;
+
+    if (AUTH_MODE === 'off') {
+      // 过渡模式：仅当显式配置 AUTH_MODE=off 时放行，用于固件未升级的空窗期
+      familyRole = clientType === 'esp32' ? 'device' : 'guest';
+      console.warn(`[WS] AUTH_MODE=off，放行 ${clientType} 连接（不安全，仅过渡用）`);
+    } else if (clientType === 'esp32') {
+      if (!verifyDeviceToken(extractDeviceTokenFromRequest(req))) {
+        denyHandshake(
+          socket, 401, 'Unauthorized', 'UNAUTHORIZED',
+          '设备令牌无效，请重新配网写入',
+          `[WS] 拒绝 esp32：设备令牌无效或缺失 (${rejectReason(req)})`,
+        );
+        return;
+      }
+      familyRole = 'device';
+    } else {
+      // app：必须持有 familyStore 签发的有效 token
+      let token = null;
+      try {
+        token = url.searchParams.get('ftoken');
+      } catch {
+        token = null;
+      }
+      try {
+        familyRole = familyStore.auth(token).role;
+      } catch {
+        // 无 token / token 失效 → 握手期拒绝。App 侧需引导用户先配对认领或扫码加入。
+        denyHandshake(
+          socket, 401, 'Unauthorized', 'UNAUTHORIZED',
+          '身份已失效，请重新认领或扫码加入',
+          '[WS] 拒绝 app：缺少或无效的 ftoken',
+        );
+        return;
+      }
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req, familyRole);
+    });
+  });
 
   wss.on('error', (err) => {
     if (err.code !== 'EADDRINUSE') {
@@ -43,42 +118,13 @@ export function createWSServer(server, detector, dataStore, familyStore) {
     dataStore.addEvent('noise', timestamp);
   });
 
-  wss.on('connection', (ws, req) => {
+  wss.on('connection', (ws, req, familyRole) => {
     const clientType = req.url?.includes('esp32') ? 'esp32' : 'app';
 
-    // ===== 鉴权（2026-11-26 上公网加固，S-07 强化）=====
-    // 旧实现：app 的 ftoken 无效时 catch 落成 'guest' 放行 —— 等于无 token 也能连，
-    // 任何人带 ?esp32 即可冒充设备上报假数据。现在改为握手期直接拒绝。
-    let familyRole = null;
-
-    if (AUTH_MODE === 'off') {
-      // 过渡模式：仅当显式配置 AUTH_MODE=off 时放行，用于固件未升级的空窗期
-      familyRole = clientType === 'esp32' ? 'device' : 'guest';
-      console.warn(`[WS] AUTH_MODE=off，放行 ${clientType} 连接（不安全，仅过渡用）`);
-    } else if (clientType === 'esp32') {
-      if (!verifyDeviceToken(extractDeviceTokenFromRequest(req))) {
-        console.warn(`[WS] 拒绝 esp32：设备令牌无效或缺失 (${rejectReason(req)})`);
-        ws.close(1008, 'invalid device token');
-        return;
-      }
-      familyRole = 'device';
-    } else {
-      // app：必须持有 familyStore 签发的有效 token
-      let token = null;
-      try {
-        token = new URL(req.url, 'http://localhost').searchParams.get('ftoken');
-      } catch {
-        token = null;
-      }
-      try {
-        familyRole = familyStore.auth(token).role;
-      } catch {
-        // 无 token / token 失效 → 拒绝。App 侧需引导用户先配对认领或扫码加入。
-        console.warn('[WS] 拒绝 app：缺少或无效的 ftoken');
-        ws.close(1008, 'unauthorized');
-        return;
-      }
-    }
+    // ===== 鉴权已上移到 server 'upgrade' 事件（握手期拒绝）=====
+    // 旧实现先完成 101 握手再 ws.close(1008)：固件把状态行当连接成功的唯一判据，
+    // 导致「配对成功但设备未连上」的假成功。历史教训见方案 §2 第 5 项。
+    // AUTH_MODE=off 时 familyRole = 'device' | 'guest'，其余为 familyStore 角色。
 
     clients.add(ws);
     // 心跳存活标记：ws 库协议层自动回 pong（ESP32 固件 server_link.cpp 手写了
@@ -151,7 +197,7 @@ export function createWSServer(server, detector, dataStore, familyStore) {
         if (msg.type === 'cmd' && clientType === 'app') {
           if (familyRole === 'member') {
             // P-02 成员只读：监听开关等指令都是设备控制，成员端只收广播
-            ws.send(JSON.stringify({ type: 'error', message: '成员仅可查看，无法控制设备' }));
+            ws.send(JSON.stringify({ type: 'error', code: 'FORBIDDEN', message: '成员仅可查看，无法控制设备' }));
             return;
           }
           // listen_on/off = 监听偏好开关（设备端 NVS 持久化, 不随 App 在线启停,
@@ -160,7 +206,7 @@ export function createWSServer(server, detector, dataStore, familyStore) {
           if (esp32Client && esp32Client.readyState === esp32Client.OPEN) {
             sendToEsp32({ type: 'cmd', cmd: msg.cmd });
           } else {
-            ws.send(JSON.stringify({ type: 'error', message: '设备离线，指令未送达' }));
+            ws.send(JSON.stringify({ type: 'error', code: 'DEVICE_OFFLINE', message: '设备离线，指令未送达' }));
           }
           return;
         }

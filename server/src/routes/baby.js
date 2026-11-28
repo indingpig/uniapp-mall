@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { ok } from '../services/errors.js';
 
 export function createBabyRoutes(detector, dataStore) {
   const router = Router();
@@ -14,16 +15,13 @@ export function createBabyRoutes(detector, dataStore) {
   /** 获取当前宝宝状态 */
   router.get('/status', (_req, res) => {
     const meta = STATUS_META[detector.status] || STATUS_META.offline;
-    res.json({
-      code: 0,
-      data: {
-        status: detector.status,
-        statusText: meta.text,
-        iconKey: meta.iconKey,
-        iconColor: meta.iconColor,
-        durationSec: detector.getDurationSec(),
-        isOnline: detector.status !== 'offline',
-      },
+    ok(res, {
+      status: detector.status,
+      statusText: meta.text,
+      iconKey: meta.iconKey,
+      iconColor: meta.iconColor,
+      durationSec: detector.getDurationSec(),
+      isOnline: detector.status !== 'offline',
     });
   });
 
@@ -31,28 +29,22 @@ export function createBabyRoutes(detector, dataStore) {
   router.get('/volume', (_req, res) => {
     const recent = dataStore.getRecent(1);
     const record = recent[0];
-    res.json({
-      code: 0,
-      data: {
-        rms: record?.rms ?? 0,
-        peak: record?.peak ?? 0,
-        db: record ? Math.round(20 * Math.log10(Math.max(record.rms, 1))) : 0,
-        timestamp: record?.time ?? Date.now(),
-      },
+    ok(res, {
+      rms: record?.rms ?? 0,
+      peak: record?.peak ?? 0,
+      db: record ? Math.round(20 * Math.log10(Math.max(record.rms, 1))) : 0,
+      timestamp: record?.time ?? Date.now(),
     });
   });
 
   /** 获取设备信息 */
   router.get('/device', (_req, res) => {
     const isOnline = detector.status !== 'offline';
-    res.json({
-      code: 0,
-      data: {
-        name: 'ESP32 婴儿监护器',
-        connectionText: isOnline ? '已连接 · 正常' : '未连接',
-        signalStrength: 4,
-        isOnline,
-      },
+    ok(res, {
+      name: 'ESP32 婴儿监护器',
+      connectionText: isOnline ? '已连接 · 正常' : '未连接',
+      signalStrength: 4,
+      isOnline,
     });
   });
 

@@ -13,6 +13,7 @@ import { createHistoryRoutes } from './routes/history.js';
 import { createStatsRoutes } from './routes/stats.js';
 import { createFamilyRoutes } from './routes/family.js';
 import { requireFamilyToken, logAuthConfig } from './services/auth.js';
+import { ApiError } from './services/errors.js';
 
 const PORT = process.env.PORT || 8080;
 // 监听地址：默认 0.0.0.0 保持本机开发体验（手机真机调试要连局域网 IP）。
@@ -45,6 +46,29 @@ app.use('/api/history', familyGuard, createHistoryRoutes(dataStore));
 app.use('/api/stats', familyGuard, createStatsRoutes());
 // family 路由内部自带更细的角色校验（owner/member 分支），此处只挡匿名
 app.use('/api/family', createFamilyRoutes(familyStore, notifyFamilyChanged));
+
+// ===== 错误契约（方案-接口状态码与业务码设计.md）=====
+// 未知 /api/* 一律 JSON 404（旧默认是 HTML 的 "Cannot GET /x"，还会在
+// NODE_ENV 未设为 production 时把 err.stack 原文返回给客户端）。
+// 注意挂载顺序：必须在全部 /api 路由之后。
+app.use('/api', (_req, res) => {
+  res.status(404).json({ code: 'NOT_FOUND', message: '接口不存在' });
+});
+
+// 统一错误中间件：ApiError（含 FamilyError）按 status/code/message 渲染；
+// 其它异常一律 500 + INTERNAL，堆栈只进日志不进响应体。
+app.use((err, _req, res, next) => {
+  if (res.headersSent) {
+    next(err);   // 响应头已发出只能交给 Express 默认处理（销毁连接），避免二次写头
+    return;
+  }
+  if (err instanceof ApiError) {
+    res.status(err.status).json({ code: err.code, message: err.message });
+    return;
+  }
+  console.error('[Api] 未处理异常:', err);
+  res.status(500).json({ code: 'INTERNAL', message: '服务暂时不可用，请稍后再试' });
+});
 
 const server = createServer(app);
 
