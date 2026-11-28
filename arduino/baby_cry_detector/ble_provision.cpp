@@ -9,6 +9,8 @@
 #include <BLE2902.h>
 #include <Preferences.h>
 #include <WiFi.h>
+#include <esp_mac.h>        // esp_read_mac (蓝牙身份地址派生的基准, 不依赖 WiFi 启动时序)
+#include <esp_gap_ble_api.h>  // esp_ble_remove_bond_device / esp_ble_get_bond_device_num
 #include <vector>
 #include <algorithm>
 
@@ -20,6 +22,7 @@ static BLEServer*          s_server      = nullptr;
 static BLECharacteristic*  s_charStatus  = nullptr;
 static BLECharacteristic*  s_charWifiList = nullptr;
 static BLECharacteristic*  s_charDevInfo = nullptr;
+static BLEService*         s_service     = nullptr;   // 启动诊断：打印真实 GATT 表用
 static String s_deviceName;   // 广播名, 刷新 DeviceInfo JSON 时复用
 
 static BleCredentialsCallback s_credsCb  = nullptr;
@@ -54,6 +57,7 @@ static const uint32_t BLE_PAIR_WAIT_MS = 20000;  // 配对等待上限, 超时�
 /* ================================================================== */
 
 static void updateStatus(const String& status);
+static void dumpGattTableOnce();   // 定义在文件尾 (bleProvisionInit 之后)
 
 /* ================================================================== */
 /*  配网窗口: 写入守门                                                   */
@@ -361,6 +365,7 @@ static void sendWifiListResults() {
 }
 
 void bleProvisionLoop() {
+  dumpGattTableOnce();   // 启动后一次性打印板子真实 GATT 属性表（排查手机缓存用）
   // -- 发起链路加密: 由 App 的 WiFiList 写入触发 (见 s_encryptPending 注释) --
   if (s_encryptPending && !s_encryptDone && s_bleConnected) {
     s_encryptPending = false;
@@ -473,6 +478,67 @@ void bleProvisionRefreshDeviceInfo() {
   s_charDevInfo->setValue(info.c_str());
 }
 
+/* ================================================================== */
+/*  蓝牙身份地址（由服务表版本驱动，见 BLE_GATT_TABLE_VERSION 注释）       */
+/* ================================================================== */
+
+static esp_bd_addr_t s_identityAddr = {0};
+// 与凭据命名空间分开存：只记「上次的表版本」。恢复出厂会整体擦除，回到「已切换」的初态
+static const char* const BLE_IDENT_NS  = "ble-ident";
+static const char* const BLE_IDENT_KEY = "tbl_ver";
+
+/* 由基准蓝牙 MAC + 表版本号确定性派生一个**静态随机地址**。
+ * esp_bd_addr_t 按传输顺序存放：addr[0] 是空中发送的第一个字节，也就是地址的**最高字节**，
+ * addr[5] 是最低字节（显示时倒过来写）。静态随机地址要求 addr[0] 的最高两位为 11
+ *（esp_ble_gap_set_rand_addr 注释里的 address[47:46]）。
+ * 2026-11-28 踩坑：把标志位错放到 addr[5]，协议栈报 `BT_BTC: Invalid random address type`
+ * 并拒绝广播。同版本下地址恒定 → 重启不变、绑定关系保持；版本号一变地址才变。 */
+static void deriveIdentityAddr(esp_bd_addr_t out, uint8_t tableVersion) {
+  esp_bd_addr_t base = {0};
+  esp_read_mac(base, ESP_MAC_BT);
+  memcpy(out, base, 6);
+  out[0] = 0xC0 | (base[0] & 0x03);                  // 最高字节的最高两位固定 11
+  out[4] = (uint8_t)(base[4] ^ (0x5A + tableVersion));
+  out[5] = (uint8_t)(base[5] + tableVersion * 37);
+}
+
+/* BLEDevice::init 之后、开始广播之前调用。 */
+static void applyBleIdentity() {
+  Preferences prefs;
+  prefs.begin(BLE_IDENT_NS, false);
+  const uint8_t storedVer = prefs.getUChar(BLE_IDENT_KEY, 0);
+  const bool changed = storedVer != BLE_GATT_TABLE_VERSION;
+  deriveIdentityAddr(s_identityAddr, BLE_GATT_TABLE_VERSION);
+
+  if (changed) {
+    // 身份地址变了 → 按旧身份存的绑定全部作废，主动清掉，别占满绑定表
+    int removed = 0;
+    const int bonded = (int)esp_ble_get_bond_device_num();
+    if (bonded > 0) {
+      std::vector<esp_ble_bond_dev_t> list(bonded);
+      int got = bonded;
+      if (esp_ble_get_bond_device_list(&got, list.data()) == ESP_OK) {
+        for (int i = 0; i < got; i++) {
+          if (esp_ble_remove_bond_device(list[i].bd_addr) == ESP_OK)
+            removed++;
+        }
+      }
+    }
+    prefs.putUChar(BLE_IDENT_KEY, BLE_GATT_TABLE_VERSION);
+    Serial.printf("[BLE] GATT 表版本 %u -> %u：切换蓝牙身份地址，清除旧绑定 %d 条"
+                  "（手机会把它当作新设备重新发现并配对）\n",
+                  storedVer, BLE_GATT_TABLE_VERSION, removed);
+  }
+  prefs.end();
+
+  // 设置地址 + 把广播的地址类型改成随机（setDeviceAddress 内部两件事一起做）。
+  // 随机地址不落盘，每次启动都要重设。日志只打最高 2 字节，其余是设备唯一标识不入日志
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  adv->setDeviceAddress(s_identityAddr, BLE_ADDR_TYPE_RANDOM);
+  Serial.printf("[BLE] identity addr v%u (static random): %02x:%02x:**:**:**:**\n",
+                BLE_GATT_TABLE_VERSION, s_identityAddr[0], s_identityAddr[1]);
+}
+
 void bleProvisionInit(const char* deviceName) {
   BLEDevice::init(deviceName);
   BLEDevice::setMTU(256);
@@ -488,10 +554,17 @@ void bleProvisionInit(const char* deviceName) {
   sec->setInitEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
   sec->setRespEncryptionKey(ESP_BLE_ENC_KEY_MASK | ESP_BLE_ID_KEY_MASK);
 
+  applyBleIdentity();   // 服务表版本变化 → 换蓝牙身份地址 + 清旧绑定（须在广播前）
+
   s_server = BLEDevice::createServer();
   s_server->setCallbacks(new ServerConnectionCallback());
 
-  BLEService* service = s_server->createService(BLE_SERVICE_UUID);
+  // 句柄上限必须显式给够：框架 createService 的默认值是 15，而本服务要 17 个
+  //（服务声明 1 + SSID/密码/地址各 2 + 状态 3 + WiFi 列表 3 + 设备信息 2 + 令牌 2）。
+  // 2026-11-28 真机实证：加令牌特征值后超出默认上限，协议栈把它**静默丢弃**——
+  // 不报错、不注册，手机发现不到，板子侧 getHandle() 恒为 0。此前表刚好 15 个，
+  // 所以一直没人踩到。新增特征值时同步核对此数，启动自检会校验（见 dumpGattTableOnce）
+  BLEService* service = s_server->createService(BLEUUID(BLE_SERVICE_UUID), BLE_SERVICE_NUM_HANDLES);
 
   // WiFi SSID (Write, 要求加密链路 —— 防空中嗅探 WiFi 密码)
   BLECharacteristic* cSSID = service->createCharacteristic(
@@ -542,6 +615,7 @@ void bleProvisionInit(const char* deviceName) {
   cToken->setCallbacks(new DeviceTokenWriteCallback());
 
   service->start();
+  s_service = service;   // 供 bleProvisionLoop 打印真实属性表（GATT 句柄异步回填）
 
   // 广播
   BLEAdvertising* adv = BLEDevice::getAdvertising();
@@ -552,4 +626,40 @@ void bleProvisionInit(const char* deviceName) {
   BLEDevice::startAdvertising();
 
   Serial.printf("[BLE] Advertising as '%s'\n", deviceName);
+}
+
+/* 启动后一次性打印板子的**真实** GATT 属性表（各特征值句柄），并自检完整性。
+ * 用途：排查「手机发现不到某特征值」——把 App 日志 `[BLE] 发现特征值` 的清单与
+ * 这里对照，缺项在板子侧 = 固件没注册（如句柄上限不够）；缺项只在手机侧 = 手机
+ * GATT 缓存陈旧。2026-11-28 教训：令牌特征值因超出 createService 默认句柄上限被
+ * 协议栈静默丢弃，无任何报错，靠这张表才定位到。
+ * 句柄由协议栈在 BT 任务里异步回填，所以延迟到 loop 里读 */
+static void dumpGattTableOnce() {
+  static uint32_t s_dumpAt = 0;
+  if (s_dumpAt == 0) s_dumpAt = millis() + 1500;   // 服务启动后 1.5s，句柄已就绪
+  if (s_service == nullptr || millis() < s_dumpAt) return;
+
+  struct Entry { const char* name; const char* uuid; };
+  static const Entry kEntries[] = {
+    { "SSID",      BLE_CHAR_WIFI_SSID_UUID },
+    { "Password",  BLE_CHAR_WIFI_PASS_UUID },
+    { "ServerURL", BLE_CHAR_SERVER_URL_UUID },
+    { "Status",    BLE_CHAR_STATUS_UUID },
+    { "WifiList",  BLE_CHAR_WIFI_LIST_UUID },
+    { "DevInfo",   BLE_CHAR_DEVICE_INFO_UUID },
+    { "DevToken",  BLE_CHAR_DEVICE_TOKEN_UUID },
+  };
+  uint8_t missing = 0;
+  Serial.println("[BLE] GATT table (board side):");
+  for (const Entry& e : kEntries) {
+    BLECharacteristic* c = s_service->getCharacteristic(e.uuid);
+    const uint16_t handle = c ? c->getHandle() : 0;
+    Serial.printf("[BLE]   %-10s handle=0x%04x\n", e.name, handle);
+    if (handle == 0) missing++;
+  }
+  if (missing > 0) {
+    Serial.printf("[BLE] ⚠️ GATT 表不完整: %u 个特征值未注册。最常见原因是超出服务的句柄上限"
+                  "（见 BLE_SERVICE_NUM_HANDLES，框架默认仅 15），协议栈会静默丢弃超限项\n", missing);
+  }
+  s_dumpAt = UINT32_MAX;   // 只打印一次
 }

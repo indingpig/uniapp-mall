@@ -32,6 +32,24 @@
 #define BLE_CHAR_DEVICE_INFO_UUID   "beb5483e-36e1-4688-b7f5-ea07361b26ac"
 #define BLE_CHAR_WIFI_LIST_UUID     "beb5483e-36e1-4688-b7f5-ea07361b26ad"  // 写"1"触发扫描, notify 逐条回 AP 列表
 
+/* 服务属性句柄上限：每个特征值占 2 (声明+值)，带通知的再 +1 (CCCD)，服务声明占 1。
+ * 框架 createService 默认 15，超限的特征值会被协议栈静默丢弃（2026-11-28 实证：
+ * 加令牌后共 17 个，令牌没注册、手机发现不到、无任何报错）。
+ * 留 6 个余量给后续特征值；启动自检 dumpGattTableOnce 会核对必需项。
+ *   1(服务) + 2(SSID) + 2(密码) + 2(地址) + 3(状态) + 3(WiFi列表) + 2(设备信息) + 2(令牌) = 17 */
+#define BLE_SERVICE_NUM_HANDLES     24
+
+/* GATT 服务表版本：**每次增删服务里的特征值或描述符都 +1**。
+ *
+ * 为什么需要：Android 对已绑定的蓝牙设备缓存整张 GATT 属性表，重新连接时直接用
+ * 缓存、不做发现；重新配对也不会刷新。2026-11-28 EMUI 实证：固件已注册令牌特征值
+ * （板子侧 handle=0x38），手机发现清单里仍没有它——解绑重配、删蓝牙数据均无效。
+ * 手机只对「没见过的地址」才做全新发现。所以表一变，板子就换一个蓝牙身份地址
+ * （静态随机地址，由基准 MAC + 版本号确定性派生：同版本下重启不变、绑定关系保持）。
+ *
+ * 历史：1 = 加令牌前的 15 句柄表；2 = 含设备令牌特征值（句柄上限修复后） */
+#define BLE_GATT_TABLE_VERSION      2
+
 /* 凭据回调: App 写入 SSID+密码+服务器地址全部完成后触发 */
 typedef void (*BleCredentialsCallback)(const String& ssid, const String& pass);
 
