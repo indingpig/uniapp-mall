@@ -27,6 +27,7 @@ static String   s_deviceToken;
 
 static WiFiClient s_client;
 static uint32_t s_lastAttempt = 0;
+static bool s_authRejected = false;   // 握手期 401 锁定: true 时停止重连（serverLinkStart 复位）
 static uint32_t s_lastAudioSend = 0;
 static uint32_t s_lastPingMs = 0;    // 上次 WS 心跳 ping
 static uint32_t s_lastRxMs = 0;      // 上次收到服务端任何字节 (死链检测用)
@@ -267,6 +268,16 @@ static bool tryConnect() {
   }
 
   String resp(respBuf);
+  // 握手期 401 = 设备令牌被 server 拒绝（方案 §2 第 5 项）。服务端已改为在
+  // 升级前直接回 401 JSON（旧版是 101 后再 close(1008)，固件会误判「已连接」
+  // 上报 server_connected，造成配网假成功）。锁定并停止 3 秒重试——每 3 秒
+  // 重试只会白烧握手；恢复途径 = 重新配网（serverLinkStart 复位）或重启。
+  if (resp.startsWith("HTTP/1.1 401")) {
+    s_authRejected = true;
+    Serial.println("[ServerLink] 401 Unauthorized: 设备令牌无效或缺失, 已停止重连");
+    Serial.println("[ServerLink]   恢复: App 配对页高级设置重填 DEVICE_TOKEN 后重连/重启");
+    return false;
+  }
   if (!resp.startsWith("HTTP/1.1 101")) {
     Serial.printf("[ServerLink] handshake rejected: %.32s\n", respBuf);
     return false;
@@ -339,6 +350,7 @@ static void sendListenState() {
 void serverLinkStart(ServerCmdCallback cmdCb, ServerLinkStateCallback stateCb) {
   s_cmdCb = cmdCb;
   s_stateCb = stateCb;
+  s_authRejected = false;   // WiFi 重连/重新配网都会重跑这里: 按最新的 NVS 令牌重新尝试
 
   Preferences prefs;
   prefs.begin(NVS_NAMESPACE, true);
@@ -382,8 +394,14 @@ bool serverLinkIsConnected() {
   return s_connected;
 }
 
+bool serverLinkAuthRejected() {
+  return s_authRejected;
+}
+
 void serverLinkLoop() {
   if (!s_started) return;
+
+  if (s_authRejected) return;   // 令牌被拒: 停止重连, 等重新配网或重启
 
   if (!s_connected) {
     if (millis() - s_lastAttempt >= SERVER_RECONNECT_MS) {

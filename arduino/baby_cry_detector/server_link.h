@@ -34,3 +34,7 @@ void serverLinkSetListening(bool on);
 void serverLinkSetInference(const char* label, float score, uint32_t srcRms);
 
 bool serverLinkIsConnected();
+
+/* 设备令牌被 server 握手期拒绝 (HTTP 401) 时为 true: 重连循环已停止,
+ * 恢复途径 = 重新配网 (WiFi 重连会重跑 serverLinkStart 并复位) 或重启 */
+bool serverLinkAuthRejected();

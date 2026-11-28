@@ -111,6 +111,14 @@ class SSIDWriteCallback : public BLECharacteristicCallbacks {
     String raw = c->getValue();   // 3.x: getValue 返回 String (2.0.x 是 std::string)
     s_pendingSSID = String(raw.c_str());
     s_pendingSSID.trim();
+    // 长度防御 (802.11 SSID 上限 32 字节)：超长必是 App 写错了特征值
+    // (2026-11-28 实证：EMUI GATT 缓存里没有 token 特征值时，App 旧 matchUUID
+    // 兜底把 64 位令牌写进了 SSID)——拒收并回报错误，绝不拿垃圾值去连 WiFi
+    if (s_pendingSSID.length() == 0 || s_pendingSSID.length() > 32) {
+      Serial.printf("[BLE] SSID rejected (len=%u, 须 1-32)\n", (unsigned)s_pendingSSID.length());
+      bleProvisionUpdateStatus(BLE_STATUS_ERROR_SSID);
+      return;
+    }
     Serial.printf("[BLE] SSID received: [%s] len=%u hex=%s\n",
                   s_pendingSSID.c_str(), (unsigned)raw.length(), hexDump(raw).c_str());
   }
@@ -503,12 +511,6 @@ void bleProvisionInit(const char* deviceName) {
   cURL->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
   cURL->setCallbacks(new ServerURLWriteCallback());
 
-  // Device Token (Write, 要求加密链路) —— 2026-11-26 鉴权：板子连 server 时携带
-  BLECharacteristic* cToken = service->createCharacteristic(
-    BLE_CHAR_DEVICE_TOKEN_UUID, BLECharacteristic::PROPERTY_WRITE);
-  cToken->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
-  cToken->setCallbacks(new DeviceTokenWriteCallback());
-
   // Status (Notify + Read)
   s_charStatus = service->createCharacteristic(
     BLE_CHAR_STATUS_UUID,
@@ -528,6 +530,16 @@ void bleProvisionInit(const char* deviceName) {
   s_charDevInfo = service->createCharacteristic(
     BLE_CHAR_DEVICE_INFO_UUID, BLECharacteristic::PROPERTY_READ);
   bleProvisionRefreshDeviceInfo();   // init 时 WiFi 未连, ip 为 0.0.0.0; 连上后由 onWifiStatus 刷新
+
+  // Device Token (Write, 要求加密链路) —— 2026-11-26 鉴权：板子连 server 时携带。
+  // ⚠️ 必须在服务表**末尾**创建，别插中间：特征值插中间会把其后所有 attribute
+  // 句柄平移，Android/EMUI 按设备 MAC 缓存 GATT 句柄表，旧缓存会写错属性
+  //（2026-11-28 实证：插在 URL 后导致订阅 Status 的 CCCD 写落到只读声明属性，
+  // GATT_WRITE_NOT_PERMIT + 订阅失败 status=3）。追加到末尾则旧句柄全部保持有效。
+  BLECharacteristic* cToken = service->createCharacteristic(
+    BLE_CHAR_DEVICE_TOKEN_UUID, BLECharacteristic::PROPERTY_WRITE);
+  cToken->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  cToken->setCallbacks(new DeviceTokenWriteCallback());
 
   service->start();
 

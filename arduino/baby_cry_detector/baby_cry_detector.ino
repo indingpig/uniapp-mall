@@ -396,6 +396,18 @@ void loop() {
   // 采集服务端 (HTTP /rms, /setserver + WS 采集推流)
   collectServerLoop();
 
+  // 设备令牌被 server 握手期拒绝 → BLE 告知 App（配对页据此提示重填 DEVICE_TOKEN）。
+  // 上升沿只报一次；serverLinkStart 复位（重新配网）后允许再次上报
+  static bool s_serverAuthReported = false;
+  if (serverLinkAuthRejected()) {
+    if (!s_serverAuthReported) {
+      s_serverAuthReported = true;
+      bleProvisionUpdateStatus(BLE_STATUS_ERROR_SERVER_AUTH);
+    }
+  } else {
+    s_serverAuthReported = false;
+  }
+
   // 后端 WS 客户端 (心跳/上报/收指令)
   serverLinkLoop();
 

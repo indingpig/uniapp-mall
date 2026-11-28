@@ -44,6 +44,8 @@
 #define BLE_STATUS_SERVER_CONNECTED "server_connected"
 #define BLE_STATUS_ERROR_WIFI       "error:wifi_failed"
 #define BLE_STATUS_ERROR_WIFI_PASS  "error:wifi_password"  // 密码错误 (4 次握手超时), App 就地提示
+#define BLE_STATUS_ERROR_SSID       "error:ssid"  // SSID 非法 (空/超 32 字节), 写入被拒
+#define BLE_STATUS_ERROR_SERVER_AUTH "error:server_auth"  // 设备令牌被 server 握手期拒绝 (401), 已停止重连
 #define BLE_STATUS_ERROR_PROVISION  "error:provisioning_closed"  // 配网窗口未开, 写入被拒
 #define BLE_STATUS_ERROR_SERVER_URL "error:server_url"  // 服务器地址未通过校验, 写入被拒
 #define BLE_STATUS_FACTORY_RESET    "factory_reset"  // 恢复出厂 (BOOT 长按 10s) 触发时经 BLE 通知
