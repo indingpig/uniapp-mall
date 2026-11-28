@@ -247,6 +247,8 @@ export function useBLE() {
     }
 
     const charUUIDs = allChars.map(c => c.uuid);
+    // 诊断日志：GATT 缓存排查的关键证据——缓存缺新特征值时，这里能看到发现列表缺谁
+    console.warn('[BLE] 发现特征值:', JSON.stringify(charUUIDs));
     platformCharUuids.wifiSSID = matchUUID(charUUIDs, BLE_CHAR_WIFI_SSID_UUID);
     platformCharUuids.wifiPass = matchUUID(charUUIDs, BLE_CHAR_WIFI_PASS_UUID);
     platformCharUuids.serverUrl = matchUUID(charUUIDs, BLE_CHAR_SERVER_URL_UUID);
@@ -256,12 +258,21 @@ export function useBLE() {
     platformCharUuids.deviceInfo = matchUUID(charUUIDs, BLE_CHAR_DEVICE_INFO_UUID);
     // WiFi 列表特征值: 旧固件可能没有, 缺失时配对页回退手输 SSID
     platformCharUuids.wifiList = matchUUID(charUUIDs, BLE_CHAR_WIFI_LIST_UUID);
+    console.warn('[BLE] UUID 映射结果:', JSON.stringify(platformCharUuids));
 
-    // 配对必需的写入特征值缺失 = 发现服务不完整（典型原因：Android/EMUI 按设备 MAC
-    // 缓存旧 GATT 表，新固件新增的特征值不在缓存里）。在此快速失败并给出可操作提示，
-    // 绝不带着残缺的 UUID 映射继续走配对（2026-11-28 教训）
+    // 诊断：手机发现到的特征值清单以上面两行为准。排查「某特征值发现不到」时，
+    // 先与板子启动日志 `[BLE] GATT table (board side)` 对照——缺项在板子侧 = 固件没注册
+    // （2026-11-28：令牌特征值因超出 createService 默认句柄上限 15 被协议栈静默丢弃，
+    // 板子侧 handle=0；当时误判成手机缓存陈旧，白折腾一天）。两边都有、只有手机缺
+    // 才是手机 GATT 缓存问题。别在 App 里做「解除配对清缓存」：EMUI 实测解绑不清
+    // 缓存，只会把正常的配对关系弄丢
+    if (!platformCharUuids.deviceToken) {
+      console.warn('[BLE] 未发现设备令牌特征值（旧固件，或固件 GATT 表不完整）');
+    }
+
+    // 配对必需的写入特征值缺失 = 固件服务表不完整，明确失败，不带残缺映射继续
     if (!platformCharUuids.wifiSSID || !platformCharUuids.wifiPass || !platformCharUuids.serverUrl) {
-      throw new Error('未发现完整配对服务（蓝牙缓存可能过期，请关闭再打开手机蓝牙后重试）');
+      throw new Error('未发现完整配对服务，请确认固件已正确烧录');
     }
 
     if (!platformCharUuids.status) {
